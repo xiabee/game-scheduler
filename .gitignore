@@ -1,0 +1,13 @@
+# build output
+/bin/
+*.exe
+
+# runtime data (db, logs, screenshots)
+/data/
+config.json
+
+# editor/OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
