@@ -76,15 +76,18 @@ func TestRunNonZeroExit(t *testing.T) {
 }
 
 func TestRunTimeout(t *testing.T) {
-	spec := helperSpec("sleep", "5s")
+	// Long sleep + short timeout: a working timeout returns almost immediately,
+	// while a broken one would only return near the 30s natural completion. The
+	// generous 10s margin keeps the test from flaking on slow/contended CI.
+	spec := helperSpec("sleep", "30s")
 	spec.Timeout = 200 * time.Millisecond
 	start := time.Now()
 	res := Run(context.Background(), spec)
 	if !res.TimedOut {
 		t.Fatalf("expected timeout, err=%v", res.Err)
 	}
-	if time.Since(start) > 3*time.Second {
-		t.Error("timeout did not kill the process promptly")
+	if time.Since(start) > 10*time.Second {
+		t.Errorf("timeout did not kill the process promptly: took %s", time.Since(start))
 	}
 }
 

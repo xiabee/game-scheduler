@@ -1,6 +1,6 @@
 module github.com/xiabee/game-scheduler
 
-go 1.26
+go 1.26.4
 
 require (
 	github.com/robfig/cron/v3 v3.0.1

@@ -1,104 +1,101 @@
-# game-scheduler
+# 🎮 game-scheduler · 多游戏资源收集与路线调度器
+
+> 🌏 **English docs: [README_EN.md](README_EN.md)** · 中文文档如下。
 
 [![CI](https://github.com/xiabee/game-scheduler/actions/workflows/ci.yml/badge.svg)](https://github.com/xiabee/game-scheduler/actions/workflows/ci.yml)
+[![Security](https://github.com/xiabee/game-scheduler/actions/workflows/security.yml/badge.svg)](https://github.com/xiabee/game-scheduler/actions/workflows/security.yml)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](go.mod)
 
-A multi-game **resource-collection & route scheduler** that orchestrates existing
-open-source automation tools as ordinary local processes.
+一个**多游戏「资源收集与路线」调度器**:把你已经安装好的开源自动化工具，作为普通本地进程统一编排、定时与监控。
 
-> ⚠️ **Scope / safety boundary.** This project is *only* an orchestrator. It does
-> **not** cheat, inject code, read or write game memory, intercept or forge
-> packets, or implement any anti-detection behaviour. Every supported tool is
-> launched as an opaque child process via `os/exec`; the scheduler just decides
-> *what to run, when*, and records the result. The tools themselves (BetterGI,
-> March7thAssistant/Fhoe-Rail, ok-wuthering-waves, M9A) are not bundled — you
-> install and configure them yourself, and point the scheduler at their paths.
+> ### 🔗 项目地址 → **<https://github.com/xiabee/game-scheduler>**
 
-## Supported games & tools
+> ⚠️ **范围与安全边界（务必阅读）**
+> 本项目**只是一个调度器**。它**不**作弊、**不**注入代码、**不**读写游戏内存、**不**抓包改包、**不**实现任何反检测能力。
+> 每个被支持的工具都只当作一个**不透明的本地子进程**来启动（`os/exec`）——本项目只决定 **跑什么、什么时候跑**，并记录结果。
+> 工具本身（BetterGI、March7thAssistant/Fhoe-Rail、ok-wuthering-waves、M9A）**不随本项目分发**，需你自行安装、配置、并对其使用合规性负责。
 
-| Game | Adapter key | External tool | Notes |
-|------|-------------|---------------|-------|
-| 原神 Genshin Impact | `genshin` | BetterGI (+ bettergi-scripts-list) | map tracing, auto-pickup, gathering, mining, 锄地 |
-| 崩坏：星穹铁道 Honkai: Star Rail | `hsr` | March7thAssistant / Fhoe-Rail | 锄大地, pre-recorded routes, combat, loot |
-| 鸣潮 Wuthering Waves | `wuwa` | ok-wuthering-waves (`ok-ww.exe`) | one-click dailies, background auto-battle, echo farming, reserved `farm` (RouteFarmTask) |
-| 重返未来：1999 Reverse: 1999 | `r1999` | M9A (`MaaPiCli.exe`) | 收荒原, 每日心相, 常规作战, 活动刷取 |
+---
 
-## Install the automation tools (required to actually run anything)
+## ✨ 功能一览
 
-The scheduler is only an orchestrator — it ships none of the tools or games.
-Install each tool yourself, then point a game's `tool_path` / `working_dir` /
-`extra_config` at it. `python` is needed only for the HSR tools.
+- **四游戏适配器**:原神 / 崩铁 / 鸣潮 / 重返未来1999，各自把任务翻译成对应工具的命令行。
+- **SQLite 存储**:游戏、任务、路线、计划、执行日志。
+- **手动触发 + 定时任务**(标准 5 段 cron，或 `@daily`、`@every 6h` 等)。
+- **串行执行队列**:这些工具共用鼠标/键盘/前台窗口,默认 `max_concurrent=1` 串行,绝不互相抢屏。
+- **完整执行日志**:stdout / stderr / 退出码 / 起止时间;失败时另记错误、**截图路径**、重试次数。
+- **崩溃自愈**:进程意外退出后,残留的 `running/pending` 执行在启动时被重置为 `failed`。
+- **进程树终止**:取消/超时会用 `taskkill /T` 杀掉整棵子进程树,避免工具残留控制游戏。
+- **控制看板**(类 Grafana):实时推送、增删改查、执行历史、失败截图缩略图——见下文。
+- **REST API + CLI**(`ctl`),**可选令牌鉴权**。
+- **持续集成 + 定期安全扫描**:Linux/Windows 双平台测试、`-race`、`govulncheck`、Dependabot。
 
-| Game | Tool | Source | What the scheduler needs |
-|------|------|--------|--------------------------|
-| 原神 | BetterGI | https://github.com/babalae/better-genshin-impact/releases | `tool_path` → `BetterGI.exe`. Scripts via [bettergi-scripts-list](https://github.com/babalae/bettergi-scripts-list) (subscribed inside BetterGI). |
-| 崩铁 | March7thAssistant | https://github.com/moesnow/March7thAssistant/releases | `extra_config.march7th_dir` → project dir (`python` 3.12+). |
-| 崩铁 | Fhoe-Rail | https://github.com/linruowuyin/Fhoe-Rail | `extra_config.fhoe_dir` → project dir. (Packaged build also exposes `Fhoe-Rail.exe`; point `exe`/`raw_args` at it if you prefer.) |
-| 鸣潮 | ok-wuthering-waves | https://github.com/ok-oldking/ok-wuthering-waves/releases | install via the setup `.exe`, then `tool_path` → `ok-ww.exe`. |
-| 1999 | M9A | https://github.com/MAA1999/M9A/releases | download the **PiCLI** build; `tool_path` → `MaaPiCli.exe`, `working_dir` → M9A dir. CLI usage: [MaaPiCli.md](https://github.com/MAA1999/M9A/blob/main/docs/zh_cn/manual/MaaPiCli.md). |
+---
 
-After installing, verify each game with `ctl tasks preflight <id>` (or
-`GET /api/tasks/{id}/preflight`) — it reports the resolved command, whether the
-executable exists, and a `ready` flag, without launching the game.
+## 🧩 需要安装的自动化工具（必装，否则跑不起来）
 
-## Architecture
+调度器本身**不含**任何工具或游戏。请自行安装各工具,再把游戏的 `tool_path` / `working_dir` / `extra_config` 指向它。崩铁两个工具需要 `python`。
+
+| 游戏 | 工具 | 🔗 下载地址 | 调度器需要配置 |
+|------|------|-------------|----------------|
+| 🌸 **原神** | BetterGI | **<https://github.com/babalae/better-genshin-impact/releases>** | `tool_path` → `BetterGI.exe`;脚本用 [**bettergi-scripts-list**](https://github.com/babalae/bettergi-scripts-list)(在 BetterGI 内订阅) |
+| 🚂 **崩铁** | March7thAssistant | **<https://github.com/moesnow/March7thAssistant/releases>** | `extra_config.march7th_dir` → 项目目录(需 Python 3.12+) |
+| 🚂 **崩铁** | Fhoe-Rail | **<https://github.com/linruowuyin/Fhoe-Rail>** | `extra_config.fhoe_dir` → 项目目录(也有打包版 `Fhoe-Rail.exe`,可用 `exe`/`raw_args` 指过去) |
+| 🌊 **鸣潮** | ok-wuthering-waves | **<https://github.com/ok-oldking/ok-wuthering-waves/releases>** | 用 setup 安装后,`tool_path` → `ok-ww.exe` |
+| 🕰️ **1999** | M9A | **<https://github.com/MAA1999/M9A/releases>** | 下 **PiCLI** 版,`tool_path` → `MaaPiCli.exe`、`working_dir` → M9A 目录;[CLI 用法](https://github.com/MAA1999/M9A/blob/main/docs/zh_cn/manual/MaaPiCli.md) |
+
+> 装完后用 **`ctl tasks preflight <任务id>`**(或 `GET /api/tasks/{id}/preflight`)验证:它会拼出实际命令、检查可执行文件是否存在并给出 `ready` 标志,**不会真的启动游戏**。
+
+---
+
+## 🏗️ 架构
 
 ```
-cmd/server          REST API + cron scheduler (long-running process)
-cmd/ctl             CLI client for the REST API
-internal/config     server settings (JSON file + env overrides)
-internal/store      SQLite persistence (pure-Go modernc.org/sqlite)
-internal/runner     spawns an external tool, captures stdout/stderr/exit code
-internal/task       orchestration: adapter -> command -> runner, retries, screenshots
-internal/scheduler  robfig/cron engine binding plans to tasks
-internal/game       Adapter interface + registry
-internal/game/{genshin,hsr,wuwa,r1999}   per-tool command builders
-internal/api        net/http JSON REST handlers
+cmd/server          REST API + cron 调度器(常驻进程)
+cmd/ctl             REST API 的命令行客户端
+internal/config     服务端配置(JSON 文件 + 环境变量)
+internal/store      SQLite 持久化(纯 Go 的 modernc.org/sqlite)
+internal/runner     启动外部工具,采集 stdout/stderr/退出码
+internal/task       编排:适配器 → 命令 → runner,串行队列、重试、截图
+internal/scheduler  robfig/cron 引擎,把计划绑到任务
+internal/events     轻量事件总线(给看板做实时推送)
+internal/game       Adapter 接口 + 注册表
+internal/game/{genshin,hsr,wuwa,r1999}   各工具的命令构建器
+internal/api        net/http 的 JSON REST + 看板 + SSE 实时流
 ```
 
-Data flow: a **Plan** (cron) or a **manual trigger** runs a **Task**; the task's
-**Game** selects an **Adapter**; the adapter turns the task into a command line;
-`runner` executes it and an **Execution** row records
-`command / stdout / stderr / exit_code / start_time / end_time` plus
-`error_msg / screenshot_path / retry_count` on failure.
+数据流:**计划(cron)** 或**手动触发** → 运行某个**任务**;任务所属**游戏**选定一个**适配器**;适配器把任务翻译成命令行;`runner` 执行,并把
+`command / stdout / stderr / exit_code / start_time / end_time` 以及失败时的 `error_msg / screenshot_path / retry_count` 记成一条**执行记录**。
 
-## Build
+---
+
+## 🚀 构建与运行
 
 ```powershell
 go build -o bin/server.exe ./cmd/server
 go build -o bin/ctl.exe    ./cmd/ctl
 ```
 
-Requires Go 1.26+. No cgo (SQLite driver is pure Go).
-
-## Run the server
+需要 Go 1.26.4+。无需 cgo(SQLite 驱动是纯 Go)。
 
 ```powershell
-# uses ./data for the SQLite db, logs and screenshots; listens on 127.0.0.1:8080
+# 默认用 ./data 存放 db/日志/截图,监听 127.0.0.1:8080
 ./bin/server.exe
 
-# or with a config file / overrides
+# 或指定配置文件 / 覆盖监听地址
 ./bin/server.exe -config config.json -addr 127.0.0.1:8080
 ```
 
-Configuration precedence: defaults → `config.json` (see `config.example.json`) →
-environment (`GS_ADDR`, `GS_DATA_DIR`, `GS_DB_PATH`, `GS_SCREENSHOT_CMD`,
-`GS_MAX_CONCURRENT`, `GS_AUTH_TOKEN`) → `-addr` flag.
+配置优先级:默认值 → `config.json`(见 `config.example.json`) → 环境变量
+(`GS_ADDR`、`GS_DATA_DIR`、`GS_DB_PATH`、`GS_SCREENSHOT_CMD`、`GS_MAX_CONCURRENT`、`GS_AUTH_TOKEN`) → `-addr` 参数。
 
-### Concurrency (important)
+### 并发(重要）
 
-`max_concurrent` (default **1**) bounds how many executions run at once. The
-supported tools all drive the shared mouse/keyboard and foreground window, so
-running two at the same time would make them fight over the screen. With the
-default, a second trigger is **queued** (recorded as `pending`) and starts only
-when the current run finishes. Raise this only if your executions target
-genuinely independent machines/VMs.
+`max_concurrent`(默认 **1**)限制同时运行的执行数。这些工具都要操作**共用的鼠标/键盘和前台窗口**,同时跑两个会互相抢屏。默认情况下第二次触发会**排队**(记为 `pending`),等当前这次跑完才开始。只有当你的执行确实跑在**相互独立的机器/虚拟机**上时才需要调大。
 
-### Failure screenshots
+### 失败截图
 
-`screenshot_cmd` is an optional, best-effort observability hook run when a task
-fails. `{{.Path}}` is substituted with the destination PNG. It never touches the
-game — it just captures the screen so an operator can see what happened. Example
-(Windows full-screen capture):
+`screenshot_cmd` 是可选的、尽力而为的观测钩子,任务失败时执行,`{{.Path}}` 会被替换为目标 PNG 路径。它**不碰游戏**,只是抓个屏方便排查。Windows 全屏示例:
 
 ```json
 {
@@ -106,73 +103,45 @@ game — it just captures the screen so an operator can see what happened. Examp
 }
 ```
 
-If unset, the path is still recorded (so the layout is predictable) but no image
-is written.
+不设置时,路径仍会被记录(布局可预期),但不会真的生成图片。命令通过 `cmd /S /C` 执行,因此含引号的命令(如上面的 PowerShell 一行)也能正确运行。
 
-## Authentication
+---
 
-By default the API is **unauthenticated** — safe only when bound to localhost
-(the default). To expose it on a network, set a token via `auth_token` in the
-config or `GS_AUTH_TOKEN`. When set, every `/api/*` and `/screenshots/*` request
-must present it; the dashboard page (`/`) and `/healthz` stay open.
+## 🔐 鉴权
 
-- **API / CLI:** send `Authorization: Bearer <token>` (the CLI: `ctl -token
-  <token> …`, or `GS_TOKEN`).
-- **Browser:** the dashboard prompts for the token on first 401 and stores it in
-  `localStorage`; the 🔑 button lets you set/change it. The live stream
-  authenticates via `?token=` (the browser's EventSource cannot send headers).
+默认 API **无鉴权**——仅在绑定到 localhost(默认)时才安全。要对外暴露,请用 `auth_token`(配置)或 `GS_AUTH_TOKEN` 设置令牌。设置后,所有 `/api/*` 与 `/screenshots/*` 都需令牌;看板页面(`/`)与 `/healthz` 保持开放。
 
-It is still recommended to terminate TLS and authenticate at a reverse proxy for
-anything beyond a trusted LAN — the token is a single shared secret.
+- **API / CLI**:发送 `Authorization: Bearer <令牌>`(CLI:`ctl -token <令牌> …`,或 `GS_TOKEN`)。
+- **浏览器**:看板首次遇到 401 会弹框输入令牌并存入 `localStorage`;🔑 按钮可随时设置/修改。实时流通过 `?token=` 鉴权(浏览器的 EventSource 无法发自定义头)。
 
-## Dashboard (控制看板)
+> 令牌只是**单一共享密钥**,适合可信局域网。对外网/多用户,建议在前面再挂一个做 TLS + 真实认证的反向代理。
 
-Open the server's address in a browser — **http://127.0.0.1:8080/** — for a
-Grafana-style control board. It is a single embedded page (no build step) that
-updates **live over Server-Sent Events** (`GET /api/stream`): the server pushes
-a fresh snapshot whenever anything changes (a run starts/finishes, a plan is
-toggled, a game/task is added). If SSE is blocked (some proxies), it
-automatically falls back to polling. Append `?live=0` for a static snapshot.
+---
 
-![dashboard](docs/dashboard.png)
+## 📊 控制看板
 
-It shows:
+浏览器打开服务器地址 —— **<http://127.0.0.1:8080/>** —— 即是一个类 Grafana 的控制看板。它是一个内嵌单页(无需任何前端构建),通过 **Server-Sent Events**(`GET /api/stream`)**实时更新**:任何变化(开始/结束一次运行、开关计划、增删游戏/任务)服务器都会推一份新快照。若 SSE 被代理拦截,会自动退化为轮询。加 `?live=0` 可得静态快照。
 
-- **Top stats:** total games / tasks / plans, executions running now, and
-  failures in the last 24h (highlighted red when non-zero).
-- **One card per game** with a colored health dot — `ok` (green, last run
-  succeeded), `error` (red, last run failed — the error message is shown),
-  `running` (pulsing blue), `warn` (cancelled), `idle` (gray, no runs yet).
-  Each card lists the last run + relative time, the next scheduled run,
-  task/plan counts, success/fail pills, and a disabled tag if the game is off.
-- **Per-task Run buttons** — click to trigger a manual run (`POST
-  /api/tasks/{id}/run`); the board refreshes to show it queue/run.
-- **Per-plan enable/disable toggles** — flip a schedule on/off inline (`PUT
-  /api/plans/{id}`); the scheduler reloads and the next-run time updates.
-- **Recent executions table** — newest 25, with status badge, trigger, start
-  time, duration and exit code.
-- **Execution detail modal** — click any recent row (or a card's last-run
-  badge) to see the full command, error, **stdout/stderr**, exit code, timings
-  and a **screenshot thumbnail** of the failure (served from `/screenshots/`).
-  If the run is still active, a **Cancel** button stops it
-  (`POST /api/executions/{id}/cancel`, kills the whole process tree).
-- **Full CRUD inline** — the header's **+ 游戏 / + 任务** buttons and each card's
-  **+ 添加 / ✎ (edit) / ✕ (delete)** controls manage games, tasks and plans
-  without the CLI (adapter and task-type lists come from `GET /api/meta`).
-- **执行历史** — the **历史** button opens a filterable view of past executions
-  (by status, with a row limit); click any row for its detail modal.
+![控制看板](docs/dashboard.png)
 
-The board is driven entirely by the REST API, so anything it shows is also
-available programmatically.
+它展示:
 
-## CLI (`ctl`)
+- **顶部统计**:游戏/任务/计划总数、正在运行数、近 24h 失败数(非零标红)。
+- **每游戏一张卡片**,带彩色健康灯:`ok`(绿,上次成功)、`error`(红,上次失败并显示错误)、`running`(蓝色脉冲)、`warn`(已取消)、`idle`(灰,无记录)。卡片含最近运行+相对时间、下次计划、任务/计划数、成功/失败计数、禁用标记。
+- **每任务「运行」按钮**:`POST /api/tasks/{id}/run`,触发后看板刷新显示排队/运行。
+- **每计划开关**:就地启停 `PUT /api/plans/{id}`,调度器重载、下次运行时间实时更新。
+- **执行详情弹窗**:点最近记录的任意一行(或卡片上的状态徽章),查看完整命令、错误、**stdout/stderr**、退出码、时间,以及失败**截图缩略图**(由 `/screenshots/` 提供)。若仍在运行,弹窗内有**取消**按钮(`POST /api/executions/{id}/cancel`,会杀整棵进程树)。
+- **完整增删改**:头部 **+ 游戏 / + 任务** 按钮,以及每张卡上的 **+ 添加 / ✎ 编辑 / ✕ 删除**,无需命令行即可管理游戏/任务/计划(适配器与任务类型下拉来自 `GET /api/meta`)。
+- **执行历史**:**历史** 按钮打开可筛选的历史视图(按状态、限制条数),点行进详情弹窗。
 
-> Global flags (`-server`, `-token`, `-data`, `-game`, …) must come **before**
-> the resource/action, e.g. `ctl -server http://... -data '{...}' games add`.
-> Pass `-token` (or `GS_TOKEN`) when the server requires auth.
+---
+
+## 🖥️ 命令行(`ctl`)
+
+> 全局参数(`-server`、`-token`、`-data`、`-game` …)必须放在**资源/动作之前**,例如 `ctl -server http://... -data '{...}' games add`。服务器开启鉴权时传 `-token`(或 `GS_TOKEN`)。
 
 ```
-ctl [-server URL] <resource> <action> [id]
+ctl [-server URL] [-token T] <资源> <动作> [id]
 
 games   list | get <id> | add | update <id> | delete <id>
 tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> | preflight <id>
@@ -182,129 +151,129 @@ execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
 health
 ```
 
-`add`/`update` read a JSON body from `-data '<json>'` or `-data -` (stdin).
-`-server` defaults to `$GS_SERVER` or `http://127.0.0.1:8080`.
+`add`/`update` 从 `-data '<json>'` 或 `-data -`(stdin)读取请求体。`-server` 默认 `$GS_SERVER` 或 `http://127.0.0.1:8080`。
 
-## REST API
+---
 
-| Method & path | Purpose |
+## 🌐 REST API
+
+| 方法与路径 | 用途 |
 |---|---|
-| `GET /healthz` | liveness + registered adapters |
-| `GET/POST /api/games`, `GET/PUT/DELETE /api/games/{id}` | games CRUD |
-| `GET/POST /api/tasks`, `GET/PUT/DELETE /api/tasks/{id}` | tasks CRUD (`?game_id=`) |
-| `POST /api/tasks/{id}/run` | **manual trigger** (returns the pending execution) |
-| `GET /api/tasks/{id}/preflight` | build the command & check the tool exists, **without running** |
-| `GET /api/dashboard` | aggregated board snapshot (per-game health, plans, recent execs) |
-| `GET /api/stream` | live board updates via Server-Sent Events |
-| `GET /api/meta` | adapter keys + task types (for the add forms) |
-| `GET /screenshots/{name}` | serve a failure screenshot (auth-protected) |
-| `GET/POST /api/routes`, `DELETE /api/routes/{id}` | routes (`?game_id=`) |
-| `GET/POST /api/plans`, `GET/PUT/DELETE /api/plans/{id}` | scheduled plans (cron validated) |
-| `GET /api/executions`, `GET /api/executions/{id}` | execution logs (`?task_id=&status=&limit=`) |
-| `POST /api/executions/{id}/cancel` | cancel a running execution |
+| `GET /healthz` | 存活探针 + 已注册适配器 |
+| `GET/POST /api/games`、`GET/PUT/DELETE /api/games/{id}` | 游戏增删改查 |
+| `GET/POST /api/tasks`、`GET/PUT/DELETE /api/tasks/{id}` | 任务增删改查(`?game_id=`) |
+| `POST /api/tasks/{id}/run` | **手动触发**(返回 pending 执行) |
+| `GET /api/tasks/{id}/preflight` | 拼命令并检查工具是否存在,**不运行** |
+| `GET/POST /api/routes`、`DELETE /api/routes/{id}` | 路线(`?game_id=`) |
+| `GET/POST /api/plans`、`GET/PUT/DELETE /api/plans/{id}` | 定时计划(cron 会校验) |
+| `GET /api/executions`、`GET /api/executions/{id}` | 执行日志(`?task_id=&status=&limit=`) |
+| `POST /api/executions/{id}/cancel` | 取消运行中的执行 |
+| `GET /api/dashboard` | 看板聚合快照(各游戏健康、计划、最近执行) |
+| `GET /api/stream` | SSE 实时推送看板更新 |
+| `GET /api/meta` | 适配器键 + 任务类型(给表单用) |
+| `GET /screenshots/{name}` | 取失败截图(受鉴权保护) |
 
-## Task configuration by adapter
+---
 
-Each task has a `type` (interpreted by the adapter) and a `params` JSON string.
-Two universal escape hatches exist on every adapter:
+## ⚙️ 各适配器的任务配置
 
-- `"exe": "<path>"` — override the executable for this task.
-- `"raw_args": ["...", "..."]` — supply the exact CLI args, bypassing the
-  adapter's defaults. **Use this whenever your tool's flags differ from the
-  documented defaults** (CLI flags vary across tool versions).
+每个任务有一个 `type`(由适配器解释)和一个 `params`(JSON 字符串)。所有适配器都提供两个万能逃生口:
 
-### genshin (BetterGI) — `game.tool_path = BetterGI.exe`
-| type | params | default args |
+- `"exe": "<路径>"` —— 覆盖本任务的可执行文件。
+- `"raw_args": ["...", "..."]` —— 直接给出**完整命令行参数**,绕过适配器默认值。**当你的工具版本参数和文档默认值不一致时就用它**(各工具 CLI 参数会随版本变)。
+
+### 🌸 genshin(BetterGI) —— `tool_path = BetterGI.exe`
+| type | params | 默认参数 |
 |---|---|---|
-| `onedragon` | `{"group":"<name>"}` (optional) | `--startOneDragon [--group <name>]` |
-| `config_group` | `{"group":"<name>"}` | `--startGroup <name>` |
-| `script` | `{"script":"<name|path>"}` | `--script <name>` |
-| `raw` | `{"raw_args":[...]}` | verbatim |
+| `onedragon` | `{"group":"<名>"}`(可选) | `--startOneDragon [--group <名>]` |
+| `config_group` | `{"group":"<名>"}` | `--startGroup <名>` |
+| `script` | `{"script":"<名或路径>"}` | `--script <名>` |
+| `raw` | `{"raw_args":[...]}` | 原样 |
 
-### hsr (March7thAssistant / Fhoe-Rail) — Python projects
-`game.extra_config`:
+### 🚂 hsr(March7thAssistant / Fhoe-Rail) —— Python 项目
+`extra_config`:
 ```json
 { "python_path":"python",
   "march7th_dir":"C:/.../March7thAssistant", "march7th_entry":"main.py",
   "fhoe_dir":"C:/.../Fhoe-Rail", "fhoe_entry":"main.py" }
 ```
-| type | params | runs |
+| type | params | 运行 |
 |---|---|---|
 | `march7th_daily` | — | `python <march7th_dir>/main.py` |
-| `fhoe_route` | `{"route":"<file|name>"}` (optional) | `python <fhoe_dir>/main.py [--route ...]` |
+| `fhoe_route` | `{"route":"<文件或名>"}`(可选) | `python <fhoe_dir>/main.py [--route ...]` |
 | `raw` | `{"raw_args":[...]}` | `python <raw_args...>` |
 
-### wuwa (ok-wuthering-waves) — `game.tool_path = ok-ww.exe`
-| type | params | default args |
+### 🌊 wuwa(ok-wuthering-waves) —— `tool_path = ok-ww.exe`
+| type | params | 默认参数 |
 |---|---|---|
 | `task` | `{"task_index":N,"exit":true}` | `-t N [-e]` |
-| `farm` *(reserved RouteFarmTask)* | `{"task_index":N,"route":"<name>","exit":true}` | `-t N [-r <route>] [-e]` |
-| `raw` | `{"raw_args":[...]}` | verbatim |
+| `farm`(预留 RouteFarmTask) | `{"task_index":N,"route":"<名>","exit":true}` | `-t N [-r <route>] [-e]` |
+| `raw` | `{"raw_args":[...]}` | 原样 |
 
-### r1999 (M9A MaaPiCli) — `game.tool_path = MaaPiCli.exe`, `game.working_dir = M9A project dir`
-| type | params | default args |
+### 🕰️ r1999(M9A MaaPiCli) —— `tool_path = MaaPiCli.exe`、`working_dir = M9A 项目目录`
+| type | params | 默认参数 |
 |---|---|---|
-| `run` | `{"config":"<name>"}` (optional) | `[-c <name>]` |
-| `config` | `{"config":"<name>"}` | `-c <name>` |
-| `raw` | `{"raw_args":[...]}` | verbatim |
+| `run` | `{"config":"<名>"}`(可选) | `[-c <名>]` |
+| `config` | `{"config":"<名>"}` | `-c <名>` |
+| `raw` | `{"raw_args":[...]}` | 原样 |
 
-## Example: end-to-end
+---
+
+## 📝 完整示例
 
 ```powershell
 $S = "http://127.0.0.1:8080"
 
-# 1. register a game (point tool_path at your installed BetterGI)
-ctl -server $S -data '{"id":"genshin","name":"Genshin","adapter":"genshin","tool_path":"D:/BetterGI/BetterGI.exe","enabled":true}' games add
+# 1. 注册游戏（tool_path 指向你装好的 BetterGI）
+ctl -server $S -data '{"id":"genshin","name":"原神","adapter":"genshin","tool_path":"D:/BetterGI/BetterGI.exe","enabled":true}' games add
 
-# 2. define a task (run a 一条龙 config group)
-ctl -server $S -data '{"game_id":"genshin","name":"daily-collect","type":"onedragon","params":"{\"group\":\"采集\"}","max_retries":1,"retry_delay_sec":30,"timeout_sec":3600,"enabled":true}' tasks add
+# 2. 定义任务（跑一条龙配置组）
+ctl -server $S -data '{"game_id":"genshin","name":"每日采集","type":"onedragon","params":"{\"group\":\"采集\"}","max_retries":1,"retry_delay_sec":30,"timeout_sec":3600,"enabled":true}' tasks add
 
-# 3. run it now
+# 3. 立刻运行
 ctl -server $S tasks run 1
 
-# 4. schedule it daily at 06:00 (5-field cron, also accepts @daily / @every 6h)
-ctl -server $S -data '{"name":"genshin-morning","task_id":1,"cron_expr":"0 6 * * *","enabled":true}' plans add
+# 4. 每天 06:00 定时（5 段 cron，也支持 @daily / @every 6h）
+ctl -server $S -data '{"name":"原神晨间","task_id":1,"cron_expr":"0 6 * * *","enabled":true}' plans add
 
-# 5. inspect logs
+# 5. 查看日志
 ctl -server $S execs list -task 1
 ```
 
-## Cron format
+---
 
-Standard 5-field cron (`min hour dom mon dow`) plus robfig/cron descriptors
-(`@hourly`, `@daily`, `@weekly`, `@every 6h`, …). Times use the server's local
-timezone. Expressions are validated on create/update.
+## ⏰ cron 格式
 
-## Execution lifecycle & safety
+标准 5 段 cron(`分 时 日 月 周`),外加 robfig/cron 描述符(`@hourly`、`@daily`、`@weekly`、`@every 6h` …)。时间用服务器本地时区。创建/更新时会校验表达式。
 
-- **Serialized.** Runs go through a bounded queue (`max_concurrent`, default 1)
-  so input-automation tools never collide on the shared screen.
-- **No overlap.** Scheduled fires skip if the same task is still
-  pending/running, so a long task on a short cron does not stack up. Manual
-  triggers are always queued (explicit operator intent).
-- **Cancellable.** `POST /api/executions/{id}/cancel` works whether the run is
-  queued or in flight, and kills the **whole child process tree** (taskkill /T
-  on Windows) so helper processes don't keep controlling the game.
-- **Crash-safe.** On startup, executions left in `pending`/`running` by a
-  previous crash are reconciled to `failed` ("interrupted…").
+---
 
-## Development
+## 🧪 开发与持续集成
 
 ```powershell
-go test ./...        # unit + integration tests (store, runner, adapters, task, api)
-go test -race ./...  # race detector (Linux/macOS, or Windows with a C toolchain)
-gofmt -l .           # should print nothing
+go test ./...        # 单元 + 集成测试(store / runner / 适配器 / task / api)
+go test -race ./...  # 竞态检测(Linux/macOS,或装了 C 工具链的 Windows)
+gofmt -l .           # 应当无输出
 go vet ./...
 ```
 
-GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs gofmt
-+ vet, builds and tests on **Linux and Windows** (so the platform-specific
-`*_windows.go` files are exercised), and runs the race detector on Linux.
+- **CI**([.github/workflows/ci.yml](.github/workflows/ci.yml)):gofmt + vet,在 **Linux 与 Windows** 双平台构建+测试(让 `*_windows.go` 在真 Windows 上被检查),并在 Linux 上跑 `-race`。
+- **安全**([.github/workflows/security.yml](.github/workflows/security.yml)):每次推送/PR + **每周定时**跑 [`govulncheck`](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) 扫描依赖与标准库漏洞。
+- **Dependabot**([.github/dependabot.yml](.github/dependabot.yml)):每周自动为 Go 依赖与 GitHub Actions 提更新 PR。
 
-## Notes & limitations (MVP)
+---
 
-- Tool CLI flags differ across versions; adapter defaults are documented best
-  guesses — prefer `raw_args` when in doubt.
-- API auth is a single shared token (see Authentication); for multi-user or
-  internet exposure, front it with a reverse proxy that does real authn/TLS.
-- SQLite uses a single writer connection (WAL mode) for simplicity.
+## 🔒 安全说明
+
+- 本项目**不实现任何**注入/内存读写/抓包/反检测能力;外部工具一律按子进程启动。
+- 任务的 `raw_args` / `exe` 可执行任意命令——这是本工具的**核心用途**(运行你配置的外部工具)。因此:**开启鉴权后**才暴露 API,**令牌不要泄露**;能调用 API 的人即可在本机运行命令。
+- `/screenshots/` 做了路径穿越防护(只接受纯文件名);令牌比较用常量时间;SQL 全部参数化。
+- 漏洞由 `govulncheck`(CI + 定时)与 Dependabot 持续监控。
+
+---
+
+## ⚠️ 已知限制(MVP)
+
+- 各工具 CLI 参数随版本变化;适配器默认值是常见写法的最佳猜测——拿不准就用 `raw_args` 写死。
+- API 鉴权是单一共享令牌;多用户/公网请用反向代理做真正的认证 + TLS。
+- SQLite 为简化使用单写连接(WAL 模式)。
