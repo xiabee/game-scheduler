@@ -77,6 +77,28 @@ func TestDisabledMonitorNeverPauses(t *testing.T) {
 	}
 }
 
+func TestHistoryAndDisk(t *testing.T) {
+	m := newMon(PolicyAlert)
+	for i := 0; i < historyLen+10; i++ {
+		m.update(Reading{CPUPercent: float64(i % 100), MemPercent: 40, DiskPercent: 55, DiskUsedMB: 100, DiskTotalMB: 200})
+	}
+	s := m.Current()
+	if len(s.CPUHistory) != historyLen {
+		t.Errorf("cpu history len=%d want %d (capped)", len(s.CPUHistory), historyLen)
+	}
+	if len(s.MemHistory) != historyLen || len(s.DiskHistory) != historyLen {
+		t.Errorf("mem/disk history not tracked: %d/%d", len(s.MemHistory), len(s.DiskHistory))
+	}
+	if s.DiskPercent != 55 || s.DiskTotalMB != 200 {
+		t.Errorf("disk not recorded: %+v", s)
+	}
+	// Current returns copies — mutating them must not affect the monitor.
+	s.CPUHistory[0] = -1
+	if m.Current().CPUHistory[0] == -1 {
+		t.Error("Current() must return a copy of history")
+	}
+}
+
 func TestThresholdDisabled(t *testing.T) {
 	// CPUThreshold<=0 disables the CPU dimension.
 	m := New(Config{Enabled: true, CPUThreshold: 0, MemThreshold: 90}, func() (Reading, error) { return Reading{}, nil }, events.New(), nil)

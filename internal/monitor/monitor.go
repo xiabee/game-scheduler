@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/mem"
 
 	"github.com/xiabee/game-scheduler/internal/events"
@@ -20,11 +21,17 @@ import (
 
 // Reading is a single resource sample.
 type Reading struct {
-	CPUPercent float64
-	MemPercent float64
-	MemUsedMB  uint64
-	MemTotalMB uint64
+	CPUPercent  float64
+	MemPercent  float64
+	MemUsedMB   uint64
+	MemTotalMB  uint64
+	DiskPercent float64
+	DiskUsedMB  uint64
+	DiskTotalMB uint64
 }
+
+// historyLen is how many recent samples are kept for the dashboard sparklines.
+const historyLen = 60
 
 // Sampler returns one reading. Pluggable so tests can drive the overload logic
 // without depending on real machine load.
@@ -37,12 +44,19 @@ type Snapshot struct {
 	MemPercent   float64   `json:"mem_percent"`
 	MemUsedMB    uint64    `json:"mem_used_mb"`
 	MemTotalMB   uint64    `json:"mem_total_mb"`
+	DiskPercent  float64   `json:"disk_percent"`
+	DiskUsedMB   uint64    `json:"disk_used_mb"`
+	DiskTotalMB  uint64    `json:"disk_total_mb"`
 	CPUThreshold float64   `json:"cpu_threshold"`
 	MemThreshold float64   `json:"mem_threshold"`
 	Overloaded   bool      `json:"overloaded"`
 	Reason       string    `json:"reason,omitempty"`
 	Policy       string    `json:"policy"`
 	SampledAt    time.Time `json:"sampled_at"`
+	// Rolling history (oldest→newest) for sparklines; disk is informational.
+	CPUHistory  []float64 `json:"cpu_history"`
+	MemHistory  []float64 `json:"mem_history"`
+	DiskHistory []float64 `json:"disk_history"`
 }
 
 // Policy values.
@@ -58,6 +72,7 @@ type Config struct {
 	MemThreshold float64       // percent (0-100); <=0 disables the mem trip
 	Interval     time.Duration // sampling period
 	Policy       string        // PolicyAlert | PolicyPause
+	DiskPath     string        // filesystem to report disk usage for (informational)
 }
 
 // breachesToTrip requires this many consecutive over-threshold samples before
@@ -73,9 +88,12 @@ type Monitor struct {
 
 	notify func(event, title, message string) // optional operator alert hook
 
-	mu     sync.RWMutex
-	snap   Snapshot
-	breach int
+	mu       sync.RWMutex
+	snap     Snapshot
+	breach   int
+	cpuHist  []float64
+	memHist  []float64
+	diskHist []float64
 }
 
 // SetNotify installs an operator-alert hook, called when overload trips.
@@ -85,7 +103,7 @@ func (m *Monitor) SetNotify(fn func(event, title, message string)) { m.notify = 
 // and log may be nil.
 func New(cfg Config, sampler Sampler, bus *events.Bus, log *slog.Logger) *Monitor {
 	if sampler == nil {
-		sampler = gopsutilSampler
+		sampler = newGopsutilSampler(cfg.DiskPath)
 	}
 	if log == nil {
 		log = slog.Default()
@@ -166,7 +184,13 @@ func (m *Monitor) update(r Reading) {
 	m.snap.MemPercent = r.MemPercent
 	m.snap.MemUsedMB = r.MemUsedMB
 	m.snap.MemTotalMB = r.MemTotalMB
+	m.snap.DiskPercent = r.DiskPercent
+	m.snap.DiskUsedMB = r.DiskUsedMB
+	m.snap.DiskTotalMB = r.DiskTotalMB
 	m.snap.SampledAt = time.Now()
+	m.cpuHist = appendHist(m.cpuHist, r.CPUPercent)
+	m.memHist = appendHist(m.memHist, r.MemPercent)
+	m.diskHist = appendHist(m.diskHist, r.DiskPercent)
 	if m.breach >= breachesToTrip {
 		m.snap.Overloaded = true
 		m.snap.Reason = reason
@@ -188,11 +212,25 @@ func (m *Monitor) update(r Reading) {
 	m.bus.Notify()
 }
 
-// Current returns a copy of the latest snapshot.
+// appendHist appends v, keeping at most historyLen most-recent values.
+func appendHist(h []float64, v float64) []float64 {
+	h = append(h, v)
+	if len(h) > historyLen {
+		h = h[len(h)-historyLen:]
+	}
+	return h
+}
+
+// Current returns a copy of the latest snapshot, including copies of the
+// history slices so callers can read them without racing the sampler.
 func (m *Monitor) Current() Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.snap
+	s := m.snap
+	s.CPUHistory = append([]float64(nil), m.cpuHist...)
+	s.MemHistory = append([]float64(nil), m.memHist...)
+	s.DiskHistory = append([]float64(nil), m.diskHist...)
+	return s
 }
 
 // Overloaded reports whether the machine is currently overloaded.
@@ -211,25 +249,39 @@ func (m *Monitor) ShouldPause() bool {
 	return m.Overloaded()
 }
 
-// gopsutilSampler reads real CPU and memory usage. cpu.Percent(0,...) returns
-// usage since the previous call, so the priming call in loop() matters.
-func gopsutilSampler() (Reading, error) {
-	pcts, err := cpu.Percent(0, false)
-	if err != nil {
-		return Reading{}, err
+// newGopsutilSampler reads real CPU, memory and disk usage. cpu.Percent(0,...)
+// returns usage since the previous call, so the priming call in loop() matters.
+// diskPath selects the filesystem to report; empty falls back to the current
+// directory.
+func newGopsutilSampler(diskPath string) Sampler {
+	if diskPath == "" {
+		diskPath = "."
 	}
-	var c float64
-	if len(pcts) > 0 {
-		c = pcts[0]
+	return func() (Reading, error) {
+		pcts, err := cpu.Percent(0, false)
+		if err != nil {
+			return Reading{}, err
+		}
+		var c float64
+		if len(pcts) > 0 {
+			c = pcts[0]
+		}
+		vm, err := mem.VirtualMemory()
+		if err != nil {
+			return Reading{}, err
+		}
+		r := Reading{
+			CPUPercent: c,
+			MemPercent: vm.UsedPercent,
+			MemUsedMB:  vm.Used / (1024 * 1024),
+			MemTotalMB: vm.Total / (1024 * 1024),
+		}
+		// Disk is best-effort/informational: don't fail a sample if it errors.
+		if du, err := disk.Usage(diskPath); err == nil {
+			r.DiskPercent = du.UsedPercent
+			r.DiskUsedMB = du.Used / (1024 * 1024)
+			r.DiskTotalMB = du.Total / (1024 * 1024)
+		}
+		return r, nil
 	}
-	vm, err := mem.VirtualMemory()
-	if err != nil {
-		return Reading{}, err
-	}
-	return Reading{
-		CPUPercent: c,
-		MemPercent: vm.UsedPercent,
-		MemUsedMB:  vm.Used / (1024 * 1024),
-		MemTotalMB: vm.Total / (1024 * 1024),
-	}, nil
 }

@@ -77,6 +77,7 @@ func main() {
 		MemThreshold: cfg.MemThreshold,
 		Interval:     time.Duration(cfg.MonitorIntervalSec) * time.Second,
 		Policy:       cfg.OverloadPolicy,
+		DiskPath:     cfg.DataDir,
 	}, nil, bus, log)
 	mon.SetNotify(notifier.Send)
 	mon.Start(monCtx)

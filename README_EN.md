@@ -163,8 +163,10 @@ It shows:
   without the CLI (adapter and task-type lists come from `GET /api/meta`).
 - **执行历史** — the **历史** button opens a filterable view of past executions
   (by status, with a row limit); click any row for its detail modal.
-- **Resource monitor** — a top panel shows live CPU / RAM usage (sampled every
-  `monitor_interval_sec`, default 3s, via gopsutil). When usage stays above
+- **Resource monitor** — a top panel shows live CPU / RAM / disk usage as ring
+  gauges with history sparklines (sampled every `monitor_interval_sec`, default
+  3s, via gopsutil; disk is informational and reports the data dir's volume).
+  When usage stays above
   `cpu_threshold` / `mem_threshold` (default 90%) for two consecutive samples it
   trips an **overload** banner. With `overload_policy: pause`, scheduled runs are
   held back while overloaded (manual runs still work); `alert` (default) only
