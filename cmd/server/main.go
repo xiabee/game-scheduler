@@ -51,6 +51,14 @@ func main() {
 	}
 	defer st.Close()
 
+	// Reconcile executions left in flight by a previous crash/restart; their
+	// processes and cancel handles are gone, so they can never finish.
+	if n, err := st.RecoverOrphans(); err != nil {
+		log.Warn("recover orphaned executions", "err", err)
+	} else if n > 0 {
+		log.Info("recovered orphaned executions", "count", n)
+	}
+
 	reg := game.NewRegistry(genshin.New(), hsr.New(), wuwa.New(), r1999.New())
 	svc := task.NewService(st, reg, cfg, log)
 	sched := scheduler.New(st, svc, log)

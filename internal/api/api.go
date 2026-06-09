@@ -167,7 +167,9 @@ func (s *Server) runTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	exec, err := s.svc.RunAsync(id, store.TriggerManual, nil)
+	// Manual triggers do not skip when active: an operator asking to run is an
+	// explicit intent, so the run is queued behind any in-flight execution.
+	exec, _, err := s.svc.Enqueue(id, store.TriggerManual, nil, false)
 	respondCreated(w, exec, err)
 }
 

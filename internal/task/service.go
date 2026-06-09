@@ -2,6 +2,11 @@
 // adapter, builds the command, runs it through runner, applies retries, and
 // records a full execution log (stdout/stderr/exit code/timestamps, plus error,
 // screenshot path and retry count on failure).
+//
+// Executions are serialized through a bounded run queue (see Service.sem).
+// Because every supported tool drives the shared mouse/keyboard and foreground
+// window, the default concurrency is 1: a second run waits for the first to
+// finish rather than fighting over the screen.
 package task
 
 import (
@@ -28,8 +33,11 @@ type Service struct {
 	cfg   config.Config
 	log   *slog.Logger
 
+	sem chan struct{} // bounded run slots; cap == cfg.MaxConcurrent
+
 	mu      sync.Mutex
 	running map[int64]context.CancelFunc // execID -> cancel
+	active  map[int64]int                // taskID -> count of pending/running execs
 }
 
 // NewService constructs a task service.
@@ -37,66 +45,118 @@ func NewService(s *store.Store, reg *game.Registry, cfg config.Config, log *slog
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{store: s, reg: reg, cfg: cfg, log: log, running: map[int64]context.CancelFunc{}}
+	n := cfg.MaxConcurrent
+	if n < 1 {
+		n = 1
+	}
+	return &Service{
+		store:   s,
+		reg:     reg,
+		cfg:     cfg,
+		log:     log,
+		sem:     make(chan struct{}, n),
+		running: map[int64]context.CancelFunc{},
+		active:  map[int64]int{},
+	}
 }
 
-// RunAsync creates a pending execution, returns it immediately, and runs the
-// task in a background goroutine. Use this for API/manual triggers.
-func (s *Service) RunAsync(taskID int64, trigger string, planID *int64) (store.Execution, error) {
-	t, err := s.store.GetTask(taskID)
-	if err != nil {
-		return store.Execution{}, err
+// Enqueue creates a pending execution and schedules it on the run queue,
+// returning immediately. If skipIfActive is true and the task already has a
+// pending/running execution, no row is created and (zero, true, nil) is
+// returned — this is how scheduled fires avoid stacking on top of a run that is
+// still going.
+func (s *Service) Enqueue(taskID int64, trigger string, planID *int64, skipIfActive bool) (exec store.Execution, skipped bool, err error) {
+	if _, err = s.store.GetTask(taskID); err != nil {
+		return store.Execution{}, false, err
 	}
-	exec := store.Execution{
-		TaskID:  t.ID,
-		PlanID:  planID,
-		Trigger: trigger,
-		Status:  store.StatusPending,
-	}
-	exec, err = s.store.CreateExecution(exec)
-	if err != nil {
-		return store.Execution{}, err
-	}
-	go func() {
-		if err := s.execute(context.Background(), exec.ID); err != nil {
-			s.log.Error("execution failed to complete", "exec_id", exec.ID, "err", err)
-		}
-	}()
-	return exec, nil
-}
 
-// RunSync runs the task to completion and returns the final execution record.
-func (s *Service) RunSync(ctx context.Context, taskID int64, trigger string, planID *int64) (store.Execution, error) {
-	t, err := s.store.GetTask(taskID)
-	if err != nil {
-		return store.Execution{}, err
+	s.mu.Lock()
+	if skipIfActive && s.active[taskID] > 0 {
+		s.mu.Unlock()
+		return store.Execution{}, true, nil
 	}
-	exec, err := s.store.CreateExecution(store.Execution{
-		TaskID: t.ID, PlanID: planID, Trigger: trigger, Status: store.StatusPending,
+	exec, err = s.store.CreateExecution(store.Execution{
+		TaskID: taskID, PlanID: planID, Trigger: trigger, Status: store.StatusPending,
 	})
 	if err != nil {
-		return store.Execution{}, err
+		s.mu.Unlock()
+		return store.Execution{}, false, err
 	}
-	if err := s.execute(ctx, exec.ID); err != nil {
-		return store.Execution{}, err
-	}
-	return s.store.GetExecution(exec.ID)
+	ctx, cancel := context.WithCancel(context.Background())
+	s.active[taskID]++
+	s.running[exec.ID] = cancel
+	s.mu.Unlock()
+
+	go s.worker(ctx, exec.ID, taskID)
+	return exec, false, nil
 }
 
-// Cancel attempts to stop a running execution.
+// worker waits for a run slot, then executes. It owns the execution's context
+// lifecycle and the bookkeeping maps.
+func (s *Service) worker(ctx context.Context, execID, taskID int64) {
+	defer func() {
+		s.mu.Lock()
+		if cancel, ok := s.running[execID]; ok {
+			cancel()
+			delete(s.running, execID)
+		}
+		if s.active[taskID] > 0 {
+			s.active[taskID]--
+			if s.active[taskID] == 0 {
+				delete(s.active, taskID)
+			}
+		}
+		s.mu.Unlock()
+	}()
+
+	// Acquire a run slot, or abort if cancelled while still queued.
+	select {
+	case <-ctx.Done():
+		s.markCancelledBeforeStart(execID)
+		return
+	case s.sem <- struct{}{}:
+	}
+	defer func() { <-s.sem }()
+
+	if err := s.execute(ctx, execID); err != nil {
+		s.log.Error("execution failed to complete", "exec_id", execID, "err", err)
+	}
+}
+
+// Cancel attempts to stop a queued or running execution.
 func (s *Service) Cancel(execID int64) error {
 	s.mu.Lock()
 	cancel, ok := s.running[execID]
 	s.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("task: execution %d is not running", execID)
+		return fmt.Errorf("task: execution %d is not active", execID)
 	}
 	cancel()
 	return nil
 }
 
+// markCancelledBeforeStart records cancellation of a run that never left the
+// queue.
+func (s *Service) markCancelledBeforeStart(execID int64) {
+	exec, err := s.store.GetExecution(execID)
+	if err != nil {
+		return
+	}
+	now := time.Now().UTC()
+	if exec.StartTime == nil {
+		exec.StartTime = &now
+	}
+	exec.EndTime = &now
+	exec.Status = store.StatusCancelled
+	exec.ErrorMsg = "cancelled before start (was queued)"
+	if err := s.store.UpdateExecution(exec); err != nil {
+		s.log.Warn("persist queued-cancel", "exec_id", execID, "err", err)
+	}
+}
+
 // execute performs the full lifecycle for an existing pending execution row.
-func (s *Service) execute(parent context.Context, execID int64) error {
+// The caller (worker) owns ctx and the running/active bookkeeping.
+func (s *Service) execute(ctx context.Context, execID int64) error {
 	exec, err := s.store.GetExecution(execID)
 	if err != nil {
 		return err
@@ -120,17 +180,6 @@ func (s *Service) execute(parent context.Context, execID int64) error {
 	if err != nil {
 		return s.finishWithError(exec, fmt.Errorf("build command: %w", err))
 	}
-
-	ctx, cancel := context.WithCancel(parent)
-	s.mu.Lock()
-	s.running[execID] = cancel
-	s.mu.Unlock()
-	defer func() {
-		cancel()
-		s.mu.Lock()
-		delete(s.running, execID)
-		s.mu.Unlock()
-	}()
 
 	exec.Command = spec.CommandLine()
 	exec.Status = store.StatusRunning

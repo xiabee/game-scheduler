@@ -90,9 +90,15 @@ func (s *Scheduler) Reload() error {
 func (s *Scheduler) fire(p store.Plan) {
 	s.log.Info("plan firing", "plan_id", p.ID, "task_id", p.TaskID, "name", p.Name)
 	planID := p.ID
-	exec, err := s.svc.RunAsync(p.TaskID, store.TriggerSchedule, &planID)
+	// Scheduled fires skip if the task is still active, so a long task on a
+	// short cron does not stack overlapping runs.
+	exec, skipped, err := s.svc.Enqueue(p.TaskID, store.TriggerSchedule, &planID, true)
 	if err != nil {
 		s.log.Error("plan run failed to start", "plan_id", p.ID, "err", err)
+		return
+	}
+	if skipped {
+		s.log.Warn("plan fire skipped; previous run still active", "plan_id", p.ID, "task_id", p.TaskID)
 		return
 	}
 	now := time.Now()

@@ -79,6 +79,12 @@ func Run(ctx context.Context, spec Spec) Result {
 	if len(spec.Env) > 0 {
 		cmd.Env = append(cmd.Environ(), spec.Env...)
 	}
+	// On cancel or timeout, kill the whole child process tree — the automation
+	// tools spawn grandchildren (python, helper exes) that would otherwise keep
+	// controlling the game after the parent is signalled. WaitDelay forces Wait
+	// to return even if a lingering grandchild holds the stdout/stderr pipes.
+	cmd.Cancel = func() error { return killProcessTree(cmd.Process) }
+	cmd.WaitDelay = 5 * time.Second
 
 	var stdout, stderr cappedBuffer
 	stdout.limit = maxCapture

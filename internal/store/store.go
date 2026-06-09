@@ -467,6 +467,34 @@ func (s *Store) GetExecution(id int64) (Execution, error) {
 	return e, nil
 }
 
+// RecoverOrphans marks any execution left in pending/running (because the
+// server stopped while it was in flight) as failed. The in-memory process and
+// cancel handle no longer exist, so the row would otherwise be stuck forever.
+// Returns the number of rows reconciled.
+func (s *Store) RecoverOrphans() (int64, error) {
+	now := time.Now().UTC()
+	res, err := s.db.Exec(`UPDATE executions
+		SET status=?, error_msg=?, end_time=COALESCE(end_time, ?)
+		WHERE status IN (?, ?)`,
+		StatusFailed, "interrupted: server stopped while task was in flight", now,
+		StatusPending, StatusRunning)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// CountActiveByTask returns how many executions for taskID are currently
+// pending or running, per the database. Used as a backstop for the in-memory
+// active-task guard.
+func (s *Store) CountActiveByTask(taskID int64) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM executions WHERE task_id=? AND status IN (?, ?)`,
+		taskID, StatusPending, StatusRunning).Scan(&n)
+	return n, err
+}
+
 // ExecutionFilter narrows ListExecutions.
 type ExecutionFilter struct {
 	TaskID int64  // 0 = any

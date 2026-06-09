@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -24,6 +25,11 @@ type Config struct {
 	//   "powershell -NoProfile -Command \"Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; $bmp=New-Object System.Drawing.Bitmap($b.Width,$b.Height); $g=[System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size); $bmp.Save('{{.Path}}')\""
 	// It is purely an observability helper; it never touches the game process.
 	ScreenshotCmd string `json:"screenshot_cmd"`
+	// MaxConcurrent is how many executions may run at once. The supported tools
+	// drive the shared mouse/keyboard and foreground window, so the safe (and
+	// default) value is 1 — fully serialized. Raise it only if your executions
+	// genuinely target independent machines/VMs.
+	MaxConcurrent int `json:"max_concurrent"`
 }
 
 // Default returns a Config with sensible defaults. DBPath is intentionally
@@ -31,8 +37,9 @@ type Config struct {
 // DataDir; an explicit db_path in the config file or GS_DB_PATH still wins.
 func Default() Config {
 	return Config{
-		Addr:    "127.0.0.1:8080",
-		DataDir: "data",
+		Addr:          "127.0.0.1:8080",
+		DataDir:       "data",
+		MaxConcurrent: 1,
 	}
 }
 
@@ -63,6 +70,14 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("GS_SCREENSHOT_CMD"); v != "" {
 		cfg.ScreenshotCmd = v
+	}
+	if v := os.Getenv("GS_MAX_CONCURRENT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.MaxConcurrent = n
+		}
+	}
+	if cfg.MaxConcurrent < 1 {
+		cfg.MaxConcurrent = 1
 	}
 	if strings.TrimSpace(cfg.DataDir) == "" {
 		cfg.DataDir = "data"

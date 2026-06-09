@@ -61,8 +61,17 @@ Requires Go 1.26+. No cgo (SQLite driver is pure Go).
 ```
 
 Configuration precedence: defaults → `config.json` (see `config.example.json`) →
-environment (`GS_ADDR`, `GS_DATA_DIR`, `GS_DB_PATH`, `GS_SCREENSHOT_CMD`) →
-`-addr` flag.
+environment (`GS_ADDR`, `GS_DATA_DIR`, `GS_DB_PATH`, `GS_SCREENSHOT_CMD`,
+`GS_MAX_CONCURRENT`) → `-addr` flag.
+
+### Concurrency (important)
+
+`max_concurrent` (default **1**) bounds how many executions run at once. The
+supported tools all drive the shared mouse/keyboard and foreground window, so
+running two at the same time would make them fight over the screen. With the
+default, a second trigger is **queued** (recorded as `pending`) and starts only
+when the current run finishes. Raise this only if your executions target
+genuinely independent machines/VMs.
 
 ### Failure screenshots
 
@@ -184,11 +193,22 @@ Standard 5-field cron (`min hour dom mon dow`) plus robfig/cron descriptors
 (`@hourly`, `@daily`, `@weekly`, `@every 6h`, …). Times use the server's local
 timezone. Expressions are validated on create/update.
 
+## Execution lifecycle & safety
+
+- **Serialized.** Runs go through a bounded queue (`max_concurrent`, default 1)
+  so input-automation tools never collide on the shared screen.
+- **No overlap.** Scheduled fires skip if the same task is still
+  pending/running, so a long task on a short cron does not stack up. Manual
+  triggers are always queued (explicit operator intent).
+- **Cancellable.** `POST /api/executions/{id}/cancel` works whether the run is
+  queued or in flight, and kills the **whole child process tree** (taskkill /T
+  on Windows) so helper processes don't keep controlling the game.
+- **Crash-safe.** On startup, executions left in `pending`/`running` by a
+  previous crash are reconciled to `failed` ("interrupted…").
+
 ## Notes & limitations (MVP)
 
 - Tool CLI flags differ across versions; adapter defaults are documented best
   guesses — prefer `raw_args` when in doubt.
-- Executions run concurrently; the scheduler does not serialize runs that would
-  fight over the same game window. Stagger your cron schedules accordingly.
 - No auth on the REST API — bind to localhost (default) or front it yourself.
 - SQLite uses a single writer connection (WAL mode) for simplicity.
