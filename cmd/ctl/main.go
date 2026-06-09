@@ -11,6 +11,7 @@
 //	routes  list [-game id] | add | delete <id>
 //	plans   list | get <id> | add | update <id> | delete <id>
 //	execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
+//	discover [-paths "F:/Games;D:/Tools"]   scan disk for tool executables
 //	health
 //
 // "add"/"update" read a JSON body from -data '<json>' or from stdin ('-data -').
@@ -37,6 +38,7 @@ func main() {
 	taskID := flag.String("task", "", "filter by task id (execs list)")
 	status := flag.String("status", "", "filter by status (execs list)")
 	limit := flag.String("limit", "", "limit (execs list)")
+	paths := flag.String("paths", "", "scan paths for 'discover', separated by ; or ,")
 	flag.Parse()
 
 	args := flag.Args()
@@ -75,6 +77,14 @@ func main() {
 	switch resource {
 	case "health":
 		err = c.do("GET", "/healthz", nil)
+	case "discover":
+		body := []byte("{}")
+		if *paths != "" {
+			parts := strings.FieldsFunc(*paths, func(r rune) bool { return r == ';' || r == ',' })
+			b, _ := json.Marshal(map[string][]string{"paths": parts})
+			body = b
+		}
+		err = c.do("POST", "/api/discover", body)
 	case "games":
 		err = c.crud("/api/games", action, id, *data, nil)
 	case "tasks":

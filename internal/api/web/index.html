@@ -137,6 +137,7 @@
   <span class="meta" id="updated">—</span>
   <button onclick="openGameForm()">+ 游戏</button>
   <button onclick="openTaskForm()">+ 任务</button>
+  <button onclick="openScan()">扫描</button>
   <button onclick="openHistory()">历史</button>
   <label class="toggle"><span class="live-dot" id="livedot"></span><input type="checkbox" id="live" checked> 实时</label>
   <button id="refresh">刷新</button>
@@ -397,27 +398,71 @@ async function cancelExec(id){
   catch(e){ $("#err").textContent="取消失败: "+e; }
 }
 
+// ---- modal: scan / discover ----
+function parentDir(p){ return p.replace(/[\\/][^\\/]*$/, ""); }
+function openScan(){
+  openModal("扫描工具", `<div class="form">
+    <label>自定义搜索路径（可选；用 ; 或 , 分隔；留空则扫描所有磁盘）
+      <input id="scan-paths" placeholder="例如 F:/Games;D:/Tools"></label>
+    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" onclick="runScan()">开始扫描</button></div>
+    <div id="scan-res" class="hint">扫描整盘可能需要几秒到几十秒;指定路径会快很多。</div>
+  </div>`);
+}
+async function runScan(){
+  const raw=($("#scan-paths").value||"").trim();
+  const body={}; if(raw) body.paths = raw.split(/[;,]/).map(s=>s.trim()).filter(Boolean);
+  $("#scan-res").innerHTML='<div class="empty">扫描中…</div>';
+  try{
+    const r=await api("/api/discover",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const res=await r.json();
+    const rows=(res.candidates||[]).map(c=>`<tr>
+      <td><span class="badge adapter">${esc(c.adapter)}</span></td>
+      <td>${esc(c.tool)}</td><td>${esc(c.kind)}</td>
+      <td style="font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-all">${esc(c.path)}</td>
+      <td><button onclick="fillGameFromCandidate(${esc(JSON.stringify(c)).replace(/'/g,'&#39;')})">填入新游戏</button></td></tr>`).join("");
+    $("#scan-res").innerHTML = `<div class="hint">扫描 ${(res.scanned_roots||[]).length} 个根目录,用时 ${res.elapsed_ms} ms${res.truncated?'(结果可能被截断,可缩小路径范围)':''}。</div>`
+      + (rows ? `<table><thead><tr><th>游戏</th><th>工具</th><th>类型</th><th>路径</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+              : '<div class="empty">未找到已知工具。可填自定义路径重试,或直接「+ 游戏」手动填写。</div>');
+  }catch(e){ if(String(e).indexOf("unauthorized")<0) $("#scan-res").innerHTML='<div class="empty">扫描失败: '+esc(String(e))+'</div>'; }
+}
+function fillGameFromCandidate(c){
+  const pre={adapter:c.adapter};
+  if(c.adapter==='hsr'){
+    const dir = c.kind==='dir' ? c.path : parentDir(c.path);
+    const key = c.tool.toLowerCase().indexOf('fhoe')>=0 ? 'fhoe_dir' : 'march7th_dir';
+    pre.extra_config = JSON.stringify({[key]:dir}); pre.name = c.tool;
+  } else if(c.adapter==='r1999'){
+    pre.tool_path=c.path; pre.working_dir=parentDir(c.path); pre.name='重返未来1999';
+  } else {
+    pre.tool_path=c.path; pre.name = c.adapter==='genshin'?'原神':(c.adapter==='wuwa'?'鸣潮':c.adapter);
+  }
+  openGameForm(pre); // create mode (no id), fields prefilled
+}
+
 // ---- modal: forms ----
 async function ensureMeta(){ if(!meta){ const r=await api("/api/meta"); meta=await r.json(); } return meta; }
 let editId=null; // current edit target id (game id / task id / plan id); null = create
 
 // --- game form (create + edit) ---
+// g may be: undefined (blank create), a full game object with .id (edit), or a
+// partial prefill object without .id (create with fields filled, e.g. from scan).
 async function openGameForm(g){
   const m=await ensureMeta();
-  editId = g? g.id : null;
+  const isEdit = !!(g && g.id);
+  editId = isEdit ? g.id : null;
   const opts=m.adapters.map(a=>`<option value="${a.key}" ${g&&g.adapter===a.key?'selected':''}>${a.key}</option>`).join("");
   const v=k=> g? esc(g[k]||"") : "";
-  openModal(g?("编辑游戏 "+esc(g.id)):"添加游戏",`<form class="form" onsubmit="return submitGame(event)">
+  openModal(isEdit?("编辑游戏 "+esc(g.id)):"添加游戏",`<form class="form" onsubmit="return submitGame(event)">
     <div class="two">
-      <label>ID（唯一，如 genshin）<input name="id" required pattern="[A-Za-z0-9_-]+" value="${g?esc(g.id):''}" ${g?'readonly':''}></label>
+      <label>ID（唯一，如 genshin）<input name="id" required pattern="[A-Za-z0-9_-]+" value="${isEdit?esc(g.id):''}" ${isEdit?'readonly':''}></label>
       <label>适配器<select name="adapter">${opts}</select></label>
     </div>
     <label>名称<input name="name" required value="${v('name')}"></label>
     <label>工具路径 tool_path<input name="tool_path" placeholder="如 D:/BetterGI/BetterGI.exe" value="${v('tool_path')}"></label>
     <label>工作目录 working_dir<input name="working_dir" placeholder="可选" value="${v('working_dir')}"></label>
     <label>extra_config (JSON)<textarea name="extra_config" placeholder='{"python_path":"python","march7th_dir":"..."}'>${v('extra_config')}</textarea></label>
-    <label class="toggle"><input type="checkbox" name="enabled" ${!g||g.enabled?'checked':''}> 启用</label>
-    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">${g?'保存':'创建'}</button></div>
+    <label class="toggle"><input type="checkbox" name="enabled" ${!isEdit||g.enabled?'checked':''}> 启用</label>
+    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">${isEdit?'保存':'创建'}</button></div>
   </form><div id="ferr" class="hint" style="color:var(--err)"></div>`);
 }
 async function editGame(id){

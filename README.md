@@ -46,6 +46,8 @@
 
 > 装完后用 **`ctl tasks preflight <任务id>`**(或 `GET /api/tasks/{id}/preflight`)验证:它会拼出实际命令、检查可执行文件是否存在并给出 `ready` 标志,**不会真的启动游戏**。
 
+> 🔍 **不知道工具装在哪?** 用**扫描**功能自动定位:看板头部「扫描」按钮、`ctl discover [-paths "F:/Games;D:/Tools"]`、或 `POST /api/discover`。它会在磁盘里查找上述可执行文件/项目目录(只读、不执行任何东西),找到后在看板里可**一键填入新游戏**。留空路径则扫描所有磁盘;指定路径更快。
+
 ---
 
 ## 🏗️ 架构
@@ -203,6 +205,7 @@ health
 | `GET /api/dashboard` | 看板聚合快照(各游戏健康、计划、最近执行) |
 | `GET /api/stream` | SSE 实时推送看板更新 |
 | `GET /api/meta` | 适配器键 + 任务类型(给表单用) |
+| `POST /api/discover` | 扫描磁盘查找工具可执行文件(body 可选 `{"paths":[...],"max_depth":N}`) |
 | `GET /screenshots/{name}` | 取失败截图(受鉴权保护) |
 
 ---

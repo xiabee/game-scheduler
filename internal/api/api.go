@@ -68,6 +68,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/dashboard", s.dashboard)
 	mux.HandleFunc("GET /api/stream", s.stream)
 	mux.HandleFunc("GET /api/meta", s.meta)
+	mux.HandleFunc("POST /api/discover", s.discoverScan)
 	mux.HandleFunc("GET /screenshots/{name}", s.screenshot)
 
 	// Games

@@ -42,6 +42,12 @@ After installing, verify each game with `ctl tasks preflight <id>` (or
 `GET /api/tasks/{id}/preflight`) — it reports the resolved command, whether the
 executable exists, and a `ready` flag, without launching the game.
 
+**Don't know where a tool is installed?** Auto-locate it: the dashboard's
+**扫描 (scan)** button, `ctl discover [-paths "F:/Games;D:/Tools"]`, or
+`POST /api/discover`. It searches the disk for the known executables/project
+dirs (read-only, runs nothing) and lets you one-click prefill a new game. Empty
+paths scan all drives; passing paths is faster.
+
 ## Architecture
 
 ```
