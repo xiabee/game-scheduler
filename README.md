@@ -20,6 +20,24 @@ open-source automation tools as ordinary local processes.
 | 鸣潮 Wuthering Waves | `wuwa` | ok-wuthering-waves (`ok-ww.exe`) | one-click dailies, background auto-battle, echo farming, reserved `farm` (RouteFarmTask) |
 | 重返未来：1999 Reverse: 1999 | `r1999` | M9A (`MaaPiCli.exe`) | 收荒原, 每日心相, 常规作战, 活动刷取 |
 
+## Install the automation tools (required to actually run anything)
+
+The scheduler is only an orchestrator — it ships none of the tools or games.
+Install each tool yourself, then point a game's `tool_path` / `working_dir` /
+`extra_config` at it. `python` is needed only for the HSR tools.
+
+| Game | Tool | Source | What the scheduler needs |
+|------|------|--------|--------------------------|
+| 原神 | BetterGI | https://github.com/babalae/better-genshin-impact/releases | `tool_path` → `BetterGI.exe`. Scripts via [bettergi-scripts-list](https://github.com/babalae/bettergi-scripts-list) (subscribed inside BetterGI). |
+| 崩铁 | March7thAssistant | https://github.com/moesnow/March7thAssistant/releases | `extra_config.march7th_dir` → project dir (`python` 3.12+). |
+| 崩铁 | Fhoe-Rail | https://github.com/linruowuyin/Fhoe-Rail | `extra_config.fhoe_dir` → project dir. (Packaged build also exposes `Fhoe-Rail.exe`; point `exe`/`raw_args` at it if you prefer.) |
+| 鸣潮 | ok-wuthering-waves | https://github.com/ok-oldking/ok-wuthering-waves/releases | install via the setup `.exe`, then `tool_path` → `ok-ww.exe`. |
+| 1999 | M9A | https://github.com/MAA1999/M9A/releases | download the **PiCLI** build; `tool_path` → `MaaPiCli.exe`, `working_dir` → M9A dir. CLI usage: [MaaPiCli.md](https://github.com/MAA1999/M9A/blob/main/docs/zh_cn/manual/MaaPiCli.md). |
+
+After installing, verify each game with `ctl tasks preflight <id>` (or
+`GET /api/tasks/{id}/preflight`) — it reports the resolved command, whether the
+executable exists, and a `ready` flag, without launching the game.
+
 ## Architecture
 
 ```
@@ -98,7 +116,7 @@ is written.
 ctl [-server URL] <resource> <action> [id]
 
 games   list | get <id> | add | update <id> | delete <id>
-tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id>
+tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> | preflight <id>
 routes  list [-game id] | add | delete <id>
 plans   list | get <id> | add | update <id> | delete <id>
 execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
@@ -116,6 +134,7 @@ health
 | `GET/POST /api/games`, `GET/PUT/DELETE /api/games/{id}` | games CRUD |
 | `GET/POST /api/tasks`, `GET/PUT/DELETE /api/tasks/{id}` | tasks CRUD (`?game_id=`) |
 | `POST /api/tasks/{id}/run` | **manual trigger** (returns the pending execution) |
+| `GET /api/tasks/{id}/preflight` | build the command & check the tool exists, **without running** |
 | `GET/POST /api/routes`, `DELETE /api/routes/{id}` | routes (`?game_id=`) |
 | `GET/POST /api/plans`, `GET/PUT/DELETE /api/plans/{id}` | scheduled plans (cron validated) |
 | `GET /api/executions`, `GET /api/executions/{id}` | execution logs (`?task_id=&status=&limit=`) |

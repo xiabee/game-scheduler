@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -152,6 +153,77 @@ func (s *Service) markCancelledBeforeStart(execID int64) {
 	if err := s.store.UpdateExecution(exec); err != nil {
 		s.log.Warn("persist queued-cancel", "exec_id", execID, "err", err)
 	}
+}
+
+// Preflight reports what a task would run and whether the environment is ready,
+// without launching anything. It is the quickest way to confirm a game is wired
+// up correctly after installing its tool.
+type Preflight struct {
+	TaskID           int64  `json:"task_id"`
+	TaskName         string `json:"task_name"`
+	GameID           string `json:"game_id"`
+	Adapter          string `json:"adapter"`
+	Command          string `json:"command"`
+	Executable       string `json:"executable"`
+	ExecutableExists bool   `json:"executable_exists"`
+	WorkingDir       string `json:"working_dir"`
+	WorkingDirExists bool   `json:"working_dir_exists"`
+	ValidationError  string `json:"validation_error,omitempty"`
+	BuildError       string `json:"build_error,omitempty"`
+	Ready            bool   `json:"ready"`
+}
+
+// Preflight resolves the command for taskID and checks its prerequisites.
+func (s *Service) Preflight(taskID int64) (Preflight, error) {
+	t, err := s.store.GetTask(taskID)
+	if err != nil {
+		return Preflight{}, err
+	}
+	g, err := s.store.GetGame(t.GameID)
+	if err != nil {
+		return Preflight{}, err
+	}
+	pf := Preflight{TaskID: t.ID, TaskName: t.Name, GameID: g.ID, Adapter: g.Adapter}
+
+	adapter, err := s.reg.Get(g.Adapter)
+	if err != nil {
+		pf.ValidationError = err.Error()
+		return pf, nil
+	}
+	if verr := adapter.Validate(g); verr != nil {
+		pf.ValidationError = verr.Error()
+	}
+	spec, berr := adapter.BuildCommand(g, t)
+	if berr != nil {
+		pf.BuildError = berr.Error()
+		return pf, nil
+	}
+	pf.Command = spec.CommandLine()
+	pf.Executable = spec.Path
+	pf.ExecutableExists = executableExists(spec.Path)
+	pf.WorkingDir = spec.Dir
+	pf.WorkingDirExists = spec.Dir == "" || dirExists(spec.Dir)
+	pf.Ready = pf.ValidationError == "" && pf.ExecutableExists && pf.WorkingDirExists
+	return pf, nil
+}
+
+// executableExists is true if path is an existing file or resolvable on PATH.
+func executableExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+		return true
+	}
+	if _, err := exec.LookPath(path); err == nil {
+		return true
+	}
+	return false
+}
+
+func dirExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
 }
 
 // execute performs the full lifecycle for an existing pending execution row.

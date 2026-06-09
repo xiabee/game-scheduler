@@ -54,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/tasks/{id}", s.updateTask)
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.deleteTask)
 	mux.HandleFunc("POST /api/tasks/{id}/run", s.runTask)
+	mux.HandleFunc("GET /api/tasks/{id}/preflight", s.preflightTask)
 
 	// Routes
 	mux.HandleFunc("GET /api/routes", s.listRoutes)
@@ -171,6 +172,15 @@ func (s *Server) runTask(w http.ResponseWriter, r *http.Request) {
 	// explicit intent, so the run is queued behind any in-flight execution.
 	exec, _, err := s.svc.Enqueue(id, store.TriggerManual, nil, false)
 	respondCreated(w, exec, err)
+}
+
+func (s *Server) preflightTask(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	pf, err := s.svc.Preflight(id)
+	respond(w, pf, err)
 }
 
 // ---------- routes ----------

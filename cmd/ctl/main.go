@@ -7,7 +7,7 @@
 // Resources/actions:
 //
 //	games   list | get <id> | add | update <id> | delete <id>
-//	tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id>
+//	tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> | preflight <id>
 //	routes  list [-game id] | add | delete <id>
 //	plans   list | get <id> | add | update <id> | delete <id>
 //	execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
@@ -79,6 +79,8 @@ func main() {
 	case "tasks":
 		if action == "run" {
 			err = c.do("POST", "/api/tasks/"+id+"/run", nil)
+		} else if action == "preflight" {
+			err = c.do("GET", "/api/tasks/"+id+"/preflight", nil)
 		} else {
 			err = c.crud("/api/tasks", action, id, *data, q)
 		}
