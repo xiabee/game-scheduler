@@ -19,6 +19,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/game/hsr"
 	"github.com/xiabee/game-scheduler/internal/game/r1999"
 	"github.com/xiabee/game-scheduler/internal/game/wuwa"
+	"github.com/xiabee/game-scheduler/internal/monitor"
 	"github.com/xiabee/game-scheduler/internal/scheduler"
 	"github.com/xiabee/game-scheduler/internal/store"
 	"github.com/xiabee/game-scheduler/internal/task"
@@ -63,7 +64,21 @@ func main() {
 	bus := events.New()
 	reg := game.NewRegistry(genshin.New(), hsr.New(), wuwa.New(), r1999.New())
 	svc := task.NewService(st, reg, cfg, bus, log)
+
+	// Resource monitor: live CPU/RAM sampling + optional overload gating.
+	monCtx, monCancel := context.WithCancel(context.Background())
+	defer monCancel()
+	mon := monitor.New(monitor.Config{
+		Enabled:      cfg.MonitorEnabled,
+		CPUThreshold: cfg.CPUThreshold,
+		MemThreshold: cfg.MemThreshold,
+		Interval:     time.Duration(cfg.MonitorIntervalSec) * time.Second,
+		Policy:       cfg.OverloadPolicy,
+	}, nil, bus, log)
+	mon.Start(monCtx)
+
 	sched := scheduler.New(st, svc, log)
+	sched.SetPauseGate(mon.ShouldPause)
 	if err := sched.Start(); err != nil {
 		log.Error("start scheduler", "err", err)
 		os.Exit(1)
@@ -72,7 +87,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           api.New(st, svc, sched, reg, bus, cfg, log).Handler(),
+		Handler:           api.New(st, svc, sched, reg, bus, mon, cfg, log).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

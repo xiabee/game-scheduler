@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/xiabee/game-scheduler/internal/monitor"
 	"github.com/xiabee/game-scheduler/internal/store"
 )
 
@@ -11,10 +12,11 @@ import (
 // from the existing CRUD data in a few queries; small enough to recompute on
 // every poll.
 type dashboard struct {
-	GeneratedAt time.Time     `json:"generated_at"`
-	Totals      totals        `json:"totals"`
-	Games       []gameSummary `json:"games"`
-	Recent      []recentExec  `json:"recent"`
+	GeneratedAt time.Time         `json:"generated_at"`
+	Totals      totals            `json:"totals"`
+	Games       []gameSummary     `json:"games"`
+	Recent      []recentExec      `json:"recent"`
+	Resource    *monitor.Snapshot `json:"resource,omitempty"`
 }
 
 type totals struct {
@@ -180,6 +182,11 @@ func (s *Server) buildDashboard() (dashboard, error) {
 		gs := byGame[g.ID]
 		gs.Health = health(gs)
 		d.Games = append(d.Games, *gs)
+	}
+
+	if s.mon != nil {
+		snap := s.mon.Current()
+		d.Resource = &snap
 	}
 
 	return d, nil

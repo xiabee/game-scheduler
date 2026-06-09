@@ -163,6 +163,15 @@ It shows:
   without the CLI (adapter and task-type lists come from `GET /api/meta`).
 - **执行历史** — the **历史** button opens a filterable view of past executions
   (by status, with a row limit); click any row for its detail modal.
+- **Resource monitor** — a top panel shows live CPU / RAM usage (sampled every
+  `monitor_interval_sec`, default 3s, via gopsutil). When usage stays above
+  `cpu_threshold` / `mem_threshold` (default 90%) for two consecutive samples it
+  trips an **overload** banner. With `overload_policy: pause`, scheduled runs are
+  held back while overloaded (manual runs still work); `alert` (default) only
+  surfaces the banner. Read-only observability + a scheduling gate — it only
+  reads CPU/memory, never game/tool internals. Exposed at `/api/dashboard`'s
+  `resource` field; env vars `GS_MONITOR_ENABLED`, `GS_CPU_THRESHOLD`,
+  `GS_MEM_THRESHOLD`, `GS_MONITOR_INTERVAL_SEC`, `GS_OVERLOAD_POLICY`.
 
 The board is driven entirely by the REST API, so anything it shows is also
 available programmatically.

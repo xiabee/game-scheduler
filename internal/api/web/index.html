@@ -32,6 +32,16 @@
   .stat .v{font-size:26px;font-weight:700}
   .stat .l{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.6px;margin-top:2px}
   .stat.alert .v{color:var(--err)}
+  .res{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:20px}
+  .res.over{border-color:var(--err);box-shadow:0 0 0 1px var(--err) inset}
+  .res .rh{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+  .res .rh .t{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+  .res .banner{color:var(--err);font-weight:600;font-size:13px}
+  .bar{display:grid;grid-template-columns:52px 1fr 56px;align-items:center;gap:10px;margin:6px 0}
+  .bar .lab{color:var(--muted);font-size:12px}
+  .track{height:10px;background:var(--panel2);border-radius:6px;overflow:hidden}
+  .fill{height:100%;border-radius:6px;transition:width .4s linear,background .4s}
+  .bar .pct{text-align:right;font-variant-numeric:tabular-nums}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-bottom:24px}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
   .card .top{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border)}
@@ -124,6 +134,7 @@
 </header>
 <main>
   <div class="stats" id="stats"></div>
+  <div id="resource"></div>
   <div class="grid" id="games"></div>
   <h2>最近执行</h2>
   <table>
@@ -230,9 +241,31 @@ function gameCard(g){
   </div>`;
 }
 
+function resBar(label,pct,threshold){
+  const v=Math.max(0,Math.min(100,pct||0));
+  const col = (threshold>0&&v>=threshold)?'var(--err)':(v>=70?'var(--warn)':'var(--ok)');
+  return `<div class="bar"><span class="lab">${label}</span>
+    <div class="track"><div class="fill" style="width:${v}%;background:${col}"></div></div>
+    <span class="pct">${v.toFixed(0)}%</span></div>`;
+}
+function renderResource(r){
+  const el=$("#resource");
+  if(!r||!r.enabled){ el.innerHTML=""; return; }
+  const memTxt = r.mem_total_mb ? ` · 内存 ${(r.mem_used_mb/1024).toFixed(1)} / ${(r.mem_total_mb/1024).toFixed(1)} GB` : "";
+  const head = r.overloaded
+    ? `<span class="banner">⚠ 资源过载：${esc(r.reason)}${r.policy==='pause'?'（已暂停定时任务）':''}</span>`
+    : `<span class="meta">阈值 CPU ${r.cpu_threshold}% / 内存 ${r.mem_threshold}% · 策略 ${r.policy==='pause'?'过载暂停':'仅提醒'}${memTxt}</span>`;
+  el.innerHTML = `<div class="res ${r.overloaded?'over':''}">
+    <div class="rh"><span class="t">资源监控</span>${head}</div>
+    ${resBar('CPU', r.cpu_percent, r.cpu_threshold)}
+    ${resBar('内存', r.mem_percent, r.mem_threshold)}
+  </div>`;
+}
+
 function render(d){
   lastData = d;
   $("#updated").textContent = "更新于 "+new Date(d.generated_at).toLocaleTimeString();
+  renderResource(d.resource);
   $("#stats").innerHTML =
     statCard(d.totals.games,"游戏")+statCard(d.totals.tasks,"任务")+statCard(d.totals.plans,"计划")+
     statCard(d.totals.running,"运行中")+statCard(d.totals.failed_24h,"24h 失败",d.totals.failed_24h>0);

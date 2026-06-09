@@ -35,6 +35,19 @@ type Config struct {
 	// query parameter. The dashboard page and /healthz stay open. Empty means no
 	// auth (safe only when bound to localhost). Set GS_AUTH_TOKEN to enable.
 	AuthToken string `json:"auth_token"`
+
+	// --- resource monitor ---
+	// MonitorEnabled turns on live CPU/RAM sampling (default true).
+	MonitorEnabled bool `json:"monitor_enabled"`
+	// CPUThreshold / MemThreshold are the overload trip points in percent
+	// (defaults 90). A value <=0 disables that dimension.
+	CPUThreshold float64 `json:"cpu_threshold"`
+	MemThreshold float64 `json:"mem_threshold"`
+	// MonitorIntervalSec is the sampling period in seconds (default 3).
+	MonitorIntervalSec int `json:"monitor_interval_sec"`
+	// OverloadPolicy is "alert" (default, surface only) or "pause" (also skip
+	// new scheduled runs while overloaded).
+	OverloadPolicy string `json:"overload_policy"`
 }
 
 // Default returns a Config with sensible defaults. DBPath is intentionally
@@ -42,9 +55,14 @@ type Config struct {
 // DataDir; an explicit db_path in the config file or GS_DB_PATH still wins.
 func Default() Config {
 	return Config{
-		Addr:          "127.0.0.1:8080",
-		DataDir:       "data",
-		MaxConcurrent: 1,
+		Addr:               "127.0.0.1:8080",
+		DataDir:            "data",
+		MaxConcurrent:      1,
+		MonitorEnabled:     true,
+		CPUThreshold:       90,
+		MemThreshold:       90,
+		MonitorIntervalSec: 3,
+		OverloadPolicy:     "alert",
 	}
 }
 
@@ -83,6 +101,27 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("GS_AUTH_TOKEN"); v != "" {
 		cfg.AuthToken = v
+	}
+	if v := os.Getenv("GS_MONITOR_ENABLED"); v != "" {
+		cfg.MonitorEnabled, _ = strconv.ParseBool(v)
+	}
+	if v := os.Getenv("GS_CPU_THRESHOLD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.CPUThreshold = f
+		}
+	}
+	if v := os.Getenv("GS_MEM_THRESHOLD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.MemThreshold = f
+		}
+	}
+	if v := os.Getenv("GS_MONITOR_INTERVAL_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.MonitorIntervalSec = n
+		}
+	}
+	if v := os.Getenv("GS_OVERLOAD_POLICY"); v != "" {
+		cfg.OverloadPolicy = v
 	}
 	if cfg.MaxConcurrent < 1 {
 		cfg.MaxConcurrent = 1

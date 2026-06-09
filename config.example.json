@@ -4,5 +4,10 @@
   "db_path": "data/scheduler.db",
   "screenshot_cmd": "",
   "max_concurrent": 1,
-  "auth_token": ""
+  "auth_token": "",
+  "monitor_enabled": true,
+  "cpu_threshold": 90,
+  "mem_threshold": 90,
+  "monitor_interval_sec": 3,
+  "overload_policy": "alert"
 }

@@ -20,10 +20,15 @@ type Scheduler struct {
 	svc   *task.Service
 	log   *slog.Logger
 
-	mu      sync.Mutex
-	cron    *cron.Cron
-	entries map[int64]cron.EntryID // planID -> entry
+	mu        sync.Mutex
+	cron      *cron.Cron
+	entries   map[int64]cron.EntryID // planID -> entry
+	pauseGate func() bool            // when true, skip firing (e.g. resource overload)
 }
+
+// SetPauseGate installs a predicate; when it returns true, scheduled fires are
+// skipped (used to hold back new runs while the machine is overloaded).
+func (s *Scheduler) SetPauseGate(fn func() bool) { s.pauseGate = fn }
 
 // New builds a scheduler. Times use the local timezone.
 func New(s *store.Store, svc *task.Service, log *slog.Logger) *Scheduler {
@@ -88,6 +93,10 @@ func (s *Scheduler) Reload() error {
 }
 
 func (s *Scheduler) fire(p store.Plan) {
+	if s.pauseGate != nil && s.pauseGate() {
+		s.log.Warn("plan fire skipped; resource overload (policy=pause)", "plan_id", p.ID, "task_id", p.TaskID)
+		return
+	}
 	s.log.Info("plan firing", "plan_id", p.ID, "task_id", p.TaskID, "name", p.Name)
 	planID := p.ID
 	// Scheduled fires skip if the task is still active, so a long task on a

@@ -32,7 +32,7 @@ func newTestServer(t *testing.T, token string) (*httptest.Server, *store.Store, 
 	cfg := config.Config{DataDir: t.TempDir(), AuthToken: token, MaxConcurrent: 1}
 	svc := task.NewService(st, reg, cfg, bus, nil)
 	sched := scheduler.New(st, svc, nil)
-	srv := httptest.NewServer(New(st, svc, sched, reg, bus, cfg, nil).Handler())
+	srv := httptest.NewServer(New(st, svc, sched, reg, bus, nil, cfg, nil).Handler())
 	t.Cleanup(srv.Close)
 	return srv, st, bus
 }

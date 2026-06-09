@@ -87,7 +87,7 @@ go build -o bin/ctl.exe    ./cmd/ctl
 ```
 
 配置优先级:默认值 → `config.json`(见 `config.example.json`) → 环境变量
-(`GS_ADDR`、`GS_DATA_DIR`、`GS_DB_PATH`、`GS_SCREENSHOT_CMD`、`GS_MAX_CONCURRENT`、`GS_AUTH_TOKEN`) → `-addr` 参数。
+(`GS_ADDR`、`GS_DATA_DIR`、`GS_DB_PATH`、`GS_SCREENSHOT_CMD`、`GS_MAX_CONCURRENT`、`GS_AUTH_TOKEN`、`GS_MONITOR_ENABLED`、`GS_CPU_THRESHOLD`、`GS_MEM_THRESHOLD`、`GS_MONITOR_INTERVAL_SEC`、`GS_OVERLOAD_POLICY`) → `-addr` 参数。
 
 ### 并发(重要）
 
@@ -133,6 +133,20 @@ go build -o bin/ctl.exe    ./cmd/ctl
 - **执行详情弹窗**:点最近记录的任意一行(或卡片上的状态徽章),查看完整命令、错误、**stdout/stderr**、退出码、时间,以及失败**截图缩略图**(由 `/screenshots/` 提供)。若仍在运行,弹窗内有**取消**按钮(`POST /api/executions/{id}/cancel`,会杀整棵进程树)。
 - **完整增删改**:头部 **+ 游戏 / + 任务** 按钮,以及每张卡上的 **+ 添加 / ✎ 编辑 / ✕ 删除**,无需命令行即可管理游戏/任务/计划(适配器与任务类型下拉来自 `GET /api/meta`)。
 - **执行历史**:**历史** 按钮打开可筛选的历史视图(按状态、限制条数),点行进详情弹窗。
+- **资源监控面板**:顶部实时显示本机 **CPU / 内存** 使用率(随 SSE 持续刷新);超过阈值时变红并弹出**过载横幅**(见下节)。
+
+---
+
+## 🖥️ 资源监控与过载保护
+
+服务器内置一个轻量监控,按 `monitor_interval_sec`(默认 3 秒)采样本机 **CPU / 内存**,在看板顶部用进度条实时展示。这些工具会吃满 CPU/内存,机器过载时自动化容易出错、卡死甚至连环失败——本功能用来**防止资源过载**。
+
+- **阈值**:`cpu_threshold` / `mem_threshold`(默认各 90%)。连续 2 次采样超过阈值才判定**过载**(去抖,避免瞬时尖峰误报);掉回阈值以下立即解除。
+- **过载策略** `overload_policy`:
+  - `alert`(默认):只在看板**红色横幅提醒**(`⚠ 资源过载:…`),不干预任务。
+  - `pause`:在此基础上,**过载期间跳过新的定时任务**(调度器记日志并在看板标注「已暂停定时任务」),手动触发不受影响;资源回落后自动恢复。
+- 纯只读观测 + 调度闸门,**不碰游戏或工具**;只看 CPU/内存(`gopsutil`),不读进程内存。
+- 相关配置:`monitor_enabled`、`cpu_threshold`、`mem_threshold`、`monitor_interval_sec`、`overload_policy`(对应环境变量 `GS_MONITOR_ENABLED`、`GS_CPU_THRESHOLD`、`GS_MEM_THRESHOLD`、`GS_MONITOR_INTERVAL_SEC`、`GS_OVERLOAD_POLICY`)。实时数据也在 `GET /api/dashboard` 的 `resource` 字段中。
 
 ---
 

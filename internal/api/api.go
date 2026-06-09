@@ -15,6 +15,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
+	"github.com/xiabee/game-scheduler/internal/monitor"
 	"github.com/xiabee/game-scheduler/internal/scheduler"
 	"github.com/xiabee/game-scheduler/internal/store"
 	"github.com/xiabee/game-scheduler/internal/task"
@@ -30,13 +31,14 @@ type Server struct {
 	sched         *scheduler.Scheduler
 	reg           *game.Registry
 	bus           *events.Bus
+	mon           *monitor.Monitor
 	log           *slog.Logger
 	screenshotDir string
 	authToken     string
 }
 
-// New builds an API server.
-func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *game.Registry, bus *events.Bus, cfg config.Config, log *slog.Logger) *Server {
+// New builds an API server. mon may be nil (no resource panel).
+func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *game.Registry, bus *events.Bus, mon *monitor.Monitor, cfg config.Config, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -46,6 +48,7 @@ func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *gam
 		sched:         sched,
 		reg:           reg,
 		bus:           bus,
+		mon:           mon,
 		log:           log,
 		screenshotDir: cfg.ScreenshotDir(),
 		authToken:     cfg.AuthToken,
