@@ -65,6 +65,32 @@
   h2{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin:0 0 10px}
   .empty{color:var(--muted);padding:24px;text-align:center}
   #err{color:var(--err);font-size:12px}
+  tbody tr{cursor:pointer} tbody tr:hover td{background:var(--panel2)}
+  .clickable{cursor:pointer;text-decoration:underline dotted var(--muted) 1px;text-underline-offset:3px}
+  .plans{border-top:1px solid var(--border);margin-top:4px;padding-top:8px;display:grid;gap:6px}
+  .plan{display:flex;align-items:center;gap:8px;justify-content:space-between}
+  .plan .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .plan .cron{color:var(--muted);font-size:11px;font-family:ui-monospace,Consolas,monospace}
+  .switch{position:relative;width:34px;height:18px;flex:none}
+  .switch input{opacity:0;width:0;height:0}
+  .slider{position:absolute;inset:0;background:var(--idle);border-radius:20px;transition:.2s;cursor:pointer}
+  .slider:before{content:"";position:absolute;height:14px;width:14px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s}
+  .switch input:checked + .slider{background:var(--ok)}
+  .switch input:checked + .slider:before{transform:translateX(16px)}
+  .sub{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:2px 0}
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:40px 16px;overflow:auto}
+  .overlay.open{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:12px;width:min(820px,100%);max-height:85vh;display:flex;flex-direction:column}
+  .modal .mh{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
+  .modal .mh h3{margin:0;font-size:15px;flex:1}
+  .modal .mb{padding:16px 18px;overflow:auto}
+  .modal .x{cursor:pointer;color:var(--muted);font-size:20px;line-height:1}
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:6px 14px;margin-bottom:14px}
+  .kv .k{color:var(--muted)}
+  pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:0 0 12px;
+    max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px/1.5 ui-monospace,Consolas,monospace}
+  .danger{border-color:var(--err);color:var(--err)} .danger:hover{background:rgba(240,62,62,.12)}
 </style>
 </head>
 <body>
@@ -86,6 +112,12 @@
     <tbody id="recent"></tbody>
   </table>
 </main>
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="mh"><h3 id="m-title">执行详情</h3><span class="x" onclick="closeModal()">✕</span></div>
+    <div class="mb" id="m-body"></div>
+  </div>
+</div>
 <script>
 const $ = s => document.querySelector(s);
 function fmtTime(t){ if(!t) return "—"; const d=new Date(t); if(isNaN(d)) return "—"; return d.toLocaleString(); }
@@ -113,8 +145,18 @@ function gameCard(g){
       ${g.active?`<span class="pill run">● ${g.active} 进行中</span>`:""}
     </div>`;
   const last = g.last_status
-    ? `<span class="st ${g.last_status}">${g.last_status}</span> <span class="meta">${rel(g.last_run)}</span>`
+    ? `<span class="st ${g.last_status} clickable" onclick="openExec(${g.last_exec_id})">${g.last_status}</span> <span class="meta">${rel(g.last_run)}</span>`
     : `<span class="meta">无记录</span>`;
+  const plans = (g.plan_list||[]).map(p=>`
+      <div class="plan">
+        <span class="pn">${esc(p.name)} <span class="cron">${esc(p.cron)}</span></span>
+        <label class="switch" title="${p.enabled?'已启用':'已停用'} · 下次 ${p.next_run?fmtTime(p.next_run):'—'}">
+          <input type="checkbox" ${p.enabled?'checked':''} onchange="togglePlan(${esc(JSON.stringify(p)).replace(/'/g,'&#39;')},this)">
+          <span class="slider"></span>
+        </label>
+      </div>`).join("");
+  const plansBlock = (g.plan_list||[]).length
+      ? `<div class="plans"><div class="sub">计划</div>${plans}</div>` : "";
   const lastErr = (g.last_status==='error'||g.last_status==='failed')&&g.last_error
     ? `<div class="row"><span class="k">错误</span><span class="val" style="color:var(--err);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(g.last_error)}">${esc(g.last_error)}</span></div>` : "";
   const tasks = (g.task_list||[]).map(t=>`
@@ -133,7 +175,8 @@ function gameCard(g){
       <div class="row"><span class="k">下次计划</span><span class="val">${g.next_run?fmtTime(g.next_run)+' ('+rel(g.next_run)+')':'—'}</span></div>
       <div class="row"><span class="k">任务 / 计划</span><span class="val">${g.tasks} / ${g.plans}</span></div>
       ${counts}
-      <div class="tasks">${tasks}</div>
+      <div class="tasks"><div class="sub">任务</div>${tasks}</div>
+      ${plansBlock}
     </div>
   </div>`;
 }
@@ -147,13 +190,63 @@ async function load(){
       statCard(d.totals.games,"游戏")+statCard(d.totals.tasks,"任务")+statCard(d.totals.plans,"计划")+
       statCard(d.totals.running,"运行中")+statCard(d.totals.failed_24h,"24h 失败",d.totals.failed_24h>0);
     $("#games").innerHTML = (d.games||[]).map(gameCard).join("") || '<div class="empty">还没有配置游戏。用 ctl 或 REST API 添加。</div>';
-    const rows=(d.recent||[]).map(e=>`<tr>
+    const rows=(d.recent||[]).map(e=>`<tr onclick="openExec(${e.id})">
         <td>${e.id}</td><td>${esc(e.game_id)}</td><td>${esc(e.task_name)}</td>
         <td><span class="st ${e.status}">${e.status}</span></td>
         <td>${esc(e.trigger)}</td><td>${fmtTime(e.start_time)}</td>
         <td>${dur(e.duration_sec)}</td><td>${e.exit_code==null?'—':e.exit_code}</td></tr>`).join("");
     $("#recent").innerHTML = rows || '<tr><td colspan="8" class="empty">暂无执行记录</td></tr>';
   }catch(e){ $("#err").textContent="加载失败: "+e; }
+}
+
+async function openExec(id){
+  if(!id) return;
+  const ov=$("#overlay"), body=$("#m-body");
+  $("#m-title").textContent="执行 #"+id;
+  body.innerHTML='<div class="empty">加载中…</div>'; ov.classList.add("open");
+  try{
+    const r=await fetch("/api/executions/"+id); if(!r.ok) throw new Error("HTTP "+r.status);
+    const e=await r.json();
+    const active = e.status==="running"||e.status==="pending";
+    const shot = e.screenshot_path ? `<div class="kv"><span class="k">截图</span><span><code>${esc(e.screenshot_path)}</code></span></div>` : "";
+    body.innerHTML=`
+      <div class="kv">
+        <span class="k">状态</span><span><span class="st ${e.status}">${e.status}</span></span>
+        <span class="k">触发</span><span>${esc(e.trigger)}</span>
+        <span class="k">退出码</span><span>${e.exit_code==null?'—':e.exit_code}</span>
+        <span class="k">开始</span><span>${fmtTime(e.start_time)}</span>
+        <span class="k">结束</span><span>${fmtTime(e.end_time)}</span>
+        <span class="k">重试</span><span>${e.retry_count||0}</span>
+      </div>
+      ${shot}
+      <div class="sub">命令</div><pre>${esc(e.command)||'—'}</pre>
+      ${e.error_msg?`<div class="sub">错误</div><pre style="color:var(--err)">${esc(e.error_msg)}</pre>`:""}
+      <div class="sub">stdout</div><pre>${esc(e.stdout)||'(空)'}</pre>
+      <div class="sub">stderr</div><pre>${esc(e.stderr)||'(空)'}</pre>
+      ${active?`<button class="danger" onclick="cancelExec(${e.id})">取消执行</button>`:""}`;
+  }catch(err){ body.innerHTML='<div class="empty">加载失败: '+esc(String(err))+'</div>'; }
+}
+function closeModal(){ $("#overlay").classList.remove("open"); }
+$("#overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeModal(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeModal(); });
+
+async function cancelExec(id){
+  try{
+    const r=await fetch("/api/executions/"+id+"/cancel",{method:"POST"});
+    if(!r.ok && r.status!==409) throw new Error("HTTP "+r.status);
+    setTimeout(()=>{openExec(id);load();},600);
+  }catch(e){ $("#err").textContent="取消失败: "+e; }
+}
+
+async function togglePlan(p,el){
+  el.disabled=true;
+  try{
+    const body={name:p.name,task_id:p.task_id,cron_expr:p.cron,enabled:el.checked};
+    const r=await fetch("/api/plans/"+p.id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    $("#err").textContent=""; setTimeout(load,400);
+  }catch(e){ el.checked=!el.checked; $("#err").textContent="计划更新失败: "+e; }
+  finally{ el.disabled=false; }
 }
 
 let timer=null;

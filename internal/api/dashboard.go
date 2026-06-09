@@ -31,6 +31,15 @@ type taskBrief struct {
 	Type string `json:"type"`
 }
 
+type planBrief struct {
+	ID      int64      `json:"id"`
+	Name    string     `json:"name"`
+	TaskID  int64      `json:"task_id"`
+	Cron    string     `json:"cron"`
+	Enabled bool       `json:"enabled"`
+	NextRun *time.Time `json:"next_run,omitempty"`
+}
+
 type gameSummary struct {
 	ID         string      `json:"id"`
 	Name       string      `json:"name"`
@@ -45,8 +54,10 @@ type gameSummary struct {
 	LastStatus string      `json:"last_status,omitempty"`
 	LastRun    *time.Time  `json:"last_run,omitempty"`
 	LastError  string      `json:"last_error,omitempty"`
+	LastExecID int64       `json:"last_exec_id,omitempty"`
 	NextRun    *time.Time  `json:"next_run,omitempty"`
 	TaskList   []taskBrief `json:"task_list"`
+	PlanList   []planBrief `json:"plan_list"`
 }
 
 // recentWindow bounds how many executions feed the board's aggregates.
@@ -81,7 +92,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	d := dashboard{GeneratedAt: time.Now()}
 	for i := range games {
 		g := games[i]
-		gs := &gameSummary{ID: g.ID, Name: g.Name, Adapter: g.Adapter, Enabled: g.Enabled, TaskList: []taskBrief{}}
+		gs := &gameSummary{ID: g.ID, Name: g.Name, Adapter: g.Adapter, Enabled: g.Enabled, TaskList: []taskBrief{}, PlanList: []planBrief{}}
 		byGame[g.ID] = gs
 	}
 
@@ -98,6 +109,9 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		gid := taskGame[p.TaskID]
 		if gs := byGame[gid]; gs != nil {
 			gs.Plans++
+			gs.PlanList = append(gs.PlanList, planBrief{
+				ID: p.ID, Name: p.Name, TaskID: p.TaskID, Cron: p.CronExpr, Enabled: p.Enabled, NextRun: p.NextRunAt,
+			})
 			if p.Enabled && p.NextRunAt != nil {
 				if gs.NextRun == nil || p.NextRunAt.Before(*gs.NextRun) {
 					gs.NextRun = p.NextRunAt
@@ -141,9 +155,10 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 			gs.Failed++
 		}
 		// first exec encountered per game is the most recent (id desc order)
-		if gs.LastStatus == "" {
+		if gs.LastExecID == 0 {
 			gs.LastStatus = e.Status
 			gs.LastRun = e.StartTime
+			gs.LastExecID = e.ID
 			if e.Status == store.StatusFailed {
 				gs.LastError = e.ErrorMsg
 			}

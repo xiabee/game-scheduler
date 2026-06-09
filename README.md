@@ -126,8 +126,14 @@ It shows:
   task/plan counts, success/fail pills, and a disabled tag if the game is off.
 - **Per-task Run buttons** — click to trigger a manual run (`POST
   /api/tasks/{id}/run`); the board refreshes to show it queue/run.
+- **Per-plan enable/disable toggles** — flip a schedule on/off inline (`PUT
+  /api/plans/{id}`); the scheduler reloads and the next-run time updates.
 - **Recent executions table** — newest 25, with status badge, trigger, start
   time, duration and exit code.
+- **Execution detail modal** — click any recent row (or a card's last-run
+  badge) to see the full command, error, **stdout/stderr**, exit code, timings
+  and screenshot path. If the run is still active, a **Cancel** button stops it
+  (`POST /api/executions/{id}/cancel`, kills the whole process tree).
 
 The board is driven entirely by the REST API, so anything it shows is also
 available programmatically via `GET /api/dashboard`.
