@@ -20,6 +20,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/game/r1999"
 	"github.com/xiabee/game-scheduler/internal/game/wuwa"
 	"github.com/xiabee/game-scheduler/internal/monitor"
+	"github.com/xiabee/game-scheduler/internal/notify"
 	"github.com/xiabee/game-scheduler/internal/scheduler"
 	"github.com/xiabee/game-scheduler/internal/store"
 	"github.com/xiabee/game-scheduler/internal/task"
@@ -62,8 +63,10 @@ func main() {
 	}
 
 	bus := events.New()
+	notifier := notify.New(cfg.NotifyCmd, log)
 	reg := game.NewRegistry(genshin.New(), hsr.New(), wuwa.New(), r1999.New())
 	svc := task.NewService(st, reg, cfg, bus, log)
+	svc.SetNotify(notifier.Send)
 
 	// Resource monitor: live CPU/RAM sampling + optional overload gating.
 	monCtx, monCancel := context.WithCancel(context.Background())
@@ -75,6 +78,7 @@ func main() {
 		Interval:     time.Duration(cfg.MonitorIntervalSec) * time.Second,
 		Policy:       cfg.OverloadPolicy,
 	}, nil, bus, log)
+	mon.SetNotify(notifier.Send)
 	mon.Start(monCtx)
 
 	sched := scheduler.New(st, svc, log)

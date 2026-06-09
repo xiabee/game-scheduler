@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -127,6 +128,27 @@ func TestRunFailureWithRetryAndScreenshot(t *testing.T) {
 	}
 	if got.ErrorMsg == "" {
 		t.Error("expected error message")
+	}
+}
+
+func TestNotifyOnFailure(t *testing.T) {
+	svc, st := newSvc(t, 1)
+	var mu sync.Mutex
+	var events []string
+	svc.SetNotify(func(event, title, message string) {
+		mu.Lock()
+		events = append(events, event)
+		mu.Unlock()
+	})
+	tk := mkTask(t, st, "fail", 0)
+	e, _, _ := svc.Enqueue(tk.ID, store.TriggerManual, nil, false)
+	waitStatus(t, st, e.ID, store.StatusFailed, 5*time.Second)
+	// Give the alert (fired right before the final log) a moment.
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 1 || events[0] != "task_failed" {
+		t.Fatalf("expected one task_failed alert, got %v", events)
 	}
 }
 

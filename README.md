@@ -87,7 +87,7 @@ go build -o bin/ctl.exe    ./cmd/ctl
 ```
 
 配置优先级:默认值 → `config.json`(见 `config.example.json`) → 环境变量
-(`GS_ADDR`、`GS_DATA_DIR`、`GS_DB_PATH`、`GS_SCREENSHOT_CMD`、`GS_MAX_CONCURRENT`、`GS_AUTH_TOKEN`、`GS_MONITOR_ENABLED`、`GS_CPU_THRESHOLD`、`GS_MEM_THRESHOLD`、`GS_MONITOR_INTERVAL_SEC`、`GS_OVERLOAD_POLICY`) → `-addr` 参数。
+(`GS_ADDR`、`GS_DATA_DIR`、`GS_DB_PATH`、`GS_SCREENSHOT_CMD`、`GS_MAX_CONCURRENT`、`GS_AUTH_TOKEN`、`GS_MONITOR_ENABLED`、`GS_CPU_THRESHOLD`、`GS_MEM_THRESHOLD`、`GS_MONITOR_INTERVAL_SEC`、`GS_OVERLOAD_POLICY`、`GS_NOTIFY_CMD`) → `-addr` 参数。
 
 ### 并发(重要）
 
@@ -147,6 +147,24 @@ go build -o bin/ctl.exe    ./cmd/ctl
   - `pause`:在此基础上,**过载期间跳过新的定时任务**(调度器记日志并在看板标注「已暂停定时任务」),手动触发不受影响;资源回落后自动恢复。
 - 纯只读观测 + 调度闸门,**不碰游戏或工具**;只看 CPU/内存(`gopsutil`),不读进程内存。
 - 相关配置:`monitor_enabled`、`cpu_threshold`、`mem_threshold`、`monitor_interval_sec`、`overload_policy`(对应环境变量 `GS_MONITOR_ENABLED`、`GS_CPU_THRESHOLD`、`GS_MEM_THRESHOLD`、`GS_MONITOR_INTERVAL_SEC`、`GS_OVERLOAD_POLICY`)。实时数据也在 `GET /api/dashboard` 的 `resource` 字段中。
+
+---
+
+## 🔔 通知提醒(notify_cmd)
+
+看板上的红色横幅只有盯着屏幕才看得到。配置 `notify_cmd`(或 `GS_NOTIFY_CMD`)后,在**任务失败**和**资源过载**时会执行一条你指定的命令,把提醒推送出去(Windows 通知、企业微信/钉钉机器人、Bark、ServerChan、webhook 等都行)。
+
+模板字段(均已**净化 shell 特殊字符**,防止动态文本破坏命令或注入):`{{.Event}}`(如 `task_failed` / `overload`)、`{{.Title}}`、`{{.Message}}`。
+
+示例 —— Windows 弹原生通知(需 PowerShell 模块 `BurntToast`):
+```json
+{ "notify_cmd": "powershell -NoProfile -Command \"New-BurntToastNotification -Text '{{.Title}}','{{.Message}}'\"" }
+```
+示例 —— 推送到 webhook / Bark:
+```json
+{ "notify_cmd": "curl -s -X POST https://example.com/notify -d \"event={{.Event}}&title={{.Title}}&msg={{.Message}}\"" }
+```
+不设置时不发任何通知。命令尽力而为执行,失败只记日志,**不会影响任务本身**。
 
 ---
 

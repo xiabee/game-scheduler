@@ -176,6 +176,15 @@ It shows:
 The board is driven entirely by the REST API, so anything it shows is also
 available programmatically.
 
+### Notifications
+
+A dashboard banner only helps if someone's watching. Set `notify_cmd` (or
+`GS_NOTIFY_CMD`) to a templated shell command run on **task failure** and
+**resource overload**, so alerts reach you anywhere (Windows toast, webhook,
+Bark/ServerChan, etc.). Template fields `{{.Event}}` / `{{.Title}}` /
+`{{.Message}}` are sanitized of shell metacharacters. Best-effort; failures are
+only logged. Example (webhook): `curl -s -X POST https://example.com/notify -d "title={{.Title}}&msg={{.Message}}"`.
+
 ## CLI (`ctl`)
 
 > Global flags (`-server`, `-token`, `-data`, `-game`, …) must come **before**

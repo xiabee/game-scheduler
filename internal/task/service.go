@@ -25,8 +25,13 @@ import (
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
 	"github.com/xiabee/game-scheduler/internal/runner"
+	"github.com/xiabee/game-scheduler/internal/shellcmd"
 	"github.com/xiabee/game-scheduler/internal/store"
 )
+
+// NotifyFunc is called to alert an operator about an event. event is a stable
+// key (e.g. "task_failed"), title/message are human-readable.
+type NotifyFunc func(event, title, message string)
 
 // Service runs tasks and records executions.
 type Service struct {
@@ -38,9 +43,20 @@ type Service struct {
 
 	sem chan struct{} // bounded run slots; cap == cfg.MaxConcurrent
 
+	notify NotifyFunc // optional operator alert hook
+
 	mu      sync.Mutex
 	running map[int64]context.CancelFunc // execID -> cancel
 	active  map[int64]int                // taskID -> count of pending/running execs
+}
+
+// SetNotify installs an operator-alert hook, called when a task fails.
+func (s *Service) SetNotify(fn NotifyFunc) { s.notify = fn }
+
+func (s *Service) alert(event, title, message string) {
+	if s.notify != nil {
+		s.notify(event, title, message)
+	}
 }
 
 // NewService constructs a task service. bus may be nil (no live notifications).
@@ -314,6 +330,9 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 		return err
 	}
 	s.bus.Notify()
+	if exec.Status == store.StatusFailed {
+		s.alert("task_failed", "任务失败:"+t.Name, exec.ErrorMsg)
+	}
 	s.log.Info("task finished", "exec_id", execID, "status", exec.Status, "exit", code, "retries", exec.RetryCount)
 	return nil
 }
@@ -329,6 +348,7 @@ func (s *Service) finishWithError(exec store.Execution, cause error) error {
 	exec.ErrorMsg = cause.Error()
 	exec.ScreenshotPath = s.captureScreenshot(exec.ID)
 	s.log.Error("task setup failed", "exec_id", exec.ID, "err", cause)
+	s.alert("task_failed", fmt.Sprintf("任务启动失败 #%d", exec.TaskID), cause.Error())
 	return s.store.UpdateExecution(exec)
 }
 
@@ -347,9 +367,9 @@ func (s *Service) captureScreenshot(execID int64) string {
 		s.log.Warn("screenshot template", "err", err)
 		return path
 	}
-	// The configured command is a full shell command line; shellCommand runs it
-	// via the platform shell with correct quoting (see shell_windows.go).
-	cmd := shellCommand(rendered)
+	// The configured command is a full shell command line; shellcmd.Command runs
+	// it via the platform shell with correct quoting.
+	cmd := shellcmd.Command(rendered)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

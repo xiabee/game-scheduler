@@ -48,6 +48,13 @@ type Config struct {
 	// OverloadPolicy is "alert" (default, surface only) or "pause" (also skip
 	// new scheduled runs while overloaded).
 	OverloadPolicy string `json:"overload_policy"`
+
+	// NotifyCmd, if set, is a templated shell command run to alert an operator
+	// on task failure and resource overload (so alerts reach them even when not
+	// watching the dashboard). Template fields: {{.Event}} {{.Title}}
+	// {{.Message}} (each sanitized of shell metacharacters). Example (Windows
+	// toast via BurntToast, or just a log): see README. Empty disables it.
+	NotifyCmd string `json:"notify_cmd"`
 }
 
 // Default returns a Config with sensible defaults. DBPath is intentionally
@@ -122,6 +129,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("GS_OVERLOAD_POLICY"); v != "" {
 		cfg.OverloadPolicy = v
+	}
+	if v := os.Getenv("GS_NOTIFY_CMD"); v != "" {
+		cfg.NotifyCmd = v
 	}
 	if cfg.MaxConcurrent < 1 {
 		cfg.MaxConcurrent = 1

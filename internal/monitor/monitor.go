@@ -71,10 +71,15 @@ type Monitor struct {
 	bus     *events.Bus
 	log     *slog.Logger
 
+	notify func(event, title, message string) // optional operator alert hook
+
 	mu     sync.RWMutex
 	snap   Snapshot
 	breach int
 }
+
+// SetNotify installs an operator-alert hook, called when overload trips.
+func (m *Monitor) SetNotify(fn func(event, title, message string)) { m.notify = fn }
 
 // New builds a monitor. sampler defaults to the gopsutil-backed sampler; bus
 // and log may be nil.
@@ -174,6 +179,9 @@ func (m *Monitor) update(r Reading) {
 
 	if now && !was {
 		m.log.Warn("resource overload", "reason", reason)
+		if m.notify != nil {
+			m.notify("overload", "资源过载", reason)
+		}
 	} else if !now && was {
 		m.log.Info("resource overload cleared")
 	}

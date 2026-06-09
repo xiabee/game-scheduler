@@ -9,5 +9,6 @@
   "cpu_threshold": 90,
   "mem_threshold": 90,
   "monitor_interval_sec": 3,
-  "overload_policy": "alert"
+  "overload_policy": "alert",
+  "notify_cmd": ""
 }
