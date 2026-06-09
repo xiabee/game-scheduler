@@ -107,6 +107,31 @@ game — it just captures the screen so an operator can see what happened. Examp
 If unset, the path is still recorded (so the layout is predictable) but no image
 is written.
 
+## Dashboard (控制看板)
+
+Open the server's address in a browser — **http://127.0.0.1:8080/** — for a
+Grafana-style control board. It is a single embedded page (no build step) that
+polls `GET /api/dashboard` and auto-refreshes every 5s.
+
+![dashboard](docs/dashboard.png)
+
+It shows:
+
+- **Top stats:** total games / tasks / plans, executions running now, and
+  failures in the last 24h (highlighted red when non-zero).
+- **One card per game** with a colored health dot — `ok` (green, last run
+  succeeded), `error` (red, last run failed — the error message is shown),
+  `running` (pulsing blue), `warn` (cancelled), `idle` (gray, no runs yet).
+  Each card lists the last run + relative time, the next scheduled run,
+  task/plan counts, success/fail pills, and a disabled tag if the game is off.
+- **Per-task Run buttons** — click to trigger a manual run (`POST
+  /api/tasks/{id}/run`); the board refreshes to show it queue/run.
+- **Recent executions table** — newest 25, with status badge, trigger, start
+  time, duration and exit code.
+
+The board is driven entirely by the REST API, so anything it shows is also
+available programmatically via `GET /api/dashboard`.
+
 ## CLI (`ctl`)
 
 > Global flags (`-server`, `-data`, `-game`, …) must come **before** the

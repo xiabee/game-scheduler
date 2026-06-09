@@ -4,6 +4,7 @@
 
 # runtime data (db, logs, screenshots)
 /data/
+/data_test/
 config.json
 
 # editor/OS
@@ -11,3 +12,7 @@ config.json
 .vscode/
 *.swp
 .DS_Store
+
+# local launch/preview config & scratch logs
+.claude/
+stest.*

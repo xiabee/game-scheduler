@@ -3,6 +3,7 @@
 package api
 
 import (
+	"embed"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -14,6 +15,9 @@ import (
 	"github.com/xiabee/game-scheduler/internal/store"
 	"github.com/xiabee/game-scheduler/internal/task"
 )
+
+//go:embed web/index.html
+var webFS embed.FS
 
 // Server holds dependencies for the HTTP handlers.
 type Server struct {
@@ -39,6 +43,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "adapters": s.reg.Keys()})
 	})
+
+	// Control dashboard (single embedded page) + its aggregate feed.
+	mux.HandleFunc("GET /{$}", s.index)
+	mux.HandleFunc("GET /api/dashboard", s.dashboard)
 
 	// Games
 	mux.HandleFunc("GET /api/games", s.listGames)
@@ -307,6 +315,16 @@ func (s *Server) cancelExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "cancelling", "execution_id": id})
+}
+
+func (s *Server) index(w http.ResponseWriter, r *http.Request) {
+	b, err := webFS.ReadFile("web/index.html")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(b)
 }
 
 // ---------- helpers ----------
