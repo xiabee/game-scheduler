@@ -30,6 +30,11 @@ type Config struct {
 	// default) value is 1 — fully serialized. Raise it only if your executions
 	// genuinely target independent machines/VMs.
 	MaxConcurrent int `json:"max_concurrent"`
+	// AuthToken, if non-empty, protects the API: every /api/* and /screenshots/*
+	// request must present it via `Authorization: Bearer <token>` or a `?token=`
+	// query parameter. The dashboard page and /healthz stay open. Empty means no
+	// auth (safe only when bound to localhost). Set GS_AUTH_TOKEN to enable.
+	AuthToken string `json:"auth_token"`
 }
 
 // Default returns a Config with sensible defaults. DBPath is intentionally
@@ -75,6 +80,9 @@ func Load(path string) (Config, error) {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.MaxConcurrent = n
 		}
+	}
+	if v := os.Getenv("GS_AUTH_TOKEN"); v != "" {
+		cfg.AuthToken = v
 	}
 	if cfg.MaxConcurrent < 1 {
 		cfg.MaxConcurrent = 1

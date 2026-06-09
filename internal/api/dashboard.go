@@ -64,25 +64,32 @@ type gameSummary struct {
 const recentWindow = 500
 
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
-	games, err := s.store.ListGames()
+	d, err := s.buildDashboard()
 	if err != nil {
 		writeStoreErr(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
+// buildDashboard computes the aggregated view. Shared by the JSON endpoint and
+// the SSE stream.
+func (s *Server) buildDashboard() (dashboard, error) {
+	games, err := s.store.ListGames()
+	if err != nil {
+		return dashboard{}, err
 	}
 	tasks, err := s.store.ListTasks("")
 	if err != nil {
-		writeStoreErr(w, err)
-		return
+		return dashboard{}, err
 	}
 	plans, err := s.store.ListPlans(false)
 	if err != nil {
-		writeStoreErr(w, err)
-		return
+		return dashboard{}, err
 	}
 	execs, err := s.store.ListExecutions(store.ExecutionFilter{Limit: recentWindow})
 	if err != nil {
-		writeStoreErr(w, err)
-		return
+		return dashboard{}, err
 	}
 
 	taskGame := map[int64]string{}   // task id -> game id
@@ -175,7 +182,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		d.Games = append(d.Games, *gs)
 	}
 
-	writeJSON(w, http.StatusOK, d)
+	return d, nil
 }
 
 type recentExec struct {

@@ -3,13 +3,17 @@
 package api
 
 import (
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/xiabee/game-scheduler/internal/config"
+	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
 	"github.com/xiabee/game-scheduler/internal/scheduler"
 	"github.com/xiabee/game-scheduler/internal/store"
@@ -21,19 +25,31 @@ var webFS embed.FS
 
 // Server holds dependencies for the HTTP handlers.
 type Server struct {
-	store *store.Store
-	svc   *task.Service
-	sched *scheduler.Scheduler
-	reg   *game.Registry
-	log   *slog.Logger
+	store         *store.Store
+	svc           *task.Service
+	sched         *scheduler.Scheduler
+	reg           *game.Registry
+	bus           *events.Bus
+	log           *slog.Logger
+	screenshotDir string
+	authToken     string
 }
 
 // New builds an API server.
-func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *game.Registry, log *slog.Logger) *Server {
+func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *game.Registry, bus *events.Bus, cfg config.Config, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{store: s, svc: svc, sched: sched, reg: reg, log: log}
+	return &Server{
+		store:         s,
+		svc:           svc,
+		sched:         sched,
+		reg:           reg,
+		bus:           bus,
+		log:           log,
+		screenshotDir: cfg.ScreenshotDir(),
+		authToken:     cfg.AuthToken,
+	}
 }
 
 // Handler returns the configured HTTP handler.
@@ -44,9 +60,12 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "adapters": s.reg.Keys()})
 	})
 
-	// Control dashboard (single embedded page) + its aggregate feed.
+	// Control dashboard (single embedded page) + its aggregate feed + live stream.
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /api/dashboard", s.dashboard)
+	mux.HandleFunc("GET /api/stream", s.stream)
+	mux.HandleFunc("GET /api/meta", s.meta)
+	mux.HandleFunc("GET /screenshots/{name}", s.screenshot)
 
 	// Games
 	mux.HandleFunc("GET /api/games", s.listGames)
@@ -81,7 +100,34 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/executions/{id}", s.getExecution)
 	mux.HandleFunc("POST /api/executions/{id}/cancel", s.cancelExecution)
 
-	return logging(s.log, mux)
+	return s.authMW(logging(s.log, mux))
+}
+
+// authMW protects /api/* and /screenshots/* with the configured token (if any).
+// The dashboard page (/) and /healthz stay open so the page can load and prompt
+// for a token. The token may arrive as `Authorization: Bearer <t>` or `?token=`
+// (the query form lets the browser's EventSource, which cannot set headers,
+// authenticate the live stream).
+func (s *Server) authMW(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.authToken == "" || !protected(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		tok := r.URL.Query().Get("token")
+		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+			tok = strings.TrimPrefix(h, "Bearer ")
+		}
+		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.authToken)) != 1 {
+			writeErr(w, http.StatusUnauthorized, errors.New("missing or invalid token"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func protected(path string) bool {
+	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/screenshots/")
 }
 
 // ---------- games ----------
@@ -101,7 +147,7 @@ func (s *Server) createGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.store.CreateGame(g)
-	respondCreated(w, out, err)
+	respondCreated(w, out, s.changed(err))
 }
 
 func (s *Server) getGame(w http.ResponseWriter, r *http.Request) {
@@ -116,12 +162,12 @@ func (s *Server) updateGame(w http.ResponseWriter, r *http.Request) {
 	}
 	g.ID = r.PathValue("id")
 	out, err := s.store.UpdateGame(g)
-	respond(w, out, err)
+	respond(w, out, s.changed(err))
 }
 
 func (s *Server) deleteGame(w http.ResponseWriter, r *http.Request) {
 	err := s.store.DeleteGame(r.PathValue("id"))
-	respondNoContent(w, err)
+	respondNoContent(w, s.changed(err))
 }
 
 // ---------- tasks ----------
@@ -137,7 +183,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.store.CreateTask(t)
-	respondCreated(w, out, err)
+	respondCreated(w, out, s.changed(err))
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +206,7 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	t.ID = id
 	out, err := s.store.UpdateTask(t)
-	respond(w, out, err)
+	respond(w, out, s.changed(err))
 }
 
 func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +214,7 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	respondNoContent(w, s.store.DeleteTask(id))
+	respondNoContent(w, s.changed(s.store.DeleteTask(id)))
 }
 
 func (s *Server) runTask(w http.ResponseWriter, r *http.Request) {
@@ -204,7 +250,7 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.store.CreateRoute(rt)
-	respondCreated(w, out, err)
+	respondCreated(w, out, s.changed(err))
 }
 
 func (s *Server) deleteRoute(w http.ResponseWriter, r *http.Request) {
@@ -212,7 +258,7 @@ func (s *Server) deleteRoute(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	respondNoContent(w, s.store.DeleteRoute(id))
+	respondNoContent(w, s.changed(s.store.DeleteRoute(id)))
 }
 
 // ---------- plans ----------
@@ -234,6 +280,7 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 	out, err := s.store.CreatePlan(p)
 	if err == nil {
 		_ = s.sched.Reload()
+		s.bus.Notify()
 	}
 	respondCreated(w, out, err)
 }
@@ -264,6 +311,7 @@ func (s *Server) updatePlan(w http.ResponseWriter, r *http.Request) {
 	out, err := s.store.UpdatePlan(p)
 	if err == nil {
 		_ = s.sched.Reload()
+		s.bus.Notify()
 	}
 	respond(w, out, err)
 }
@@ -276,6 +324,7 @@ func (s *Server) deletePlan(w http.ResponseWriter, r *http.Request) {
 	err := s.store.DeletePlan(id)
 	if err == nil {
 		_ = s.sched.Reload()
+		s.bus.Notify()
 	}
 	respondNoContent(w, err)
 }
@@ -328,6 +377,15 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- helpers ----------
+
+// changed notifies live subscribers when a mutation succeeded, then passes the
+// error through unchanged for the normal response path.
+func (s *Server) changed(err error) error {
+	if err == nil {
+		s.bus.Notify()
+	}
+	return err
+}
 
 func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -409,4 +467,12 @@ type statusWriter struct {
 func (s *statusWriter) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// Flush forwards to the underlying writer so Server-Sent Events (which require
+// http.Flusher) keep working through this middleware.
+func (s *statusWriter) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }

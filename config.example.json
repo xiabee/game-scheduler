@@ -3,5 +3,6 @@
   "data_dir": "data",
   "db_path": "data/scheduler.db",
   "screenshot_cmd": "",
-  "max_concurrent": 1
+  "max_concurrent": 1,
+  "auth_token": ""
 }

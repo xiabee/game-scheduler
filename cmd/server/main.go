@@ -13,6 +13,7 @@ import (
 
 	"github.com/xiabee/game-scheduler/internal/api"
 	"github.com/xiabee/game-scheduler/internal/config"
+	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
 	"github.com/xiabee/game-scheduler/internal/game/genshin"
 	"github.com/xiabee/game-scheduler/internal/game/hsr"
@@ -59,8 +60,9 @@ func main() {
 		log.Info("recovered orphaned executions", "count", n)
 	}
 
+	bus := events.New()
 	reg := game.NewRegistry(genshin.New(), hsr.New(), wuwa.New(), r1999.New())
-	svc := task.NewService(st, reg, cfg, log)
+	svc := task.NewService(st, reg, cfg, bus, log)
 	sched := scheduler.New(st, svc, log)
 	if err := sched.Start(); err != nil {
 		log.Error("start scheduler", "err", err)
@@ -70,7 +72,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           api.New(st, svc, sched, reg, log).Handler(),
+		Handler:           api.New(st, svc, sched, reg, bus, cfg, log).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

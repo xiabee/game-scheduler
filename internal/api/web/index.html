@@ -13,7 +13,7 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);
     font:14px/1.45 -apple-system,Segoe UI,Roboto,"Microsoft YaHei",sans-serif}
-  header{display:flex;align-items:center;gap:16px;padding:14px 22px;
+  header{display:flex;align-items:center;gap:12px;padding:14px 22px;flex-wrap:wrap;
     background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10}
   header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.3px}
   header .spacer{flex:1}
@@ -22,7 +22,10 @@
     border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px}
   button:hover{border-color:var(--accent)}
   button:disabled{opacity:.5;cursor:default}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
   label.toggle{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;user-select:none}
+  .live-dot{width:8px;height:8px;border-radius:50%;background:var(--idle);display:inline-block}
+  .live-dot.on{background:var(--ok);box-shadow:0 0 6px var(--ok)}
   main{padding:18px 22px;max-width:1400px;margin:0 auto}
   .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
   .stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
@@ -37,21 +40,32 @@
   .dot.warn{background:var(--warn)} .dot.idle{background:var(--idle)}
   .dot.running{background:var(--run);box-shadow:0 0 0 0 rgba(28,126,214,.7);animation:pulse 1.4s infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(28,126,214,.6)}70%{box-shadow:0 0 0 7px rgba(28,126,214,0)}100%{box-shadow:0 0 0 0 rgba(28,126,214,0)}}
-  .card .name{font-weight:600;font-size:15px}
+  .card .name{font-weight:600;font-size:15px;flex:1}
   .badge{font-size:11px;padding:2px 7px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
   .badge.adapter{background:var(--panel2)}
+  .icon-x{cursor:pointer;color:var(--muted);font-size:14px;padding:0 4px}
+  .icon-x:hover{color:var(--err)}
   .card .body{padding:12px 14px;display:grid;gap:8px}
   .row{display:flex;justify-content:space-between;gap:10px}
   .row .k{color:var(--muted)} .row .val{text-align:right}
   .counts{display:flex;gap:8px;flex-wrap:wrap}
   .pill{font-size:12px;padding:2px 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--border)}
   .pill.ok{color:var(--ok)} .pill.err{color:var(--err)} .pill.run{color:var(--run)}
-  .tasks{border-top:1px solid var(--border);margin-top:4px;padding-top:8px;display:grid;gap:6px}
-  .task{display:flex;align-items:center;gap:8px;justify-content:space-between}
-  .task .tn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tasks,.plans{border-top:1px solid var(--border);margin-top:4px;padding-top:8px;display:grid;gap:6px}
+  .task,.plan{display:flex;align-items:center;gap:8px;justify-content:space-between}
+  .task .tn,.plan .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
   .task .tt{color:var(--muted);font-size:11px}
   .task button{padding:3px 10px;font-size:12px}
+  .plan .cron{color:var(--muted);font-size:11px;font-family:ui-monospace,Consolas,monospace}
   .disabled-tag{color:var(--warn);font-size:11px}
+  .sub{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:2px 0}
+  .sub .add{cursor:pointer;color:var(--accent);text-transform:none;letter-spacing:0}
+  .switch{position:relative;width:34px;height:18px;flex:none}
+  .switch input{opacity:0;width:0;height:0}
+  .slider{position:absolute;inset:0;background:var(--idle);border-radius:20px;transition:.2s;cursor:pointer}
+  .slider:before{content:"";position:absolute;height:14px;width:14px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s}
+  .switch input:checked + .slider{background:var(--ok)}
+  .switch input:checked + .slider:before{transform:translateX(16px)}
   table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
   th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px}
   th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.5px}
@@ -67,17 +81,6 @@
   #err{color:var(--err);font-size:12px}
   tbody tr{cursor:pointer} tbody tr:hover td{background:var(--panel2)}
   .clickable{cursor:pointer;text-decoration:underline dotted var(--muted) 1px;text-underline-offset:3px}
-  .plans{border-top:1px solid var(--border);margin-top:4px;padding-top:8px;display:grid;gap:6px}
-  .plan{display:flex;align-items:center;gap:8px;justify-content:space-between}
-  .plan .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .plan .cron{color:var(--muted);font-size:11px;font-family:ui-monospace,Consolas,monospace}
-  .switch{position:relative;width:34px;height:18px;flex:none}
-  .switch input{opacity:0;width:0;height:0}
-  .slider{position:absolute;inset:0;background:var(--idle);border-radius:20px;transition:.2s;cursor:pointer}
-  .slider:before{content:"";position:absolute;height:14px;width:14px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s}
-  .switch input:checked + .slider{background:var(--ok)}
-  .switch input:checked + .slider:before{transform:translateX(16px)}
-  .sub{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:2px 0}
   /* modal */
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:40px 16px;overflow:auto}
   .overlay.open{display:flex}
@@ -90,7 +93,17 @@
   .kv .k{color:var(--muted)}
   pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:0 0 12px;
     max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px/1.5 ui-monospace,Consolas,monospace}
+  .shot{max-width:100%;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;display:block}
   .danger{border-color:var(--err);color:var(--err)} .danger:hover{background:rgba(240,62,62,.12)}
+  /* forms */
+  .form{display:grid;gap:12px}
+  .form label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+  .form input,.form select,.form textarea{background:var(--bg);border:1px solid var(--border);border-radius:6px;
+    color:var(--text);padding:8px 10px;font:13px/1.4 inherit;width:100%}
+  .form textarea{font-family:ui-monospace,Consolas,monospace;min-height:64px;resize:vertical}
+  .form .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .form .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:4px}
+  .hint{color:var(--muted);font-size:11px}
 </style>
 </head>
 <body>
@@ -100,8 +113,11 @@
   <span class="spacer"></span>
   <span id="err"></span>
   <span class="meta" id="updated">—</span>
-  <label class="toggle"><input type="checkbox" id="auto" checked> 自动刷新 5s</label>
+  <button onclick="openGameForm()">+ 游戏</button>
+  <button onclick="openTaskForm()">+ 任务</button>
+  <label class="toggle"><span class="live-dot" id="livedot"></span><input type="checkbox" id="live" checked> 实时</label>
   <button id="refresh">刷新</button>
+  <button onclick="setToken()" title="设置 API 令牌">🔑</button>
 </header>
 <main>
   <div class="stats" id="stats"></div>
@@ -114,102 +130,176 @@
 </main>
 <div class="overlay" id="overlay">
   <div class="modal">
-    <div class="mh"><h3 id="m-title">执行详情</h3><span class="x" onclick="closeModal()">✕</span></div>
+    <div class="mh"><h3 id="m-title">详情</h3><span class="x" onclick="closeModal()">✕</span></div>
     <div class="mb" id="m-body"></div>
   </div>
 </div>
 <script>
 const $ = s => document.querySelector(s);
+let tok = localStorage.getItem('gs_token')||'';
+let meta = null;        // {adapters:[{key,task_types}]}
+let lastData = null;    // most recent dashboard payload
+
 function fmtTime(t){ if(!t) return "—"; const d=new Date(t); if(isNaN(d)) return "—"; return d.toLocaleString(); }
 function rel(t){ if(!t) return ""; const s=(Date.now()-new Date(t))/1000;
   if(s<0) return "in "+Math.round(-s)+"s"; if(s<60) return Math.round(s)+"s ago";
   if(s<3600) return Math.round(s/60)+"m ago"; if(s<86400) return Math.round(s/3600)+"h ago"; return Math.round(s/86400)+"d ago"; }
 function dur(s){ if(!s) return "—"; if(s<60) return s.toFixed(1)+"s"; return Math.floor(s/60)+"m"+Math.round(s%60)+"s"; }
-function esc(s){ return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function qs(){ return tok?('?token='+encodeURIComponent(tok)):''; }
 
-async function runTask(id,btn){
-  btn.disabled=true; btn.textContent="…";
-  try{
-    const r=await fetch("/api/tasks/"+id+"/run",{method:"POST"});
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    btn.textContent="已触发"; setTimeout(load,500);
-  }catch(e){ btn.textContent="失败"; $("#err").textContent=String(e); btn.disabled=false; }
+// ---- auth-aware fetch ----
+async function api(path, opts){
+  opts = opts||{};
+  opts.headers = Object.assign({}, opts.headers);
+  if(tok) opts.headers['Authorization'] = 'Bearer '+tok;
+  const r = await fetch(path, opts);
+  if(r.status===401){ $("#err").textContent="需要 API 令牌"; promptToken(); throw new Error("unauthorized"); }
+  return r;
 }
+function promptToken(){
+  const t = prompt("此服务器需要 API 令牌（GS_AUTH_TOKEN）。请输入：", tok||"");
+  if(t!=null){ tok=t.trim(); localStorage.setItem('gs_token',tok); $("#err").textContent=""; reconnect(); load(); }
+}
+function setToken(){ promptToken(); }
 
+// ---- live stream (SSE) ----
+let es=null;
+function connect(){
+  if(es){ es.close(); es=null; }
+  es = new EventSource('/api/stream'+qs());
+  es.onopen = ()=>{ $("#livedot").classList.add("on"); $("#err").textContent=""; };
+  es.onmessage = e=>{ try{ render(JSON.parse(e.data)); }catch(_){ } };
+  es.onerror = ()=>{ $("#livedot").classList.remove("on"); /* EventSource auto-retries */ };
+}
+function disconnect(){ if(es){es.close();es=null;} $("#livedot").classList.remove("on"); }
+function reconnect(){ if($("#live").checked) connect(); }
+
+// ---- render ----
 function statCard(v,l,alert){ return `<div class="stat${alert?' alert':''}"><div class="v">${v}</div><div class="l">${l}</div></div>`; }
 
 function gameCard(g){
-  const counts = `<div class="counts">
-      <span class="pill ok">✓ ${g.success}</span>
-      <span class="pill err">✗ ${g.failed}</span>
-      ${g.active?`<span class="pill run">● ${g.active} 进行中</span>`:""}
-    </div>`;
   const last = g.last_status
     ? `<span class="st ${g.last_status} clickable" onclick="openExec(${g.last_exec_id})">${g.last_status}</span> <span class="meta">${rel(g.last_run)}</span>`
     : `<span class="meta">无记录</span>`;
-  const plans = (g.plan_list||[]).map(p=>`
-      <div class="plan">
-        <span class="pn">${esc(p.name)} <span class="cron">${esc(p.cron)}</span></span>
-        <label class="switch" title="${p.enabled?'已启用':'已停用'} · 下次 ${p.next_run?fmtTime(p.next_run):'—'}">
-          <input type="checkbox" ${p.enabled?'checked':''} onchange="togglePlan(${esc(JSON.stringify(p)).replace(/'/g,'&#39;')},this)">
-          <span class="slider"></span>
-        </label>
-      </div>`).join("");
-  const plansBlock = (g.plan_list||[]).length
-      ? `<div class="plans"><div class="sub">计划</div>${plans}</div>` : "";
-  const lastErr = (g.last_status==='error'||g.last_status==='failed')&&g.last_error
+  const lastErr = (g.last_status==='failed')&&g.last_error
     ? `<div class="row"><span class="k">错误</span><span class="val" style="color:var(--err);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(g.last_error)}">${esc(g.last_error)}</span></div>` : "";
   const tasks = (g.task_list||[]).map(t=>`
       <div class="task"><span class="tn">${esc(t.name)} <span class="tt">${esc(t.type)}</span></span>
-      <button onclick="runTask(${t.id},this)">运行</button></div>`).join("") || `<div class="meta">未配置任务</div>`;
+      <span><button onclick="runTask(${t.id},this)">运行</button>
+      <span class="icon-x" title="删除任务" onclick="delTask(${t.id},'${esc(t.name)}')">✕</span></span></div>`).join("")
+      || `<div class="meta">未配置任务</div>`;
+  const plans = (g.plan_list||[]).map(p=>`
+      <div class="plan">
+        <span class="pn">${esc(p.name)} <span class="cron">${esc(p.cron)}</span></span>
+        <span style="display:flex;align-items:center;gap:8px">
+          <label class="switch" title="${p.enabled?'已启用':'已停用'} · 下次 ${p.next_run?fmtTime(p.next_run):'—'}">
+            <input type="checkbox" ${p.enabled?'checked':''} onchange="togglePlan(${esc(JSON.stringify(p)).replace(/'/g,'&#39;')},this)">
+            <span class="slider"></span>
+          </label>
+          <span class="icon-x" title="删除计划" onclick="delPlan(${p.id},'${esc(p.name)}')">✕</span>
+        </span>
+      </div>`).join("");
+  const plansBlock = (g.plan_list||[]).length
+      ? `<div class="plans"><div class="sub"><span>计划</span></div>${plans}</div>` : "";
   return `<div class="card">
     <div class="top">
       <span class="dot ${g.health}" title="${g.health}"></span>
       <span class="name">${esc(g.name)}</span>
       <span class="badge adapter">${esc(g.adapter)}</span>
       ${g.enabled?"":'<span class="disabled-tag">已禁用</span>'}
+      <span class="icon-x" title="删除游戏" onclick="delGame('${esc(g.id)}')">✕</span>
     </div>
     <div class="body">
       <div class="row"><span class="k">最近</span><span class="val">${last}</span></div>
       ${lastErr}
       <div class="row"><span class="k">下次计划</span><span class="val">${g.next_run?fmtTime(g.next_run)+' ('+rel(g.next_run)+')':'—'}</span></div>
       <div class="row"><span class="k">任务 / 计划</span><span class="val">${g.tasks} / ${g.plans}</span></div>
-      ${counts}
-      <div class="tasks"><div class="sub">任务</div>${tasks}</div>
+      <div class="counts">
+        <span class="pill ok">✓ ${g.success}</span><span class="pill err">✗ ${g.failed}</span>
+        ${g.active?`<span class="pill run">● ${g.active} 进行中</span>`:""}
+      </div>
+      <div class="tasks"><div class="sub"><span>任务</span><span class="add" onclick="openTaskForm('${esc(g.id)}')">+ 添加</span></div>${tasks}</div>
       ${plansBlock}
     </div>
   </div>`;
 }
 
-async function load(){
-  try{
-    const r=await fetch("/api/dashboard"); if(!r.ok) throw new Error("HTTP "+r.status);
-    const d=await r.json(); $("#err").textContent="";
-    $("#updated").textContent="更新于 "+new Date(d.generated_at).toLocaleTimeString();
-    $("#stats").innerHTML =
-      statCard(d.totals.games,"游戏")+statCard(d.totals.tasks,"任务")+statCard(d.totals.plans,"计划")+
-      statCard(d.totals.running,"运行中")+statCard(d.totals.failed_24h,"24h 失败",d.totals.failed_24h>0);
-    $("#games").innerHTML = (d.games||[]).map(gameCard).join("") || '<div class="empty">还没有配置游戏。用 ctl 或 REST API 添加。</div>';
-    const rows=(d.recent||[]).map(e=>`<tr onclick="openExec(${e.id})">
-        <td>${e.id}</td><td>${esc(e.game_id)}</td><td>${esc(e.task_name)}</td>
-        <td><span class="st ${e.status}">${e.status}</span></td>
-        <td>${esc(e.trigger)}</td><td>${fmtTime(e.start_time)}</td>
-        <td>${dur(e.duration_sec)}</td><td>${e.exit_code==null?'—':e.exit_code}</td></tr>`).join("");
-    $("#recent").innerHTML = rows || '<tr><td colspan="8" class="empty">暂无执行记录</td></tr>';
-  }catch(e){ $("#err").textContent="加载失败: "+e; }
+function render(d){
+  lastData = d;
+  $("#updated").textContent = "更新于 "+new Date(d.generated_at).toLocaleTimeString();
+  $("#stats").innerHTML =
+    statCard(d.totals.games,"游戏")+statCard(d.totals.tasks,"任务")+statCard(d.totals.plans,"计划")+
+    statCard(d.totals.running,"运行中")+statCard(d.totals.failed_24h,"24h 失败",d.totals.failed_24h>0);
+  $("#games").innerHTML = (d.games||[]).map(gameCard).join("") || '<div class="empty">还没有配置游戏。点右上角「+ 游戏」。</div>';
+  const rows=(d.recent||[]).map(e=>`<tr onclick="openExec(${e.id})">
+      <td>${e.id}</td><td>${esc(e.game_id)}</td><td>${esc(e.task_name)}</td>
+      <td><span class="st ${e.status}">${e.status}</span></td>
+      <td>${esc(e.trigger)}</td><td>${fmtTime(e.start_time)}</td>
+      <td>${dur(e.duration_sec)}</td><td>${e.exit_code==null?'—':e.exit_code}</td></tr>`).join("");
+  $("#recent").innerHTML = rows || '<tr><td colspan="8" class="empty">暂无执行记录</td></tr>';
 }
 
+async function load(){
+  try{
+    const r=await api("/api/dashboard"); if(!r.ok) throw new Error("HTTP "+r.status);
+    render(await r.json());
+  }catch(e){ if(String(e).indexOf("unauthorized")<0) $("#err").textContent="加载失败: "+e; }
+}
+
+// ---- actions ----
+async function runTask(id,btn){
+  btn.disabled=true; const t=btn.textContent; btn.textContent="…";
+  try{ const r=await api("/api/tasks/"+id+"/run",{method:"POST"}); if(!r.ok) throw new Error("HTTP "+r.status);
+    btn.textContent="已触发"; setTimeout(()=>{btn.textContent=t;btn.disabled=false;},1500); }
+  catch(e){ btn.textContent="失败"; $("#err").textContent=String(e); btn.disabled=false; }
+}
+async function delGame(id){
+  if(!confirm("删除游戏 "+id+"？其任务、计划、执行记录都会一并删除。")) return;
+  try{ const r=await api("/api/games/"+id,{method:"DELETE"}); if(!r.ok&&r.status!==204) throw new Error("HTTP "+r.status); load(); }
+  catch(e){ $("#err").textContent="删除失败: "+e; }
+}
+async function delTask(id,name){
+  if(!confirm("删除任务「"+name+"」？")) return;
+  try{ const r=await api("/api/tasks/"+id,{method:"DELETE"}); if(!r.ok&&r.status!==204) throw new Error("HTTP "+r.status); load(); }
+  catch(e){ $("#err").textContent="删除失败: "+e; }
+}
+async function delPlan(id,name){
+  if(!confirm("删除计划「"+name+"」？")) return;
+  try{ const r=await api("/api/plans/"+id,{method:"DELETE"}); if(!r.ok&&r.status!==204) throw new Error("HTTP "+r.status); load(); }
+  catch(e){ $("#err").textContent="删除失败: "+e; }
+}
+async function togglePlan(p,el){
+  el.disabled=true;
+  try{
+    const body={name:p.name,task_id:p.task_id,cron_expr:p.cron,enabled:el.checked};
+    const r=await api("/api/plans/"+p.id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok) throw new Error("HTTP "+r.status); $("#err").textContent="";
+  }catch(e){ el.checked=!el.checked; $("#err").textContent="计划更新失败: "+e; }
+  finally{ el.disabled=false; }
+}
+
+// ---- modal: generic ----
+function openModal(title, html){ $("#m-title").textContent=title; $("#m-body").innerHTML=html; $("#overlay").classList.add("open"); }
+function closeModal(){ $("#overlay").classList.remove("open"); }
+$("#overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeModal(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeModal(); });
+
+// ---- modal: execution detail ----
 async function openExec(id){
   if(!id) return;
-  const ov=$("#overlay"), body=$("#m-body");
-  $("#m-title").textContent="执行 #"+id;
-  body.innerHTML='<div class="empty">加载中…</div>'; ov.classList.add("open");
+  openModal("执行 #"+id, '<div class="empty">加载中…</div>');
   try{
-    const r=await fetch("/api/executions/"+id); if(!r.ok) throw new Error("HTTP "+r.status);
+    const r=await api("/api/executions/"+id); if(!r.ok) throw new Error("HTTP "+r.status);
     const e=await r.json();
     const active = e.status==="running"||e.status==="pending";
-    const shot = e.screenshot_path ? `<div class="kv"><span class="k">截图</span><span><code>${esc(e.screenshot_path)}</code></span></div>` : "";
-    body.innerHTML=`
+    let shot="";
+    if(e.screenshot_path){
+      const file=e.screenshot_path.split(/[\\/]/).pop();
+      shot=`<img class="shot" src="/screenshots/${encodeURIComponent(file)}${qs()}" alt="screenshot" onerror="this.style.display='none'">
+            <div class="hint">截图: ${esc(e.screenshot_path)}</div>`;
+    }
+    $("#m-body").innerHTML=`
       <div class="kv">
         <span class="k">状态</span><span><span class="st ${e.status}">${e.status}</span></span>
         <span class="k">触发</span><span>${esc(e.trigger)}</span>
@@ -219,41 +309,105 @@ async function openExec(id){
         <span class="k">重试</span><span>${e.retry_count||0}</span>
       </div>
       ${shot}
-      <div class="sub">命令</div><pre>${esc(e.command)||'—'}</pre>
-      ${e.error_msg?`<div class="sub">错误</div><pre style="color:var(--err)">${esc(e.error_msg)}</pre>`:""}
-      <div class="sub">stdout</div><pre>${esc(e.stdout)||'(空)'}</pre>
-      <div class="sub">stderr</div><pre>${esc(e.stderr)||'(空)'}</pre>
+      <div class="sub"><span>命令</span></div><pre>${esc(e.command)||'—'}</pre>
+      ${e.error_msg?`<div class="sub"><span>错误</span></div><pre style="color:var(--err)">${esc(e.error_msg)}</pre>`:""}
+      <div class="sub"><span>stdout</span></div><pre>${esc(e.stdout)||'(空)'}</pre>
+      <div class="sub"><span>stderr</span></div><pre>${esc(e.stderr)||'(空)'}</pre>
       ${active?`<button class="danger" onclick="cancelExec(${e.id})">取消执行</button>`:""}`;
-  }catch(err){ body.innerHTML='<div class="empty">加载失败: '+esc(String(err))+'</div>'; }
+  }catch(err){ if(String(err).indexOf("unauthorized")<0) $("#m-body").innerHTML='<div class="empty">加载失败: '+esc(String(err))+'</div>'; }
 }
-function closeModal(){ $("#overlay").classList.remove("open"); }
-$("#overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeModal(); });
-document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeModal(); });
-
 async function cancelExec(id){
-  try{
-    const r=await fetch("/api/executions/"+id+"/cancel",{method:"POST"});
-    if(!r.ok && r.status!==409) throw new Error("HTTP "+r.status);
-    setTimeout(()=>{openExec(id);load();},600);
-  }catch(e){ $("#err").textContent="取消失败: "+e; }
+  try{ const r=await api("/api/executions/"+id+"/cancel",{method:"POST"});
+    if(!r.ok && r.status!==409) throw new Error("HTTP "+r.status); setTimeout(()=>openExec(id),600); }
+  catch(e){ $("#err").textContent="取消失败: "+e; }
 }
 
-async function togglePlan(p,el){
-  el.disabled=true;
-  try{
-    const body={name:p.name,task_id:p.task_id,cron_expr:p.cron,enabled:el.checked};
-    const r=await fetch("/api/plans/"+p.id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    $("#err").textContent=""; setTimeout(load,400);
-  }catch(e){ el.checked=!el.checked; $("#err").textContent="计划更新失败: "+e; }
-  finally{ el.disabled=false; }
+// ---- modal: forms ----
+async function ensureMeta(){ if(!meta){ const r=await api("/api/meta"); meta=await r.json(); } return meta; }
+
+async function openGameForm(){
+  const m=await ensureMeta();
+  const opts=m.adapters.map(a=>`<option value="${a.key}">${a.key}</option>`).join("");
+  openModal("添加游戏",`<form class="form" onsubmit="return submitGame(event)">
+    <div class="two">
+      <label>ID（唯一，如 genshin）<input name="id" required pattern="[A-Za-z0-9_-]+"></label>
+      <label>适配器<select name="adapter">${opts}</select></label>
+    </div>
+    <label>名称<input name="name" required></label>
+    <label>工具路径 tool_path<input name="tool_path" placeholder="如 D:/BetterGI/BetterGI.exe"></label>
+    <label>工作目录 working_dir<input name="working_dir" placeholder="可选"></label>
+    <label>extra_config (JSON)<textarea name="extra_config" placeholder='{"python_path":"python","march7th_dir":"..."}'></textarea></label>
+    <label class="toggle"><input type="checkbox" name="enabled" checked> 启用</label>
+    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">创建</button></div>
+  </form><div id="ferr" class="hint" style="color:var(--err)"></div>`);
+}
+async function submitGame(ev){
+  ev.preventDefault(); const f=ev.target;
+  const ec=f.extra_config.value.trim();
+  if(ec){ try{ JSON.parse(ec); }catch(_){ $("#ferr").textContent="extra_config 不是合法 JSON"; return false; } }
+  const body={id:f.id.value.trim(),name:f.name.value.trim(),adapter:f.adapter.value,
+    tool_path:f.tool_path.value.trim(),working_dir:f.working_dir.value.trim(),extra_config:ec,enabled:f.enabled.checked};
+  try{ const r=await api("/api/games",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok){ $("#ferr").textContent=(await r.json()).error||("HTTP "+r.status); return false; }
+    closeModal(); load(); }
+  catch(e){ $("#ferr").textContent=String(e); }
+  return false;
 }
 
-let timer=null;
-function setAuto(on){ if(timer){clearInterval(timer);timer=null;} if(on) timer=setInterval(load,5000); }
-$("#auto").addEventListener("change",e=>setAuto(e.target.checked));
+async function openTaskForm(gameId){
+  const m=await ensureMeta();
+  const games=(lastData&&lastData.games)||[];
+  if(!games.length){ alert("请先添加游戏"); return; }
+  const gopts=games.map(g=>`<option value="${esc(g.id)}" data-adapter="${esc(g.adapter)}" ${g.id===gameId?'selected':''}>${esc(g.name)} (${esc(g.id)})</option>`).join("");
+  openModal("添加任务",`<form class="form" onsubmit="return submitTask(event)">
+    <div class="two">
+      <label>游戏<select name="game_id" onchange="syncTypes(this.form)">${gopts}</select></label>
+      <label>类型 type<input name="type" list="typelist" required><datalist id="typelist"></datalist></label>
+    </div>
+    <label>名称<input name="name" required></label>
+    <label>params (JSON)<textarea name="params" placeholder='{"group":"采集"}  或  {"task_index":1}'>{}</textarea></label>
+    <div class="two">
+      <label>超时(秒)<input name="timeout_sec" type="number" min="0" value="0"></label>
+      <label>重试次数<input name="max_retries" type="number" min="0" value="0"></label>
+    </div>
+    <label class="toggle"><input type="checkbox" name="enabled" checked> 启用</label>
+    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">创建</button></div>
+  </form><div id="ferr" class="hint" style="color:var(--err)"></div>`);
+  syncTypes($("#m-body form"));
+}
+function syncTypes(form){
+  const m=meta; const sel=form.game_id.selectedOptions[0];
+  const adapter=sel?sel.getAttribute("data-adapter"):"";
+  const a=(m.adapters||[]).find(x=>x.key===adapter);
+  const dl=form.querySelector("#typelist");
+  dl.innerHTML=(a?a.task_types:[]).map(t=>`<option value="${t}">`).join("");
+  if(a&&a.task_types.length&&!form.type.value) form.type.value=a.task_types[0];
+}
+async function submitTask(ev){
+  ev.preventDefault(); const f=ev.target;
+  const pr=f.params.value.trim()||"{}";
+  try{ JSON.parse(pr); }catch(_){ $("#ferr").textContent="params 不是合法 JSON"; return false; }
+  const body={game_id:f.game_id.value,name:f.name.value.trim(),type:f.type.value.trim(),params:pr,
+    timeout_sec:+f.timeout_sec.value||0,max_retries:+f.max_retries.value||0,enabled:f.enabled.checked};
+  try{ const r=await api("/api/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok){ $("#ferr").textContent=(await r.json()).error||("HTTP "+r.status); return false; }
+    closeModal(); load(); }
+  catch(e){ $("#ferr").textContent=String(e); }
+  return false;
+}
+
+// ---- wiring ----
+// Live updates come from SSE; a safety poller covers environments where SSE is
+// blocked (some proxies) by fetching only while the stream is NOT open.
+let poll=null;
+function startLive(){ connect(); if(!poll) poll=setInterval(()=>{ if(!es||es.readyState!==1) load(); },8000); }
+function stopLive(){ disconnect(); if(poll){clearInterval(poll);poll=null;} }
 $("#refresh").addEventListener("click",load);
-load(); setAuto(true);
+$("#live").addEventListener("change",e=>{ if(e.target.checked) startLive(); else stopLive(); });
+// ?live=0 loads a static snapshot (no open stream) — handy for screenshots.
+const wantLive = new URLSearchParams(location.search).get("live") !== "0";
+$("#live").checked = wantLive;
+load().then(()=>{ if(wantLive) startLive(); });
 </script>
 </body>
 </html>

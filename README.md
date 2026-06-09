@@ -80,7 +80,7 @@ Requires Go 1.26+. No cgo (SQLite driver is pure Go).
 
 Configuration precedence: defaults → `config.json` (see `config.example.json`) →
 environment (`GS_ADDR`, `GS_DATA_DIR`, `GS_DB_PATH`, `GS_SCREENSHOT_CMD`,
-`GS_MAX_CONCURRENT`) → `-addr` flag.
+`GS_MAX_CONCURRENT`, `GS_AUTH_TOKEN`) → `-addr` flag.
 
 ### Concurrency (important)
 
@@ -107,11 +107,30 @@ game — it just captures the screen so an operator can see what happened. Examp
 If unset, the path is still recorded (so the layout is predictable) but no image
 is written.
 
+## Authentication
+
+By default the API is **unauthenticated** — safe only when bound to localhost
+(the default). To expose it on a network, set a token via `auth_token` in the
+config or `GS_AUTH_TOKEN`. When set, every `/api/*` and `/screenshots/*` request
+must present it; the dashboard page (`/`) and `/healthz` stay open.
+
+- **API / CLI:** send `Authorization: Bearer <token>` (the CLI: `ctl -token
+  <token> …`, or `GS_TOKEN`).
+- **Browser:** the dashboard prompts for the token on first 401 and stores it in
+  `localStorage`; the 🔑 button lets you set/change it. The live stream
+  authenticates via `?token=` (the browser's EventSource cannot send headers).
+
+It is still recommended to terminate TLS and authenticate at a reverse proxy for
+anything beyond a trusted LAN — the token is a single shared secret.
+
 ## Dashboard (控制看板)
 
 Open the server's address in a browser — **http://127.0.0.1:8080/** — for a
 Grafana-style control board. It is a single embedded page (no build step) that
-polls `GET /api/dashboard` and auto-refreshes every 5s.
+updates **live over Server-Sent Events** (`GET /api/stream`): the server pushes
+a fresh snapshot whenever anything changes (a run starts/finishes, a plan is
+toggled, a game/task is added). If SSE is blocked (some proxies), it
+automatically falls back to polling. Append `?live=0` for a static snapshot.
 
 ![dashboard](docs/dashboard.png)
 
@@ -132,16 +151,21 @@ It shows:
   time, duration and exit code.
 - **Execution detail modal** — click any recent row (or a card's last-run
   badge) to see the full command, error, **stdout/stderr**, exit code, timings
-  and screenshot path. If the run is still active, a **Cancel** button stops it
+  and a **screenshot thumbnail** of the failure (served from `/screenshots/`).
+  If the run is still active, a **Cancel** button stops it
   (`POST /api/executions/{id}/cancel`, kills the whole process tree).
+- **Add / delete inline** — the header's **+ 游戏 / + 任务** buttons open forms
+  (adapter and task-type lists come from `GET /api/meta`); each game, task and
+  plan has a delete (✕) control. No need to drop to the CLI for everyday edits.
 
 The board is driven entirely by the REST API, so anything it shows is also
-available programmatically via `GET /api/dashboard`.
+available programmatically.
 
 ## CLI (`ctl`)
 
-> Global flags (`-server`, `-data`, `-game`, …) must come **before** the
-> resource/action, e.g. `ctl -server http://... -data '{...}' games add`.
+> Global flags (`-server`, `-token`, `-data`, `-game`, …) must come **before**
+> the resource/action, e.g. `ctl -server http://... -data '{...}' games add`.
+> Pass `-token` (or `GS_TOKEN`) when the server requires auth.
 
 ```
 ctl [-server URL] <resource> <action> [id]
@@ -166,6 +190,10 @@ health
 | `GET/POST /api/tasks`, `GET/PUT/DELETE /api/tasks/{id}` | tasks CRUD (`?game_id=`) |
 | `POST /api/tasks/{id}/run` | **manual trigger** (returns the pending execution) |
 | `GET /api/tasks/{id}/preflight` | build the command & check the tool exists, **without running** |
+| `GET /api/dashboard` | aggregated board snapshot (per-game health, plans, recent execs) |
+| `GET /api/stream` | live board updates via Server-Sent Events |
+| `GET /api/meta` | adapter keys + task types (for the add forms) |
+| `GET /screenshots/{name}` | serve a failure screenshot (auth-protected) |
 | `GET/POST /api/routes`, `DELETE /api/routes/{id}` | routes (`?game_id=`) |
 | `GET/POST /api/plans`, `GET/PUT/DELETE /api/plans/{id}` | scheduled plans (cron validated) |
 | `GET /api/executions`, `GET /api/executions/{id}` | execution logs (`?task_id=&status=&limit=`) |
@@ -260,5 +288,6 @@ timezone. Expressions are validated on create/update.
 
 - Tool CLI flags differ across versions; adapter defaults are documented best
   guesses — prefer `raw_args` when in doubt.
-- No auth on the REST API — bind to localhost (default) or front it yourself.
+- API auth is a single shared token (see Authentication); for multi-user or
+  internet exposure, front it with a reverse proxy that does real authn/TLS.
 - SQLite uses a single writer connection (WAL mode) for simplicity.

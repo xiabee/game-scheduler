@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/xiabee/game-scheduler/internal/config"
+	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
 	"github.com/xiabee/game-scheduler/internal/runner"
 	"github.com/xiabee/game-scheduler/internal/store"
@@ -33,6 +34,7 @@ type Service struct {
 	reg   *game.Registry
 	cfg   config.Config
 	log   *slog.Logger
+	bus   *events.Bus
 
 	sem chan struct{} // bounded run slots; cap == cfg.MaxConcurrent
 
@@ -41,8 +43,8 @@ type Service struct {
 	active  map[int64]int                // taskID -> count of pending/running execs
 }
 
-// NewService constructs a task service.
-func NewService(s *store.Store, reg *game.Registry, cfg config.Config, log *slog.Logger) *Service {
+// NewService constructs a task service. bus may be nil (no live notifications).
+func NewService(s *store.Store, reg *game.Registry, cfg config.Config, bus *events.Bus, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -55,6 +57,7 @@ func NewService(s *store.Store, reg *game.Registry, cfg config.Config, log *slog
 		reg:     reg,
 		cfg:     cfg,
 		log:     log,
+		bus:     bus,
 		sem:     make(chan struct{}, n),
 		running: map[int64]context.CancelFunc{},
 		active:  map[int64]int{},
@@ -89,6 +92,7 @@ func (s *Service) Enqueue(taskID int64, trigger string, planID *int64, skipIfAct
 	s.mu.Unlock()
 
 	go s.worker(ctx, exec.ID, taskID)
+	s.bus.Notify()
 	return exec, false, nil
 }
 
@@ -153,6 +157,7 @@ func (s *Service) markCancelledBeforeStart(execID int64) {
 	if err := s.store.UpdateExecution(exec); err != nil {
 		s.log.Warn("persist queued-cancel", "exec_id", execID, "err", err)
 	}
+	s.bus.Notify()
 }
 
 // Preflight reports what a task would run and whether the environment is ready,
@@ -260,6 +265,7 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	if err := s.store.UpdateExecution(exec); err != nil {
 		s.log.Warn("persist running status", "exec_id", execID, "err", err)
 	}
+	s.bus.Notify()
 
 	attempts := t.MaxRetries + 1
 	var res runner.Result
@@ -307,6 +313,7 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	if err := s.store.UpdateExecution(exec); err != nil {
 		return err
 	}
+	s.bus.Notify()
 	s.log.Info("task finished", "exec_id", execID, "status", exec.Status, "exit", code, "retries", exec.RetryCount)
 	return nil
 }
@@ -340,9 +347,9 @@ func (s *Service) captureScreenshot(execID int64) string {
 		s.log.Warn("screenshot template", "err", err)
 		return path
 	}
-	// The configured command is a full shell command line; run it via cmd /C
-	// on Windows so quoting in the template behaves as the operator expects.
-	cmd := exec.Command("cmd", "/C", rendered)
+	// The configured command is a full shell command line; shellCommand runs it
+	// via the platform shell with correct quoting (see shell_windows.go).
+	cmd := shellCommand(rendered)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

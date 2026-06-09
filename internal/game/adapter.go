@@ -60,3 +60,19 @@ func (r *Registry) Keys() []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// AdapterInfo describes an adapter for UI/metadata purposes.
+type AdapterInfo struct {
+	Key       string   `json:"key"`
+	TaskTypes []string `json:"task_types"`
+}
+
+// Meta returns metadata for all adapters, sorted by key — used to populate the
+// dashboard's add-game / add-task forms.
+func (r *Registry) Meta() []AdapterInfo {
+	out := make([]AdapterInfo, 0, len(r.m))
+	for _, k := range r.Keys() {
+		out = append(out, AdapterInfo{Key: k, TaskTypes: r.m[k].TaskTypes()})
+	}
+	return out
+}

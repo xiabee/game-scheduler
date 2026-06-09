@@ -31,6 +31,7 @@ import (
 
 func main() {
 	server := flag.String("server", envOr("GS_SERVER", "http://127.0.0.1:8080"), "scheduler server base URL")
+	token := flag.String("token", envOr("GS_TOKEN", ""), "API auth token (if the server requires one)")
 	data := flag.String("data", "", "JSON body for add/update; '-' reads stdin")
 	gameID := flag.String("game", "", "filter by game id (tasks/routes list)")
 	taskID := flag.String("task", "", "filter by task id (execs list)")
@@ -44,7 +45,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	c := &client{base: strings.TrimRight(*server, "/"), hc: &http.Client{Timeout: 30 * time.Second}}
+	c := &client{base: strings.TrimRight(*server, "/"), token: *token, hc: &http.Client{Timeout: 30 * time.Second}}
 
 	resource := args[0]
 	action := ""
@@ -105,8 +106,9 @@ func main() {
 }
 
 type client struct {
-	base string
-	hc   *http.Client
+	base  string
+	token string
+	hc    *http.Client
 }
 
 // crud maps a generic action onto REST verbs for a collection path.
@@ -150,6 +152,9 @@ func (c *client) do(method, path string, body []byte) error {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
