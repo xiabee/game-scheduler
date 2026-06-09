@@ -174,7 +174,7 @@ func (s *Store) ListGames() ([]Game, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Game
+	out := []Game{}
 	for rows.Next() {
 		var g Game
 		var enabled int
@@ -259,7 +259,7 @@ func (s *Store) ListTasks(gameID string) ([]Task, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Task
+	out := []Task{}
 	for rows.Next() {
 		var t Task
 		var enabled int
@@ -312,7 +312,7 @@ func (s *Store) ListRoutes(gameID string) ([]Route, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Route
+	out := []Route{}
 	for rows.Next() {
 		var r Route
 		if err := rows.Scan(&r.ID, &r.GameID, &r.Name, &r.FilePath, &r.Description, &r.CreatedAt); err != nil {
@@ -399,7 +399,7 @@ func (s *Store) ListPlans(onlyEnabled bool) ([]Plan, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Plan
+	out := []Plan{}
 	for rows.Next() {
 		var p Plan
 		var enabled int
@@ -524,7 +524,7 @@ func (s *Store) ListExecutions(f ExecutionFilter) ([]Execution, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Execution
+	out := []Execution{}
 	for rows.Next() {
 		var e Execution
 		if err := rows.Scan(&e.ID, &e.TaskID, &e.PlanID, &e.Trigger, &e.Status, &e.Command, &e.Stdout, &e.Stderr, &e.ExitCode, &e.ErrorMsg, &e.ScreenshotPath, &e.RetryCount, &e.StartTime, &e.EndTime, &e.CreatedAt); err != nil {

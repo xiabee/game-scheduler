@@ -1,0 +1,5 @@
+# Normalize line endings: store text as LF in the repo so gofmt and CI behave
+# consistently across Linux/Windows checkouts.
+* text=auto eol=lf
+*.png binary
+*.ico binary

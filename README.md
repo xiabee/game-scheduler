@@ -1,5 +1,7 @@
 # game-scheduler
 
+[![CI](https://github.com/xiabee/game-scheduler/actions/workflows/ci.yml/badge.svg)](https://github.com/xiabee/game-scheduler/actions/workflows/ci.yml)
+
 A multi-game **resource-collection & route scheduler** that orchestrates existing
 open-source automation tools as ordinary local processes.
 
@@ -154,9 +156,11 @@ It shows:
   and a **screenshot thumbnail** of the failure (served from `/screenshots/`).
   If the run is still active, a **Cancel** button stops it
   (`POST /api/executions/{id}/cancel`, kills the whole process tree).
-- **Add / delete inline** — the header's **+ 游戏 / + 任务** buttons open forms
-  (adapter and task-type lists come from `GET /api/meta`); each game, task and
-  plan has a delete (✕) control. No need to drop to the CLI for everyday edits.
+- **Full CRUD inline** — the header's **+ 游戏 / + 任务** buttons and each card's
+  **+ 添加 / ✎ (edit) / ✕ (delete)** controls manage games, tasks and plans
+  without the CLI (adapter and task-type lists come from `GET /api/meta`).
+- **执行历史** — the **历史** button opens a filterable view of past executions
+  (by status, with a row limit); click any row for its detail modal.
 
 The board is driven entirely by the REST API, so anything it shows is also
 available programmatically.
@@ -283,6 +287,19 @@ timezone. Expressions are validated on create/update.
   on Windows) so helper processes don't keep controlling the game.
 - **Crash-safe.** On startup, executions left in `pending`/`running` by a
   previous crash are reconciled to `failed` ("interrupted…").
+
+## Development
+
+```powershell
+go test ./...        # unit + integration tests (store, runner, adapters, task, api)
+go test -race ./...  # race detector (Linux/macOS, or Windows with a C toolchain)
+gofmt -l .           # should print nothing
+go vet ./...
+```
+
+GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs gofmt
++ vet, builds and tests on **Linux and Windows** (so the platform-specific
+`*_windows.go` files are exercised), and runs the race detector on Linux.
 
 ## Notes & limitations (MVP)
 

@@ -45,6 +45,8 @@
   .badge.adapter{background:var(--panel2)}
   .icon-x{cursor:pointer;color:var(--muted);font-size:14px;padding:0 4px}
   .icon-x:hover{color:var(--err)}
+  .icon-e{cursor:pointer;color:var(--muted);font-size:13px;padding:0 2px}
+  .icon-e:hover{color:var(--accent)}
   .card .body{padding:12px 14px;display:grid;gap:8px}
   .row{display:flex;justify-content:space-between;gap:10px}
   .row .k{color:var(--muted)} .row .val{text-align:right}
@@ -115,6 +117,7 @@
   <span class="meta" id="updated">—</span>
   <button onclick="openGameForm()">+ 游戏</button>
   <button onclick="openTaskForm()">+ 任务</button>
+  <button onclick="openHistory()">历史</button>
   <label class="toggle"><span class="live-dot" id="livedot"></span><input type="checkbox" id="live" checked> 实时</label>
   <button id="refresh">刷新</button>
   <button onclick="setToken()" title="设置 API 令牌">🔑</button>
@@ -186,7 +189,8 @@ function gameCard(g){
     ? `<div class="row"><span class="k">错误</span><span class="val" style="color:var(--err);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(g.last_error)}">${esc(g.last_error)}</span></div>` : "";
   const tasks = (g.task_list||[]).map(t=>`
       <div class="task"><span class="tn">${esc(t.name)} <span class="tt">${esc(t.type)}</span></span>
-      <span><button onclick="runTask(${t.id},this)">运行</button>
+      <span style="display:flex;align-items:center;gap:6px"><button onclick="runTask(${t.id},this)">运行</button>
+      <span class="icon-e" title="编辑任务" onclick="editTask(${t.id})">✎</span>
       <span class="icon-x" title="删除任务" onclick="delTask(${t.id},'${esc(t.name)}')">✕</span></span></div>`).join("")
       || `<div class="meta">未配置任务</div>`;
   const plans = (g.plan_list||[]).map(p=>`
@@ -197,17 +201,18 @@ function gameCard(g){
             <input type="checkbox" ${p.enabled?'checked':''} onchange="togglePlan(${esc(JSON.stringify(p)).replace(/'/g,'&#39;')},this)">
             <span class="slider"></span>
           </label>
+          <span class="icon-e" title="编辑计划" onclick="editPlan(${esc(JSON.stringify(p)).replace(/'/g,'&#39;')})">✎</span>
           <span class="icon-x" title="删除计划" onclick="delPlan(${p.id},'${esc(p.name)}')">✕</span>
         </span>
       </div>`).join("");
-  const plansBlock = (g.plan_list||[]).length
-      ? `<div class="plans"><div class="sub"><span>计划</span></div>${plans}</div>` : "";
+  const plansBlock = `<div class="plans"><div class="sub"><span>计划</span><span class="add" onclick="openPlanForm('${esc(g.id)}')">+ 添加</span></div>${plans||'<div class="meta">无计划</div>'}</div>`;
   return `<div class="card">
     <div class="top">
       <span class="dot ${g.health}" title="${g.health}"></span>
       <span class="name">${esc(g.name)}</span>
       <span class="badge adapter">${esc(g.adapter)}</span>
       ${g.enabled?"":'<span class="disabled-tag">已禁用</span>'}
+      <span class="icon-e" title="编辑游戏" onclick="editGame('${esc(g.id)}')">✎</span>
       <span class="icon-x" title="删除游戏" onclick="delGame('${esc(g.id)}')">✕</span>
     </div>
     <div class="body">
@@ -324,22 +329,30 @@ async function cancelExec(id){
 
 // ---- modal: forms ----
 async function ensureMeta(){ if(!meta){ const r=await api("/api/meta"); meta=await r.json(); } return meta; }
+let editId=null; // current edit target id (game id / task id / plan id); null = create
 
-async function openGameForm(){
+// --- game form (create + edit) ---
+async function openGameForm(g){
   const m=await ensureMeta();
-  const opts=m.adapters.map(a=>`<option value="${a.key}">${a.key}</option>`).join("");
-  openModal("添加游戏",`<form class="form" onsubmit="return submitGame(event)">
+  editId = g? g.id : null;
+  const opts=m.adapters.map(a=>`<option value="${a.key}" ${g&&g.adapter===a.key?'selected':''}>${a.key}</option>`).join("");
+  const v=k=> g? esc(g[k]||"") : "";
+  openModal(g?("编辑游戏 "+esc(g.id)):"添加游戏",`<form class="form" onsubmit="return submitGame(event)">
     <div class="two">
-      <label>ID（唯一，如 genshin）<input name="id" required pattern="[A-Za-z0-9_-]+"></label>
+      <label>ID（唯一，如 genshin）<input name="id" required pattern="[A-Za-z0-9_-]+" value="${g?esc(g.id):''}" ${g?'readonly':''}></label>
       <label>适配器<select name="adapter">${opts}</select></label>
     </div>
-    <label>名称<input name="name" required></label>
-    <label>工具路径 tool_path<input name="tool_path" placeholder="如 D:/BetterGI/BetterGI.exe"></label>
-    <label>工作目录 working_dir<input name="working_dir" placeholder="可选"></label>
-    <label>extra_config (JSON)<textarea name="extra_config" placeholder='{"python_path":"python","march7th_dir":"..."}'></textarea></label>
-    <label class="toggle"><input type="checkbox" name="enabled" checked> 启用</label>
-    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">创建</button></div>
+    <label>名称<input name="name" required value="${v('name')}"></label>
+    <label>工具路径 tool_path<input name="tool_path" placeholder="如 D:/BetterGI/BetterGI.exe" value="${v('tool_path')}"></label>
+    <label>工作目录 working_dir<input name="working_dir" placeholder="可选" value="${v('working_dir')}"></label>
+    <label>extra_config (JSON)<textarea name="extra_config" placeholder='{"python_path":"python","march7th_dir":"..."}'>${v('extra_config')}</textarea></label>
+    <label class="toggle"><input type="checkbox" name="enabled" ${!g||g.enabled?'checked':''}> 启用</label>
+    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">${g?'保存':'创建'}</button></div>
   </form><div id="ferr" class="hint" style="color:var(--err)"></div>`);
+}
+async function editGame(id){
+  try{ const r=await api("/api/games/"+id); if(!r.ok) throw new Error("HTTP "+r.status); openGameForm(await r.json()); }
+  catch(e){ $("#err").textContent="加载游戏失败: "+e; }
 }
 async function submitGame(ev){
   ev.preventDefault(); const f=ev.target;
@@ -347,40 +360,45 @@ async function submitGame(ev){
   if(ec){ try{ JSON.parse(ec); }catch(_){ $("#ferr").textContent="extra_config 不是合法 JSON"; return false; } }
   const body={id:f.id.value.trim(),name:f.name.value.trim(),adapter:f.adapter.value,
     tool_path:f.tool_path.value.trim(),working_dir:f.working_dir.value.trim(),extra_config:ec,enabled:f.enabled.checked};
-  try{ const r=await api("/api/games",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    if(!r.ok){ $("#ferr").textContent=(await r.json()).error||("HTTP "+r.status); return false; }
-    closeModal(); load(); }
-  catch(e){ $("#ferr").textContent=String(e); }
+  const url = editId? "/api/games/"+editId : "/api/games";
+  await submitForm(url, editId?"PUT":"POST", body);
   return false;
 }
 
-async function openTaskForm(gameId){
+// --- task form (create + edit) ---
+async function openTaskForm(gameId, task){
   const m=await ensureMeta();
   const games=(lastData&&lastData.games)||[];
   if(!games.length){ alert("请先添加游戏"); return; }
-  const gopts=games.map(g=>`<option value="${esc(g.id)}" data-adapter="${esc(g.adapter)}" ${g.id===gameId?'selected':''}>${esc(g.name)} (${esc(g.id)})</option>`).join("");
-  openModal("添加任务",`<form class="form" onsubmit="return submitTask(event)">
+  editId = task? task.id : null;
+  const cur = task? task.game_id : gameId;
+  const gopts=games.map(g=>`<option value="${esc(g.id)}" data-adapter="${esc(g.adapter)}" ${g.id===cur?'selected':''}>${esc(g.name)} (${esc(g.id)})</option>`).join("");
+  const v=k=> task? esc(task[k]==null?"":task[k]) : "";
+  openModal(task?("编辑任务 #"+task.id):"添加任务",`<form class="form" onsubmit="return submitTask(event)">
     <div class="two">
-      <label>游戏<select name="game_id" onchange="syncTypes(this.form)">${gopts}</select></label>
-      <label>类型 type<input name="type" list="typelist" required><datalist id="typelist"></datalist></label>
+      <label>游戏<select name="game_id" onchange="syncTypes(this.form)" ${task?'disabled':''}>${gopts}</select></label>
+      <label>类型 type<input name="type" list="typelist" required value="${v('type')}"><datalist id="typelist"></datalist></label>
     </div>
-    <label>名称<input name="name" required></label>
-    <label>params (JSON)<textarea name="params" placeholder='{"group":"采集"}  或  {"task_index":1}'>{}</textarea></label>
+    <label>名称<input name="name" required value="${v('name')}"></label>
+    <label>params (JSON)<textarea name="params" placeholder='{"group":"采集"}  或  {"task_index":1}'>${task?esc(task.params||"{}"):"{}"}</textarea></label>
     <div class="two">
-      <label>超时(秒)<input name="timeout_sec" type="number" min="0" value="0"></label>
-      <label>重试次数<input name="max_retries" type="number" min="0" value="0"></label>
+      <label>超时(秒)<input name="timeout_sec" type="number" min="0" value="${task?(task.timeout_sec||0):0}"></label>
+      <label>重试次数<input name="max_retries" type="number" min="0" value="${task?(task.max_retries||0):0}"></label>
     </div>
-    <label class="toggle"><input type="checkbox" name="enabled" checked> 启用</label>
-    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">创建</button></div>
+    <label class="toggle"><input type="checkbox" name="enabled" ${!task||task.enabled?'checked':''}> 启用</label>
+    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">${task?'保存':'创建'}</button></div>
   </form><div id="ferr" class="hint" style="color:var(--err)"></div>`);
   syncTypes($("#m-body form"));
 }
+async function editTask(id){
+  try{ const r=await api("/api/tasks/"+id); if(!r.ok) throw new Error("HTTP "+r.status); openTaskForm(null, await r.json()); }
+  catch(e){ $("#err").textContent="加载任务失败: "+e; }
+}
 function syncTypes(form){
-  const m=meta; const sel=form.game_id.selectedOptions[0];
+  const sel=form.game_id.selectedOptions[0];
   const adapter=sel?sel.getAttribute("data-adapter"):"";
-  const a=(m.adapters||[]).find(x=>x.key===adapter);
-  const dl=form.querySelector("#typelist");
-  dl.innerHTML=(a?a.task_types:[]).map(t=>`<option value="${t}">`).join("");
+  const a=(meta.adapters||[]).find(x=>x.key===adapter);
+  form.querySelector("#typelist").innerHTML=(a?a.task_types:[]).map(t=>`<option value="${t}">`).join("");
   if(a&&a.task_types.length&&!form.type.value) form.type.value=a.task_types[0];
 }
 async function submitTask(ev){
@@ -389,11 +407,77 @@ async function submitTask(ev){
   try{ JSON.parse(pr); }catch(_){ $("#ferr").textContent="params 不是合法 JSON"; return false; }
   const body={game_id:f.game_id.value,name:f.name.value.trim(),type:f.type.value.trim(),params:pr,
     timeout_sec:+f.timeout_sec.value||0,max_retries:+f.max_retries.value||0,enabled:f.enabled.checked};
-  try{ const r=await api("/api/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    if(!r.ok){ $("#ferr").textContent=(await r.json()).error||("HTTP "+r.status); return false; }
-    closeModal(); load(); }
-  catch(e){ $("#ferr").textContent=String(e); }
+  const url = editId? "/api/tasks/"+editId : "/api/tasks";
+  await submitForm(url, editId?"PUT":"POST", body);
   return false;
+}
+
+// --- plan form (create + edit) ---
+function openPlanForm(gameId, plan){
+  const games=(lastData&&lastData.games)||[];
+  const g=games.find(x=>x.id===gameId);
+  const tasks=(g&&g.task_list)||[];
+  if(!plan && !tasks.length){ alert("该游戏还没有任务，无法创建计划"); return; }
+  editId = plan? plan.id : null;
+  const topts=tasks.map(t=>`<option value="${t.id}" ${plan&&plan.task_id===t.id?'selected':''}>${esc(t.name)} (#${t.id})</option>`).join("")
+    || (plan?`<option value="${plan.task_id}" selected>#${plan.task_id}</option>`:"");
+  openModal(plan?("编辑计划 #"+plan.id):"添加计划",`<form class="form" onsubmit="return submitPlan(event)">
+    <label>名称<input name="name" required value="${plan?esc(plan.name):''}"></label>
+    <label>任务<select name="task_id">${topts}</select></label>
+    <label>cron 表达式（5 段，或 @daily / @every 6h）
+      <input name="cron_expr" required placeholder="30 6 * * *" value="${plan?esc(plan.cron):''}"></label>
+    <label class="toggle"><input type="checkbox" name="enabled" ${!plan||plan.enabled?'checked':''}> 启用</label>
+    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">${plan?'保存':'创建'}</button></div>
+  </form><div id="ferr" class="hint" style="color:var(--err)"></div>`);
+}
+function editPlan(p){ openPlanForm(null, p); }
+async function submitPlan(ev){
+  ev.preventDefault(); const f=ev.target;
+  const body={name:f.name.value.trim(),task_id:+f.task_id.value,cron_expr:f.cron_expr.value.trim(),enabled:f.enabled.checked};
+  const url = editId? "/api/plans/"+editId : "/api/plans";
+  await submitForm(url, editId?"PUT":"POST", body);
+  return false;
+}
+
+// shared submit: POST/PUT a JSON body, surface server error, refresh on success.
+async function submitForm(url, method, body){
+  try{
+    const r=await api(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok){ let msg; try{ msg=(await r.json()).error; }catch(_){ } $("#ferr").textContent=msg||("HTTP "+r.status); return; }
+    closeModal(); load();
+  }catch(e){ $("#ferr").textContent=String(e); }
+}
+
+// --- execution history (filterable) ---
+async function openHistory(){
+  openModal("执行历史",`<div class="form">
+    <div class="two">
+      <label>状态<select id="h-status"><option value="">全部</option>
+        <option>success</option><option>failed</option><option>running</option>
+        <option>pending</option><option>cancelled</option></select></label>
+      <label>条数<select id="h-limit"><option>50</option><option>100</option><option>200</option></select></label>
+    </div>
+    <table><thead><tr><th>#</th><th>任务</th><th>状态</th><th>触发</th><th>开始</th><th>用时</th><th>码</th></tr></thead>
+    <tbody id="h-rows"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody></table>
+  </div>`);
+  $("#h-status").addEventListener("change",loadHistory);
+  $("#h-limit").addEventListener("change",loadHistory);
+  loadHistory();
+}
+async function loadHistory(){
+  const st=$("#h-status").value, lim=$("#h-limit").value;
+  const taskName={}; (lastData&&lastData.games||[]).forEach(g=>(g.task_list||[]).forEach(t=>taskName[t.id]=t.name));
+  try{
+    const r=await api(`/api/executions?limit=${lim}${st?'&status='+st:''}`);
+    const ex=await r.json();
+    $("#h-rows").innerHTML = (ex||[]).map(e=>`<tr onclick="openExec(${e.id})">
+      <td>${e.id}</td><td>${esc(taskName[e.task_id]||('#'+e.task_id))}</td>
+      <td><span class="st ${e.status}">${e.status}</span></td><td>${esc(e.trigger)}</td>
+      <td>${fmtTime(e.start_time)}</td>
+      <td>${dur(e.start_time&&e.end_time?(new Date(e.end_time)-new Date(e.start_time))/1000:0)}</td>
+      <td>${e.exit_code==null?'—':e.exit_code}</td></tr>`).join("")
+      || '<tr><td colspan="7" class="empty">无记录</td></tr>';
+  }catch(e){ $("#h-rows").innerHTML='<tr><td colspan="7" class="empty">加载失败</td></tr>'; }
 }
 
 // ---- wiring ----

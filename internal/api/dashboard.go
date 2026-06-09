@@ -92,8 +92,8 @@ func (s *Server) buildDashboard() (dashboard, error) {
 		return dashboard{}, err
 	}
 
-	taskGame := map[int64]string{}   // task id -> game id
-	taskName := map[int64]string{}   // task id -> name
+	taskGame := map[int64]string{} // task id -> game id
+	taskName := map[int64]string{} // task id -> name
 	byGame := map[string]*gameSummary{}
 
 	d := dashboard{GeneratedAt: time.Now()}
