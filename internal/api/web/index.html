@@ -34,14 +34,23 @@
   .stat.alert .v{color:var(--err)}
   .res{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:20px}
   .res.over{border-color:var(--err);box-shadow:0 0 0 1px var(--err) inset}
-  .res .rh{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
-  .res .rh .t{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
-  .res .banner{color:var(--err);font-weight:600;font-size:13px}
-  .bar{display:grid;grid-template-columns:52px 1fr 56px;align-items:center;gap:10px;margin:6px 0}
-  .bar .lab{color:var(--muted);font-size:12px}
-  .track{height:10px;background:var(--panel2);border-radius:6px;overflow:hidden}
+  .res .rh{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .res .rh .t{font-size:13px;font-weight:600;letter-spacing:.4px}
+  .res .rh .status{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600}
+  .res .rh .status.ok{background:rgba(55,178,77,.15);color:var(--ok)}
+  .res .rh .status.over{background:rgba(240,62,62,.15);color:var(--err)}
+  .res .rh .meta{margin-left:auto}
+  .res .banner{margin-top:12px;color:var(--err);font-weight:600;font-size:13px}
+  .gauges{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .gauge{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px 14px}
+  .gauge.over{border-color:var(--err)}
+  .g-top{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px}
+  .g-label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+  .g-val{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+  .g-sub{color:var(--muted);font-size:11px;margin-top:6px}
+  .track{height:8px;background:var(--bg);border-radius:6px;overflow:hidden}
   .fill{height:100%;border-radius:6px;transition:width .4s linear,background .4s}
-  .bar .pct{text-align:right;font-variant-numeric:tabular-nums}
+  @media(max-width:560px){.gauges{grid-template-columns:1fr}}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-bottom:24px}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
   .card .top{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border)}
@@ -241,24 +250,33 @@ function gameCard(g){
   </div>`;
 }
 
-function resBar(label,pct,threshold){
+function gauge(label, pct, threshold, sub){
   const v=Math.max(0,Math.min(100,pct||0));
-  const col = (threshold>0&&v>=threshold)?'var(--err)':(v>=70?'var(--warn)':'var(--ok)');
-  return `<div class="bar"><span class="lab">${label}</span>
+  const over=threshold>0&&v>=threshold;
+  const col = over?'var(--err)':(v>=70?'var(--warn)':'var(--ok)');
+  return `<div class="gauge ${over?'over':''}">
+    <div class="g-top"><span class="g-label">${label}</span><span class="g-val" style="color:${col}">${v.toFixed(0)}%</span></div>
     <div class="track"><div class="fill" style="width:${v}%;background:${col}"></div></div>
-    <span class="pct">${v.toFixed(0)}%</span></div>`;
+    <div class="g-sub">${sub}</div>
+  </div>`;
 }
 function renderResource(r){
   const el=$("#resource");
   if(!r||!r.enabled){ el.innerHTML=""; return; }
-  const memTxt = r.mem_total_mb ? ` · 内存 ${(r.mem_used_mb/1024).toFixed(1)} / ${(r.mem_total_mb/1024).toFixed(1)} GB` : "";
-  const head = r.overloaded
-    ? `<span class="banner">⚠ 资源过载：${esc(r.reason)}${r.policy==='pause'?'（已暂停定时任务）':''}</span>`
-    : `<span class="meta">阈值 CPU ${r.cpu_threshold}% / 内存 ${r.mem_threshold}% · 策略 ${r.policy==='pause'?'过载暂停':'仅提醒'}${memTxt}</span>`;
+  const memSub = r.mem_total_mb ? `${(r.mem_used_mb/1024).toFixed(1)} / ${(r.mem_total_mb/1024).toFixed(1)} GB` : `阈值 ${r.mem_threshold}%`;
+  const status = r.overloaded ? `<span class="status over">⚠ 过载</span>` : `<span class="status ok">● 正常</span>`;
+  const banner = r.overloaded
+    ? `<div class="banner">⚠ 资源过载：${esc(r.reason)}${r.policy==='pause'?'（已暂停定时任务）':''}</div>` : "";
   el.innerHTML = `<div class="res ${r.overloaded?'over':''}">
-    <div class="rh"><span class="t">资源监控</span>${head}</div>
-    ${resBar('CPU', r.cpu_percent, r.cpu_threshold)}
-    ${resBar('内存', r.mem_percent, r.mem_threshold)}
+    <div class="rh">
+      <span class="t">资源监控</span>${status}
+      <span class="meta">阈值 CPU ${r.cpu_threshold}% / 内存 ${r.mem_threshold}% · 策略 ${r.policy==='pause'?'过载暂停':'仅提醒'}</span>
+    </div>
+    <div class="gauges">
+      ${gauge('CPU', r.cpu_percent, r.cpu_threshold, `阈值 ${r.cpu_threshold}%`)}
+      ${gauge('内存', r.mem_percent, r.mem_threshold, memSub)}
+    </div>
+    ${banner}
   </div>`;
 }
 
