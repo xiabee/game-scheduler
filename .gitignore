@@ -16,3 +16,5 @@ config.json
 # local launch/preview config & scratch logs
 .claude/
 stest.*
+run.log
+run.err

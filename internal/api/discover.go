@@ -18,7 +18,7 @@ func (s *Server) discoverScan(w http.ResponseWriter, r *http.Request) {
 		MaxDepth int      `json:"max_depth"`
 	}
 	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}

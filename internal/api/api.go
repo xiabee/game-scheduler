@@ -400,8 +400,11 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
+// maxBodyBytes caps request bodies; all legitimate payloads here are tiny.
+const maxBodyBytes = 1 << 20 // 1 MiB
+
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
