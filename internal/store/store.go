@@ -4,8 +4,10 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver, no cgo
@@ -39,7 +41,71 @@ func Open(path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(schema)
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	for _, col := range []struct {
+		table string
+		name  string
+		def   string
+	}{
+		{"tasks", "route_id", "INTEGER REFERENCES routes(id) ON DELETE SET NULL"},
+		{"routes", "adapter", "TEXT NOT NULL DEFAULT ''"},
+		{"routes", "route_type", "TEXT NOT NULL DEFAULT 'other'"},
+		{"routes", "tags", "TEXT NOT NULL DEFAULT '[]'"},
+		{"routes", "source_url", "TEXT NOT NULL DEFAULT ''"},
+		{"routes", "source_title", "TEXT NOT NULL DEFAULT ''"},
+		{"routes", "last_run_at", "TIMESTAMP"},
+		{"routes", "success_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"routes", "fail_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"routes", "updated_at", "TIMESTAMP"},
+	} {
+		if err := s.ensureColumn(col.table, col.name, col.def); err != nil {
+			return err
+		}
+	}
+	_, err := s.db.Exec(`
+UPDATE routes SET updated_at=created_at WHERE updated_at IS NULL;
+UPDATE routes SET route_type='other' WHERE route_type='';
+UPDATE routes SET tags='[]' WHERE tags='';
+CREATE INDEX IF NOT EXISTS idx_routes_type ON routes(route_type);
+CREATE INDEX IF NOT EXISTS idx_routes_updated ON routes(updated_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_route ON tasks(route_id);
+`)
+	return err
+}
+
+func (s *Store) ensureColumn(table, name, def string) error {
+	rows, err := s.db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	exists := false
+	for rows.Next() {
+		var cid int
+		var colName, colType string
+		var notNull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &colName, &colType, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if colName == name {
+			exists = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, name, def))
 	return err
 }
 
@@ -59,6 +125,7 @@ CREATE TABLE IF NOT EXISTS games (
 CREATE TABLE IF NOT EXISTS tasks (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id         TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    route_id        INTEGER REFERENCES routes(id) ON DELETE SET NULL,
     name            TEXT NOT NULL,
     type            TEXT NOT NULL,
     params          TEXT NOT NULL DEFAULT '',
@@ -74,10 +141,19 @@ CREATE INDEX IF NOT EXISTS idx_tasks_game ON tasks(game_id);
 CREATE TABLE IF NOT EXISTS routes (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id     TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    adapter     TEXT NOT NULL DEFAULT '',
+    route_type  TEXT NOT NULL DEFAULT 'other',
+    tags        TEXT NOT NULL DEFAULT '[]',
     name        TEXT NOT NULL,
     file_path   TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
-    created_at  TIMESTAMP NOT NULL
+    source_url  TEXT NOT NULL DEFAULT '',
+    source_title TEXT NOT NULL DEFAULT '',
+    last_run_at TIMESTAMP,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    fail_count INTEGER NOT NULL DEFAULT 0,
+    created_at  TIMESTAMP NOT NULL,
+    updated_at  TIMESTAMP NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_routes_game ON routes(game_id);
 
@@ -205,9 +281,9 @@ func (s *Store) DeleteGame(id string) error {
 func (s *Store) CreateTask(t Task) (Task, error) {
 	now := time.Now().UTC()
 	t.CreatedAt, t.UpdatedAt = now, now
-	res, err := s.db.Exec(`INSERT INTO tasks (game_id,name,type,params,max_retries,retry_delay_sec,timeout_sec,enabled,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		t.GameID, t.Name, t.Type, t.Params, t.MaxRetries, t.RetryDelaySec, t.TimeoutSec, b2i(t.Enabled), t.CreatedAt, t.UpdatedAt)
+	res, err := s.db.Exec(`INSERT INTO tasks (game_id,route_id,name,type,params,max_retries,retry_delay_sec,timeout_sec,enabled,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		t.GameID, t.RouteID, t.Name, t.Type, t.Params, t.MaxRetries, t.RetryDelaySec, t.TimeoutSec, b2i(t.Enabled), t.CreatedAt, t.UpdatedAt)
 	if err != nil {
 		return Task{}, err
 	}
@@ -218,8 +294,8 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 // UpdateTask updates mutable fields of a task.
 func (s *Store) UpdateTask(t Task) (Task, error) {
 	t.UpdatedAt = time.Now().UTC()
-	res, err := s.db.Exec(`UPDATE tasks SET game_id=?,name=?,type=?,params=?,max_retries=?,retry_delay_sec=?,timeout_sec=?,enabled=?,updated_at=? WHERE id=?`,
-		t.GameID, t.Name, t.Type, t.Params, t.MaxRetries, t.RetryDelaySec, t.TimeoutSec, b2i(t.Enabled), t.UpdatedAt, t.ID)
+	res, err := s.db.Exec(`UPDATE tasks SET game_id=?,route_id=?,name=?,type=?,params=?,max_retries=?,retry_delay_sec=?,timeout_sec=?,enabled=?,updated_at=? WHERE id=?`,
+		t.GameID, t.RouteID, t.Name, t.Type, t.Params, t.MaxRetries, t.RetryDelaySec, t.TimeoutSec, b2i(t.Enabled), t.UpdatedAt, t.ID)
 	if err != nil {
 		return Task{}, err
 	}
@@ -233,8 +309,8 @@ func (s *Store) UpdateTask(t Task) (Task, error) {
 func (s *Store) GetTask(id int64) (Task, error) {
 	var t Task
 	var enabled int
-	err := s.db.QueryRow(`SELECT id,game_id,name,type,params,max_retries,retry_delay_sec,timeout_sec,enabled,created_at,updated_at FROM tasks WHERE id=?`, id).
-		Scan(&t.ID, &t.GameID, &t.Name, &t.Type, &t.Params, &t.MaxRetries, &t.RetryDelaySec, &t.TimeoutSec, &enabled, &t.CreatedAt, &t.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id,game_id,route_id,name,type,params,max_retries,retry_delay_sec,timeout_sec,enabled,created_at,updated_at FROM tasks WHERE id=?`, id).
+		Scan(&t.ID, &t.GameID, &t.RouteID, &t.Name, &t.Type, &t.Params, &t.MaxRetries, &t.RetryDelaySec, &t.TimeoutSec, &enabled, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Task{}, ErrNotFound
 	}
@@ -247,7 +323,7 @@ func (s *Store) GetTask(id int64) (Task, error) {
 
 // ListTasks returns tasks, optionally filtered by gameID (empty = all).
 func (s *Store) ListTasks(gameID string) ([]Task, error) {
-	q := `SELECT id,game_id,name,type,params,max_retries,retry_delay_sec,timeout_sec,enabled,created_at,updated_at FROM tasks`
+	q := `SELECT id,game_id,route_id,name,type,params,max_retries,retry_delay_sec,timeout_sec,enabled,created_at,updated_at FROM tasks`
 	var args []any
 	if gameID != "" {
 		q += ` WHERE game_id=?`
@@ -263,7 +339,7 @@ func (s *Store) ListTasks(gameID string) ([]Task, error) {
 	for rows.Next() {
 		var t Task
 		var enabled int
-		if err := rows.Scan(&t.ID, &t.GameID, &t.Name, &t.Type, &t.Params, &t.MaxRetries, &t.RetryDelaySec, &t.TimeoutSec, &enabled, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.GameID, &t.RouteID, &t.Name, &t.Type, &t.Params, &t.MaxRetries, &t.RetryDelaySec, &t.TimeoutSec, &enabled, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.Enabled = enabled != 0
@@ -288,9 +364,18 @@ func (s *Store) DeleteTask(id int64) error {
 
 // CreateRoute inserts a route.
 func (s *Store) CreateRoute(r Route) (Route, error) {
-	r.CreatedAt = time.Now().UTC()
-	res, err := s.db.Exec(`INSERT INTO routes (game_id,name,file_path,description,created_at) VALUES (?,?,?,?,?)`,
-		r.GameID, r.Name, r.FilePath, r.Description, r.CreatedAt)
+	now := time.Now().UTC()
+	r.CreatedAt, r.UpdatedAt = now, now
+	if r.RouteType == "" {
+		r.RouteType = "other"
+	}
+	tags, err := encodeTags(r.Tags)
+	if err != nil {
+		return Route{}, err
+	}
+	res, err := s.db.Exec(`INSERT INTO routes (game_id,adapter,route_type,tags,name,file_path,description,source_url,source_title,last_run_at,success_count,fail_count,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.GameID, r.Adapter, r.RouteType, tags, r.Name, r.FilePath, r.Description, r.SourceURL, r.SourceTitle, r.LastRunAt, r.SuccessCount, r.FailCount, r.CreatedAt, r.UpdatedAt)
 	if err != nil {
 		return Route{}, err
 	}
@@ -298,15 +383,84 @@ func (s *Store) CreateRoute(r Route) (Route, error) {
 	return r, nil
 }
 
+// GetRoute fetches a route by id.
+func (s *Store) GetRoute(id int64) (Route, error) {
+	var r Route
+	var tags string
+	err := s.db.QueryRow(`SELECT id,game_id,adapter,route_type,tags,name,file_path,description,source_url,source_title,last_run_at,success_count,fail_count,created_at,updated_at FROM routes WHERE id=?`, id).
+		Scan(&r.ID, &r.GameID, &r.Adapter, &r.RouteType, &tags, &r.Name, &r.FilePath, &r.Description, &r.SourceURL, &r.SourceTitle, &r.LastRunAt, &r.SuccessCount, &r.FailCount, &r.CreatedAt, &r.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Route{}, ErrNotFound
+	}
+	if err != nil {
+		return Route{}, err
+	}
+	r.Tags = decodeTags(tags)
+	return r, nil
+}
+
+// UpdateRoute updates mutable route metadata.
+func (s *Store) UpdateRoute(r Route) (Route, error) {
+	if r.RouteType == "" {
+		r.RouteType = "other"
+	}
+	r.UpdatedAt = time.Now().UTC()
+	tags, err := encodeTags(r.Tags)
+	if err != nil {
+		return Route{}, err
+	}
+	res, err := s.db.Exec(`UPDATE routes SET game_id=?,adapter=?,route_type=?,tags=?,name=?,file_path=?,description=?,source_url=?,source_title=?,last_run_at=?,success_count=?,fail_count=?,updated_at=? WHERE id=?`,
+		r.GameID, r.Adapter, r.RouteType, tags, r.Name, r.FilePath, r.Description, r.SourceURL, r.SourceTitle, r.LastRunAt, r.SuccessCount, r.FailCount, r.UpdatedAt, r.ID)
+	if err != nil {
+		return Route{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Route{}, ErrNotFound
+	}
+	return s.GetRoute(r.ID)
+}
+
 // ListRoutes returns routes, optionally filtered by gameID.
 func (s *Store) ListRoutes(gameID string) ([]Route, error) {
-	q := `SELECT id,game_id,name,file_path,description,created_at FROM routes`
+	return s.SearchRoutes(RouteFilter{GameID: gameID})
+}
+
+// RouteFilter narrows route searches.
+type RouteFilter struct {
+	GameID    string
+	RouteType string
+	Tag       string
+	Query     string
+	Limit     int
+}
+
+// SearchRoutes returns route assets newest-first. Query matches name, file path,
+// description, source title, source URL, and tags.
+func (s *Store) SearchRoutes(f RouteFilter) ([]Route, error) {
+	q := `SELECT id,game_id,adapter,route_type,tags,name,file_path,description,source_url,source_title,last_run_at,success_count,fail_count,created_at,updated_at FROM routes WHERE 1=1`
 	var args []any
-	if gameID != "" {
-		q += ` WHERE game_id=?`
-		args = append(args, gameID)
+	if f.GameID != "" {
+		q += ` AND game_id=?`
+		args = append(args, f.GameID)
 	}
-	q += ` ORDER BY id`
+	if f.RouteType != "" {
+		q += ` AND route_type=?`
+		args = append(args, f.RouteType)
+	}
+	if f.Tag != "" {
+		q += ` AND tags LIKE ?`
+		args = append(args, "%"+f.Tag+"%")
+	}
+	if f.Query != "" {
+		like := "%" + strings.ToLower(f.Query) + "%"
+		q += ` AND (lower(name) LIKE ? OR lower(file_path) LIKE ? OR lower(description) LIKE ? OR lower(source_title) LIKE ? OR lower(source_url) LIKE ? OR lower(tags) LIKE ?)`
+		args = append(args, like, like, like, like, like, like)
+	}
+	limit := f.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	q += fmt.Sprintf(` ORDER BY updated_at DESC, id DESC LIMIT %d`, limit)
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -315,12 +469,59 @@ func (s *Store) ListRoutes(gameID string) ([]Route, error) {
 	out := []Route{}
 	for rows.Next() {
 		var r Route
-		if err := rows.Scan(&r.ID, &r.GameID, &r.Name, &r.FilePath, &r.Description, &r.CreatedAt); err != nil {
+		var tags string
+		if err := rows.Scan(&r.ID, &r.GameID, &r.Adapter, &r.RouteType, &tags, &r.Name, &r.FilePath, &r.Description, &r.SourceURL, &r.SourceTitle, &r.LastRunAt, &r.SuccessCount, &r.FailCount, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
+		r.Tags = decodeTags(tags)
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// UpsertRouteByFile inserts or updates one scanned route asset.
+func (s *Store) UpsertRouteByFile(r Route) (Route, bool, error) {
+	var id int64
+	err := s.db.QueryRow(`SELECT id FROM routes WHERE game_id=? AND file_path=?`, r.GameID, r.FilePath).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		out, err := s.CreateRoute(r)
+		return out, true, err
+	}
+	if err != nil {
+		return Route{}, false, err
+	}
+	existing, err := s.GetRoute(id)
+	if err != nil {
+		return Route{}, false, err
+	}
+	existing.Adapter = r.Adapter
+	existing.RouteType = r.RouteType
+	existing.Tags = mergeTags(existing.Tags, r.Tags)
+	existing.Name = r.Name
+	existing.FilePath = r.FilePath
+	if existing.Description == "" {
+		existing.Description = r.Description
+	}
+	out, err := s.UpdateRoute(existing)
+	return out, false, err
+}
+
+// RecordRouteRun updates aggregate stats after a task associated with a route
+// finishes.
+func (s *Store) RecordRouteRun(routeID int64, success bool, at time.Time) error {
+	col := "fail_count"
+	if success {
+		col = "success_count"
+	}
+	res, err := s.db.Exec(fmt.Sprintf(`UPDATE routes SET last_run_at=?, %s=%s+1, updated_at=? WHERE id=?`, col, col),
+		at.UTC(), at.UTC(), routeID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // DeleteRoute removes a route.
@@ -333,6 +534,40 @@ func (s *Store) DeleteRoute(id int64) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func encodeTags(tags []string) (string, error) {
+	clean := mergeTags(nil, tags)
+	b, err := json.Marshal(clean)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func decodeTags(s string) []string {
+	var tags []string
+	if err := json.Unmarshal([]byte(s), &tags); err == nil {
+		return mergeTags(nil, tags)
+	}
+	if s == "" {
+		return []string{}
+	}
+	return mergeTags(nil, strings.Split(s, ","))
+}
+
+func mergeTags(base, extra []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, tag := range append(base, extra...) {
+		tag = strings.TrimSpace(strings.ToLower(tag))
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
+	}
+	return out
 }
 
 // ---------- Plans ----------

@@ -17,6 +17,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"text/template"
 	"time"
@@ -180,18 +182,28 @@ func (s *Service) markCancelledBeforeStart(execID int64) {
 // without launching anything. It is the quickest way to confirm a game is wired
 // up correctly after installing its tool.
 type Preflight struct {
-	TaskID           int64  `json:"task_id"`
-	TaskName         string `json:"task_name"`
-	GameID           string `json:"game_id"`
-	Adapter          string `json:"adapter"`
-	Command          string `json:"command"`
-	Executable       string `json:"executable"`
-	ExecutableExists bool   `json:"executable_exists"`
-	WorkingDir       string `json:"working_dir"`
-	WorkingDirExists bool   `json:"working_dir_exists"`
-	ValidationError  string `json:"validation_error,omitempty"`
-	BuildError       string `json:"build_error,omitempty"`
-	Ready            bool   `json:"ready"`
+	TaskID           int64            `json:"task_id"`
+	TaskName         string           `json:"task_name"`
+	GameID           string           `json:"game_id"`
+	Adapter          string           `json:"adapter"`
+	Command          string           `json:"command"`
+	Executable       string           `json:"executable"`
+	ExecutableExists bool             `json:"executable_exists"`
+	WorkingDir       string           `json:"working_dir"`
+	WorkingDirExists bool             `json:"working_dir_exists"`
+	Checks           []PreflightCheck `json:"checks"`
+	Missing          []string         `json:"missing"`
+	ValidationError  string           `json:"validation_error,omitempty"`
+	BuildError       string           `json:"build_error,omitempty"`
+	Ready            bool             `json:"ready"`
+}
+
+// PreflightCheck is one filesystem prerequisite checked before a task is run.
+type PreflightCheck struct {
+	Key    string `json:"key"`
+	Kind   string `json:"kind"` // executable | directory | file
+	Path   string `json:"path"`
+	Exists bool   `json:"exists"`
 }
 
 // Preflight resolves the command for taskID and checks its prerequisites.
@@ -224,8 +236,96 @@ func (s *Service) Preflight(taskID int64) (Preflight, error) {
 	pf.ExecutableExists = executableExists(spec.Path)
 	pf.WorkingDir = spec.Dir
 	pf.WorkingDirExists = spec.Dir == "" || dirExists(spec.Dir)
-	pf.Ready = pf.ValidationError == "" && pf.ExecutableExists && pf.WorkingDirExists
+	executableKey := "executable"
+	if strings.TrimSpace(g.ToolPath) != "" && spec.Path == g.ToolPath {
+		executableKey = "tool_path"
+	}
+	pf.addExecutableCheck(executableKey, spec.Path)
+	if spec.Dir != "" {
+		pf.addDirCheck("working_dir", spec.Dir)
+	}
+	pf.addExtraConfigDirChecks(g)
+	pf.addPythonEntryChecks(g, t)
+	pf.Ready = pf.ValidationError == "" && pf.BuildError == "" && len(pf.Missing) == 0
 	return pf, nil
+}
+
+func (pf *Preflight) addExecutableCheck(key, path string) {
+	ok := executableExists(path)
+	pf.Checks = append(pf.Checks, PreflightCheck{Key: key, Kind: "executable", Path: path, Exists: ok})
+	if !ok {
+		pf.Missing = append(pf.Missing, fmt.Sprintf("%s executable not found: %s", key, path))
+	}
+}
+
+func (pf *Preflight) addDirCheck(key, path string) {
+	ok := dirExists(path)
+	pf.Checks = append(pf.Checks, PreflightCheck{Key: key, Kind: "directory", Path: path, Exists: ok})
+	if !ok {
+		pf.Missing = append(pf.Missing, fmt.Sprintf("%s directory not found: %s", key, path))
+	}
+}
+
+func (pf *Preflight) addFileCheck(key, path string) {
+	ok := fileExists(path)
+	pf.Checks = append(pf.Checks, PreflightCheck{Key: key, Kind: "file", Path: path, Exists: ok})
+	if !ok {
+		pf.Missing = append(pf.Missing, fmt.Sprintf("%s file not found: %s", key, path))
+	}
+}
+
+func (pf *Preflight) addExtraConfigDirChecks(g store.Game) {
+	ec, err := g.ExtraConfigMap()
+	if err != nil {
+		return
+	}
+	keys := make([]string, 0, len(ec))
+	for k := range ec {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !strings.HasSuffix(k, "_dir") {
+			continue
+		}
+		path, ok := ec[k].(string)
+		if !ok || strings.TrimSpace(path) == "" {
+			continue
+		}
+		pf.addDirCheck("extra_config."+k, strings.TrimSpace(path))
+	}
+}
+
+func (pf *Preflight) addPythonEntryChecks(g store.Game, t store.Task) {
+	if g.Adapter != "hsr" {
+		return
+	}
+	ec, err := g.ExtraConfigMap()
+	if err != nil {
+		return
+	}
+	var dirKey, entryKey, defEntry string
+	switch t.Type {
+	case "march7th_daily":
+		dirKey, entryKey, defEntry = "march7th_dir", "march7th_entry", "main.py"
+	case "fhoe_route":
+		dirKey, entryKey, defEntry = "fhoe_dir", "fhoe_entry", "main.py"
+	default:
+		return
+	}
+	dir := strings.TrimSpace(stringValue(ec[dirKey]))
+	entry := strings.TrimSpace(stringValue(ec[entryKey]))
+	if entry == "" {
+		entry = defEntry
+	}
+	if dir == "" || entry == "" {
+		return
+	}
+	path := entry
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, entry)
+	}
+	pf.addFileCheck("extra_config."+entryKey, path)
 }
 
 // executableExists is true if path is an existing file or resolvable on PATH.
@@ -245,6 +345,18 @@ func executableExists(path string) bool {
 func dirExists(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && fi.IsDir()
+}
+
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}
+
+func stringValue(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // execute performs the full lifecycle for an existing pending execution row.
@@ -329,6 +441,7 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	if err := s.store.UpdateExecution(exec); err != nil {
 		return err
 	}
+	s.recordRouteRun(t, exec)
 	s.bus.Notify()
 	if exec.Status == store.StatusFailed {
 		s.alert("task_failed", "任务失败:"+t.Name, exec.ErrorMsg)
@@ -349,7 +462,21 @@ func (s *Service) finishWithError(exec store.Execution, cause error) error {
 	exec.ScreenshotPath = s.captureScreenshot(exec.ID)
 	s.log.Error("task setup failed", "exec_id", exec.ID, "err", cause)
 	s.alert("task_failed", fmt.Sprintf("任务启动失败 #%d", exec.TaskID), cause.Error())
-	return s.store.UpdateExecution(exec)
+	err := s.store.UpdateExecution(exec)
+	if t, loadErr := s.store.GetTask(exec.TaskID); loadErr == nil {
+		s.recordRouteRun(t, exec)
+	}
+	return err
+}
+
+func (s *Service) recordRouteRun(t store.Task, exec store.Execution) {
+	if t.RouteID == nil || exec.EndTime == nil {
+		return
+	}
+	success := exec.Status == store.StatusSuccess
+	if err := s.store.RecordRouteRun(*t.RouteID, success, *exec.EndTime); err != nil {
+		s.log.Warn("record route run", "task_id", t.ID, "route_id", *t.RouteID, "err", err)
+	}
 }
 
 // captureScreenshot computes the destination path and, if a screenshot command

@@ -97,6 +97,10 @@ func (s *Server) Handler() http.Handler {
 	// Routes
 	mux.HandleFunc("GET /api/routes", s.listRoutes)
 	mux.HandleFunc("POST /api/routes", s.createRoute)
+	mux.HandleFunc("POST /api/routes/scan", s.scanRoutes)
+	mux.HandleFunc("GET /api/routes/search", s.searchRoutes)
+	mux.HandleFunc("PUT /api/routes/{id}", s.updateRoute)
+	mux.HandleFunc("POST /api/routes/{id}/create-task", s.createTaskFromRoute)
 	mux.HandleFunc("DELETE /api/routes/{id}", s.deleteRoute)
 
 	// Plans
@@ -251,7 +255,12 @@ func (s *Server) preflightTask(w http.ResponseWriter, r *http.Request) {
 // ---------- routes ----------
 
 func (s *Server) listRoutes(w http.ResponseWriter, r *http.Request) {
-	routes, err := s.store.ListRoutes(r.URL.Query().Get("game_id"))
+	routes, err := s.store.SearchRoutes(store.RouteFilter{
+		GameID:    r.URL.Query().Get("game_id"),
+		RouteType: r.URL.Query().Get("type"),
+		Tag:       r.URL.Query().Get("tag"),
+		Query:     r.URL.Query().Get("q"),
+	})
 	respond(w, routes, err)
 }
 
@@ -260,6 +269,7 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &rt) {
 		return
 	}
+	s.prepareRoute(&rt)
 	out, err := s.store.CreateRoute(rt)
 	respondCreated(w, out, s.changed(err))
 }

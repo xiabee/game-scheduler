@@ -1,9 +1,12 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -131,5 +134,107 @@ func TestPlanRunTimes(t *testing.T) {
 	got, _ := s.GetPlan(p.ID)
 	if got.LastRunAt == nil || !got.LastRunAt.Equal(now) {
 		t.Errorf("last run not persisted: %v", got.LastRunAt)
+	}
+}
+
+func TestRouteAssetCRUDSearchAndStats(t *testing.T) {
+	s := newTestStore(t)
+	mkGame(t, s, "g")
+	rt, err := s.CreateRoute(Route{
+		GameID: "g", Adapter: "genshin", RouteType: "collect", Tags: []string{"mondstadt", "collect"},
+		Name: "风车菊采集路线", FilePath: "D:/routes/风车菊.json", SourceURL: "https://example.com/video",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.UpdatedAt.IsZero() || rt.RouteType != "collect" {
+		t.Fatalf("route defaults not populated: %+v", rt)
+	}
+	got, err := s.SearchRoutes(RouteFilter{Query: "wind", Tag: "mondstadt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("unexpected latin match: %+v", got)
+	}
+	got, err = s.SearchRoutes(RouteFilter{Query: "风车", Tag: "mondstadt", RouteType: "collect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Tags[0] != "mondstadt" {
+		t.Fatalf("route search failed: %+v", got)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := s.RecordRouteRun(rt.ID, true, now); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := s.GetRoute(rt.ID)
+	if after.SuccessCount != 1 || after.FailCount != 0 || after.LastRunAt == nil {
+		t.Fatalf("stats not updated: %+v", after)
+	}
+}
+
+func TestRouteMigrationKeepsExistingRows(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+CREATE TABLE games (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, adapter TEXT NOT NULL,
+    tool_path TEXT NOT NULL DEFAULT '', working_dir TEXT NOT NULL DEFAULT '',
+    extra_config TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+CREATE TABLE routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    file_path TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL
+);
+CREATE TABLE tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    name TEXT NOT NULL, type TEXT NOT NULL, params TEXT NOT NULL DEFAULT '',
+    max_retries INTEGER NOT NULL DEFAULT 0, retry_delay_sec INTEGER NOT NULL DEFAULT 0,
+    timeout_sec INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	_, err = db.Exec(`INSERT INTO games (id,name,adapter,created_at,updated_at) VALUES (?,?,?,?,?)`, "g", "g", "genshin", now, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO routes (game_id,name,file_path,description,created_at) VALUES (?,?,?,?,?)`, "g", "old", "D:/old.json", "legacy", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	routes, err := s.ListRoutes("g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || routes[0].Name != "old" || routes[0].RouteType != "other" || routes[0].UpdatedAt.IsZero() {
+		t.Fatalf("legacy route not migrated: %+v", routes)
+	}
+	tk, err := s.CreateTask(Task{GameID: "g", RouteID: &routes[0].ID, Name: "task", Type: "script", Params: `{}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk.RouteID == nil || *tk.RouteID != routes[0].ID {
+		t.Fatalf("route_id not persisted: %+v", tk)
 	}
 }

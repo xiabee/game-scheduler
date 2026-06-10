@@ -8,7 +8,7 @@
 //
 //	games   list | get <id> | add | update <id> | delete <id>
 //	tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> | preflight <id>
-//	routes  list [-game id] | add | delete <id>
+//	routes  list [-game id] | search [-q text] [-game id] [-type t] [-tag tag] | add | update <id> | delete <id> | scan [-game id] | create-task <id>
 //	plans   list | get <id> | add | update <id> | delete <id>
 //	execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
 //	discover [-paths "F:/Games;D:/Tools"]   scan disk for tool executables
@@ -41,6 +41,8 @@ func main() {
 	limit := flag.String("limit", "", "limit (execs list)")
 	paths := flag.String("paths", "", "scan paths for 'discover', separated by ; or ,")
 	query := flag.String("q", "", "search keyword for 'guides'")
+	routeType := flag.String("type", "", "route type filter (routes search/list)")
+	tag := flag.String("tag", "", "route tag filter (routes search/list)")
 	flag.Parse()
 
 	args := flag.Args()
@@ -109,7 +111,34 @@ func main() {
 			err = c.crud("/api/tasks", action, id, *data, q)
 		}
 	case "routes":
-		err = c.crud("/api/routes", action, id, *data, q)
+		if *routeType != "" {
+			q.Set("type", *routeType)
+		}
+		if *tag != "" {
+			q.Set("tag", *tag)
+		}
+		if *query != "" {
+			q.Set("q", *query)
+		}
+		switch action {
+		case "scan":
+			body := []byte("{}")
+			if *gameID != "" {
+				b, _ := json.Marshal(map[string]string{"game_id": *gameID})
+				body = b
+			}
+			err = c.do("POST", "/api/routes/scan", body)
+		case "search":
+			p := "/api/routes/search"
+			if len(q) > 0 {
+				p += "?" + q.Encode()
+			}
+			err = c.do("GET", p, nil)
+		case "create-task":
+			err = c.do("POST", "/api/routes/"+id+"/create-task", nil)
+		default:
+			err = c.crud("/api/routes", action, id, *data, q)
+		}
 	case "plans":
 		err = c.crud("/api/plans", action, id, *data, nil)
 	case "execs", "executions":

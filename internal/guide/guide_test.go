@@ -106,6 +106,7 @@ func TestScanLocalRoutes(t *testing.T) {
 	}
 	mk("蒙德/风车菊采集路线.json")
 	mk("璃月/绝云椒椒_路线.json")
+	mk("活动/夏活速刷.txt")
 	mk("misc/readme.md")            // wrong ext
 	mk("node_modules/风车菊采集路线.json") // skipped dir
 
@@ -116,15 +117,30 @@ func TestScanLocalRoutes(t *testing.T) {
 	if got[0].Name != "风车菊采集路线" {
 		t.Errorf("name=%q", got[0].Name)
 	}
+	if got[0].RouteType != "collect" {
+		t.Errorf("route_type=%q want collect", got[0].RouteType)
+	}
+	if len(got[0].Tags) == 0 {
+		t.Errorf("expected inferred tags: %+v", got[0])
+	}
 
 	// multi-token: every token must match
 	if n := len(ScanLocalRoutes([]string{root}, "绝云 路线", 10)); n != 1 {
 		t.Errorf("multi-token match=%d want 1", n)
+	}
+	if n := len(ScanLocalRoutes([]string{root}, "活动 event", 10)); n != 1 {
+		t.Errorf("mixed path/type tag query=%d want 1", n)
+	}
+	if n := len(ScanLocalRoutes([]string{root}, "event", 10)); n != 1 {
+		t.Errorf("route_type tag match=%d want 1", n)
 	}
 	if n := len(ScanLocalRoutes([]string{root}, "不存在", 10)); n != 0 {
 		t.Errorf("no-match=%d want 0", n)
 	}
 	if n := len(ScanLocalRoutes([]string{root}, "", 10)); n != 0 {
 		t.Errorf("empty keyword should match nothing, got %d", n)
+	}
+	if n := len(ScanRouteAssets([]string{root}, 10)); n != 3 {
+		t.Errorf("asset scan=%d want 3", n)
 	}
 }

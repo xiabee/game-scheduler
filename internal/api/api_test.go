@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -287,5 +288,88 @@ func TestScreenshotTraversalBlocked(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		t.Error("path traversal should not succeed")
+	}
+}
+
+func TestRoutesAssetCenterAPI(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	scriptDir := t.TempDir()
+	routePath := filepath.Join(scriptDir, "蒙德", "风车菊采集路线.json")
+	if err := os.MkdirAll(filepath.Dir(routePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(routePath, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ecJSON, _ := json.Marshal(map[string]string{"scripts_dir": scriptDir})
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "原神", Adapter: "genshin", ToolPath: "BetterGI.exe", ExtraConfig: string(ecJSON), Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := srv.Client().Post(srv.URL+"/api/routes/scan", "application/json", strings.NewReader(`{"game_id":"genshin"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var scan struct {
+		Scanned int           `json:"scanned"`
+		Created int           `json:"created"`
+		Routes  []store.Route `json:"routes"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&scan); err != nil {
+		t.Fatal(err)
+	}
+	if scan.Scanned != 1 || scan.Created != 1 || len(scan.Routes) != 1 {
+		t.Fatalf("scan=%+v", scan)
+	}
+	if scan.Routes[0].RouteType != "collect" || len(scan.Routes[0].Tags) == 0 {
+		t.Fatalf("route enrichment failed: %+v", scan.Routes[0])
+	}
+
+	searchURL := srv.URL + "/api/routes/search?game_id=genshin&q=" + url.QueryEscape("蒙德") + "&type=collect&tag=蒙德"
+	resp, err = srv.Client().Get(searchURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var routes []store.Route
+	if err := json.NewDecoder(resp.Body).Decode(&routes); err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || routes[0].ID != scan.Routes[0].ID {
+		t.Fatalf("search routes=%+v", routes)
+	}
+
+	route := routes[0]
+	route.SourceURL = "https://example.com/guide"
+	route.SourceTitle = "攻略标题"
+	route.Tags = append(route.Tags, "manual")
+	body, _ := json.Marshal(route)
+	req, _ := http.NewRequest("PUT", srv.URL+"/api/routes/"+strconv.FormatInt(route.ID, 10), strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update status=%d", resp.StatusCode)
+	}
+
+	resp, err = srv.Client().Post(srv.URL+"/api/routes/"+strconv.FormatInt(route.ID, 10)+"/create-task", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var task store.Task
+	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+		t.Fatal(err)
+	}
+	var params map[string]string
+	if err := json.Unmarshal([]byte(task.Params), &params); err != nil {
+		t.Fatal(err)
+	}
+	if task.RouteID == nil || *task.RouteID != route.ID || task.Type != "script" || filepath.Clean(params["script"]) != filepath.Clean(routePath) {
+		t.Fatalf("created task=%+v", task)
 	}
 }

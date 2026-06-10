@@ -1,6 +1,7 @@
 # build output
 /bin/
 *.exe
+.gocache/
 
 # runtime data (db, logs, screenshots)
 /data/

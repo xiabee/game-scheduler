@@ -73,6 +73,7 @@
   .counts{display:flex;gap:8px;flex-wrap:wrap}
   .pill{font-size:12px;padding:2px 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--border)}
   .pill.ok{color:var(--ok)} .pill.err{color:var(--err)} .pill.run{color:var(--run)}
+  .tag{display:inline-block;font-size:11px;padding:2px 6px;border-radius:6px;background:rgba(59,130,246,.12);color:#9cc2ff;border:1px solid rgba(59,130,246,.25);margin:1px 3px 1px 0}
   .tasks,.plans{border-top:1px solid var(--border);margin-top:4px;padding-top:8px;display:grid;gap:6px}
   .task,.plan{display:flex;align-items:center;gap:8px;justify-content:space-between}
   .task .tn,.plan .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
@@ -140,6 +141,7 @@
   <button onclick="openGameForm()">+ 游戏</button>
   <button onclick="openTaskForm()">+ 任务</button>
   <button onclick="openScan()">扫描</button>
+  <button onclick="openRoutes()">路线</button>
   <button onclick="openGuides()">攻略</button>
   <button onclick="openHistory()">历史</button>
   <label class="toggle"><span class="live-dot" id="livedot"></span><input type="checkbox" id="live" checked> 实时</label>
@@ -442,6 +444,77 @@ function fillGameFromCandidate(c){
   openGameForm(pre); // create mode (no id), fields prefilled
 }
 
+// ---- modal: route asset center ----
+function tagList(tags){ return (tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join("") || '<span class="meta">—</span>'; }
+function openRoutes(){
+  const games=(lastData&&lastData.games)||[];
+  const gopts=['<option value="">全部游戏</option>'].concat(games.map(g=>`<option value="${esc(g.id)}">${esc(g.name)} (${esc(g.id)})</option>`)).join("");
+  openModal("路线资产中心", `<div class="form">
+    <div class="two">
+      <label>游戏<select id="rt-game">${gopts}</select></label>
+      <label>关键词<input id="rt-q" placeholder="文件名 / 路径 / 标签 / 来源标题"></label>
+    </div>
+    <div class="two">
+      <label>类型<select id="rt-type"><option value="">全部类型</option><option value="collect">collect</option><option value="farm">farm</option><option value="daily">daily</option><option value="event">event</option><option value="abyss">abyss</option><option value="other">other</option></select></label>
+      <label>标签<input id="rt-tag" placeholder="如 蒙德 / collect"></label>
+    </div>
+    <div class="actions">
+      <button type="button" onclick="scanRoutes()">扫描入库</button>
+      <button class="primary" type="button" onclick="searchRoutes()">搜索</button>
+    </div>
+    <div class="hint">扫描只读取 scripts_dir / fhoe_dir / march7th_dir 下的 .json/.js/.txt 文件,并写入路线资产库。</div>
+    <div id="rt-res"></div>
+  </div>`);
+  $("#rt-q").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); searchRoutes(); } });
+  searchRoutes();
+}
+function routeURL(){
+  const q=new URLSearchParams();
+  const game=$("#rt-game")?.value||"", kw=$("#rt-q")?.value.trim()||"", typ=$("#rt-type")?.value||"", tag=$("#rt-tag")?.value.trim()||"";
+  if(game) q.set("game_id",game); if(kw) q.set("q",kw); if(typ) q.set("type",typ); if(tag) q.set("tag",tag);
+  const s=q.toString(); return "/api/routes/search"+(s?"?"+s:"");
+}
+async function searchRoutes(){
+  const box=$("#rt-res"); if(!box) return;
+  box.innerHTML='<div class="empty">加载中…</div>';
+  try{
+    const r=await api(routeURL()); if(!r.ok) throw new Error("HTTP "+r.status);
+    const routes=await r.json();
+    box.innerHTML = renderRouteTable(routes||[]);
+  }catch(e){ if(String(e).indexOf("unauthorized")<0) box.innerHTML='<div class="empty">路线加载失败: '+esc(String(e))+'</div>'; }
+}
+function renderRouteTable(routes){
+  if(!routes.length) return '<div class="empty">暂无路线。先点「扫描入库」,或在攻略搜索里收藏/保存路线。</div>';
+  return `<table><thead><tr><th>路线</th><th>类型/标签</th><th>统计</th><th>来源/路径</th><th></th></tr></thead><tbody>`+
+    routes.map(r=>`<tr>
+      <td><strong>${esc(r.name)}</strong><div class="hint">${esc(r.game_id)} · ${esc(r.adapter||'')}</div></td>
+      <td><span class="badge">${esc(r.route_type||'other')}</span><div>${tagList(r.tags)}</div></td>
+      <td><span class="pill ok">✓ ${r.success_count||0}</span> <span class="pill err">✗ ${r.fail_count||0}</span><div class="hint">${r.last_run_at?fmtTime(r.last_run_at):'未运行'}</div></td>
+      <td style="max-width:360px;word-break:break-all">${r.source_url?`<a href="${esc(r.source_url)}" target="_blank" rel="noopener noreferrer">${esc(r.source_title||r.source_url)}</a>`:esc(r.file_path||r.description||'—')}</td>
+      <td><button onclick="createTaskFromRoute(${r.id})">建任务</button></td>
+    </tr>`).join("")+`</tbody></table>`;
+}
+async function scanRoutes(){
+  const gameId=$("#rt-game")?.value||"";
+  const box=$("#rt-res"); box.innerHTML='<div class="empty">扫描中…</div>';
+  try{
+    const body=gameId?{game_id:gameId}:{};
+    const r=await api("/api/routes/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const res=await r.json();
+    box.innerHTML=`<div class="hint">扫描 ${res.scanned||0} 条,新建 ${res.created||0} 条,更新 ${res.updated||0} 条。</div>`+renderRouteTable(res.routes||[]);
+  }catch(e){ if(String(e).indexOf("unauthorized")<0) box.innerHTML='<div class="empty">扫描失败: '+esc(String(e))+'</div>'; }
+}
+async function createTaskFromRoute(id){
+  try{
+    const r=await api(`/api/routes/${id}/create-task`,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const t=await r.json();
+    $("#err").textContent="已创建路线任务 #"+t.id;
+    await load();
+  }catch(e){ $("#err").textContent="创建路线任务失败: "+e; }
+}
+
 // ---- modal: guides (B站攻略 + 本地路线) ----
 function fmtPlay(n){ if(!n) return "—"; if(n>=10000) return (n/10000).toFixed(1)+"万"; return String(n); }
 function fmtDur(s){ if(!s) return "—"; const m=Math.floor(s/60), sec=s%60; return m+":"+String(sec).padStart(2,"0"); }
@@ -503,15 +576,15 @@ async function saveVideoAsRoute(gameId,title,url){
   if(!gameId){ $("#err").textContent="请先选择游戏"; return; }
   try{
     const r=await api("/api/routes",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({game_id:gameId,name:title,file_path:"",description:url})});
+      body:JSON.stringify({game_id:gameId,name:title,file_path:"",description:"收藏的攻略视频",route_type:"other",tags:["guide"],source_url:url,source_title:title})});
     if(!r.ok) throw new Error("HTTP "+r.status);
-    $("#err").textContent=""; alert("已收藏为路线备注(routes),可在 API/CLI 中查看");
+    $("#err").textContent=""; alert("已收藏到路线资产中心");
   }catch(e){ $("#err").textContent="收藏失败: "+e; }
 }
 async function saveLocalRoute(gameId,name,path){
   try{
     const r=await api("/api/routes",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({game_id:gameId,name:name,file_path:path,description:""})});
+      body:JSON.stringify({game_id:gameId,name:name,file_path:path,description:"手动保存的本地路线"})});
     if(!r.ok) throw new Error("HTTP "+r.status);
     alert("已保存为路线");
   }catch(e){ $("#err").textContent="保存失败: "+e; }

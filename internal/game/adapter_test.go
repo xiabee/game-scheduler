@@ -1,6 +1,7 @@
 package game_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -82,6 +83,9 @@ func TestGenshinBuildCommand(t *testing.T) {
 	if _, err := a.BuildCommand(g, store.Task{Type: "config_group", Params: `{}`}); err == nil {
 		t.Error("expected error without group")
 	}
+	if _, err := a.BuildCommand(g, store.Task{Type: "script", Params: `{}`}); err == nil {
+		t.Error("expected error without script")
+	}
 	// unknown type
 	if _, err := a.BuildCommand(g, store.Task{Type: "bogus"}); err == nil {
 		t.Error("expected error for unknown type")
@@ -116,6 +120,26 @@ func TestWuwaBuildCommand(t *testing.T) {
 	if strings.Join(spec.Args, " ") != "-t 1" {
 		t.Errorf("args=%v want -t 1", spec.Args)
 	}
+	spec, err = a.BuildCommand(g, store.Task{Type: "farm", Params: `{"task_index":2,"route":"echo","exit":true}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(spec.Args, " ") != "-t 2 -r echo -e" {
+		t.Errorf("args=%v want farm route args", spec.Args)
+	}
+	spec, err = a.BuildCommand(g, store.Task{Type: "raw", Params: `{"raw_args":["--dry-run"]}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(spec.Args, " ") != "--dry-run" {
+		t.Errorf("raw args=%v", spec.Args)
+	}
+	if _, err := a.BuildCommand(g, store.Task{Type: "task", Params: `{}`}); err == nil {
+		t.Error("expected error without task_index")
+	}
+	if _, err := a.BuildCommand(g, store.Task{Type: "bogus"}); err == nil {
+		t.Error("expected error for unknown type")
+	}
 }
 
 func TestHSRBuildCommand(t *testing.T) {
@@ -131,14 +155,63 @@ func TestHSRBuildCommand(t *testing.T) {
 	if len(spec.Args) != 1 || !strings.Contains(spec.Args[0], "main.py") {
 		t.Errorf("args=%v", spec.Args)
 	}
+	g.ExtraConfig = `{"python_path":"py","fhoe_dir":"C:/Fhoe","fhoe_entry":"run.py"}`
+	spec, err = a.BuildCommand(g, store.Task{Type: "fhoe_route", Params: `{"route":"daily"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Dir != "C:/Fhoe" || filepath.ToSlash(strings.Join(spec.Args, " ")) != filepath.ToSlash(filepath.Join("C:/Fhoe", "run.py"))+" --route daily" {
+		t.Errorf("fhoe spec=%+v", spec)
+	}
+	spec, err = a.BuildCommand(g, store.Task{Type: "raw", Params: `{"exe":"Fhoe-Rail.exe","working_dir":"C:/Fhoe","raw_args":["--once"]}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Path != "Fhoe-Rail.exe" || spec.Dir != "C:/Fhoe" || strings.Join(spec.Args, " ") != "--once" {
+		t.Errorf("raw spec=%+v", spec)
+	}
+	if _, err := a.BuildCommand(store.Game{Adapter: "hsr", ExtraConfig: `{"python_path":"py"}`}, store.Task{Type: "march7th_daily", Params: `{}`}); err == nil {
+		t.Error("expected error without march7th_dir")
+	}
+	if _, err := a.BuildCommand(g, store.Task{Type: "bogus", Params: `{}`}); err == nil {
+		t.Error("expected error for unknown type")
+	}
 	// validate requires a dir
 	if err := a.Validate(store.Game{Adapter: "hsr", ExtraConfig: `{}`}); err == nil {
 		t.Error("expected validation error without dirs")
 	}
 }
 
-func TestR1999Validate(t *testing.T) {
+func TestR1999BuildCommand(t *testing.T) {
 	a := r1999.New()
+	g := store.Game{Adapter: "r1999", ToolPath: "MaaPiCli.exe", WorkingDir: "C:/M9A"}
+	spec, err := a.BuildCommand(g, store.Task{Type: "run", Params: `{"config":"daily"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(spec.Args, " ") != "-c daily" {
+		t.Errorf("args=%v want -c daily", spec.Args)
+	}
+	spec, err = a.BuildCommand(g, store.Task{Type: "config", Params: `{"config":"daily"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(spec.Args, " ") != "-c daily" {
+		t.Errorf("args=%v want -c daily", spec.Args)
+	}
+	spec, err = a.BuildCommand(g, store.Task{Type: "raw", Params: `{"raw_args":["--foo"]}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(spec.Args, " ") != "--foo" {
+		t.Errorf("raw args=%v", spec.Args)
+	}
+	if _, err := a.BuildCommand(g, store.Task{Type: "config", Params: `{}`}); err == nil {
+		t.Error("expected error without config")
+	}
+	if _, err := a.BuildCommand(g, store.Task{Type: "bogus"}); err == nil {
+		t.Error("expected error for unknown type")
+	}
 	if err := a.Validate(store.Game{Adapter: "r1999", ToolPath: "MaaPiCli.exe"}); err == nil {
 		t.Error("expected error without working_dir")
 	}

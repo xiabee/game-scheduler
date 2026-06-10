@@ -45,6 +45,7 @@ func (g Game) ExtraConfigMap() (map[string]any, error) {
 type Task struct {
 	ID            int64     `json:"id"`
 	GameID        string    `json:"game_id"`
+	RouteID       *int64    `json:"route_id,omitempty"`
 	Name          string    `json:"name"`
 	Type          string    `json:"type"`
 	Params        string    `json:"params"` // adapter-specific JSON object
@@ -65,12 +66,21 @@ func (t Task) ParamsMap() (map[string]any, error) {
 // recording or a BetterGI pathing JSON). Tasks reference routes by file path
 // through their Params.
 type Route struct {
-	ID          int64     `json:"id"`
-	GameID      string    `json:"game_id"`
-	Name        string    `json:"name"`
-	FilePath    string    `json:"file_path"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID           int64      `json:"id"`
+	GameID       string     `json:"game_id"`
+	Adapter      string     `json:"adapter"`
+	RouteType    string     `json:"route_type"`
+	Tags         []string   `json:"tags"`
+	Name         string     `json:"name"`
+	FilePath     string     `json:"file_path"`
+	Description  string     `json:"description"`
+	SourceURL    string     `json:"source_url"`
+	SourceTitle  string     `json:"source_title"`
+	LastRunAt    *time.Time `json:"last_run_at,omitempty"`
+	SuccessCount int        `json:"success_count"`
+	FailCount    int        `json:"fail_count"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // Plan binds a task to a cron schedule.

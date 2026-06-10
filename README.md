@@ -47,9 +47,56 @@
 | 🌊 **鸣潮** | ok-wuthering-waves | **<https://github.com/ok-oldking/ok-wuthering-waves/releases>** | 用 setup 安装后,`tool_path` → `ok-ww.exe` |
 | 🕰️ **1999** | M9A | **<https://github.com/MAA1999/M9A/releases>** | 下 **PiCLI** 版,`tool_path` → `MaaPiCli.exe`、`working_dir` → M9A 目录;[CLI 用法](https://github.com/MAA1999/M9A/blob/main/docs/zh_cn/manual/MaaPiCli.md) |
 
-> 装完后用 **`ctl tasks preflight <任务id>`**(或 `GET /api/tasks/{id}/preflight`)验证:它会拼出实际命令、检查可执行文件是否存在并给出 `ready` 标志,**不会真的启动游戏**。
+> 装完后用 **`ctl tasks preflight <任务id>`**(或 `GET /api/tasks/{id}/preflight`)验证:它会拼出实际命令、检查可执行文件/工作目录/`extra_config` 目录/Python 入口文件是否存在,并给出 `ready`、`checks`、`missing`,**不会真的启动游戏**。
 
 > 🔍 **不知道工具装在哪?** 用**扫描**功能自动定位:看板头部「扫描」按钮、`ctl discover [-paths "F:/Games;D:/Tools"]`、或 `POST /api/discover`。它会在磁盘里查找上述可执行文件/项目目录(只读、不执行任何东西),找到后在看板里可**一键填入新游戏**。留空路径则扫描所有磁盘;指定路径更快。
+
+---
+
+## ✅ 真实接入验证流程
+
+这一步只校准外部工具调用,不启动任何注入/内存读写/封包/反检测能力。本项目始终只把已安装工具当作普通子进程运行。
+
+1. **安装外部工具**
+   - BetterGI:安装/解压后确认 `BetterGI.exe` 可手动打开。
+   - March7thAssistant / Fhoe-Rail:确认 Python 版本满足工具要求,项目目录里存在入口文件(默认 `main.py`)。
+   - ok-wuthering-waves:按其说明安装后确认 `ok-ww.exe` 可手动启动。
+   - M9A:下载 PiCLI 版,确认 `MaaPiCli.exe` 与 M9A 项目目录可用。
+
+2. **配置路径**
+   - `tool_path`:原神/鸣潮/1999 填对应 exe;崩铁默认用 `extra_config.python_path`。
+   - `working_dir`:工具需要相对资源时填写;M9A 必填项目目录。
+   - `extra_config`:崩铁填 `march7th_dir` / `fhoe_dir`;需要本地脚本匹配时填 `scripts_dir`;Python 入口不是 `main.py` 时填 `march7th_entry` / `fhoe_entry`。
+
+3. **跑 preflight**
+   ```powershell
+   $S = "http://127.0.0.1:8080"
+   ctl -server $S tasks preflight <任务id>
+   ```
+   重点看:
+   - `command`:最终会执行的完整命令行。
+   - `checks`:逐项检查结果,包含 executable / directory / file。
+   - `missing`:缺失项列表;为空且 `ready=true` 才说明路径和入口文件都对上了。
+
+4. **手动运行一次**
+   ```powershell
+   ctl -server $S tasks run <任务id>
+   ```
+   第一次建议把游戏和工具都放在前台、关闭定时计划,确认工具自身能按预期完成。
+
+5. **查看日志**
+   ```powershell
+   ctl -server $S execs list -task <任务id> -limit 5
+   ctl -server $S execs get <执行id>
+   ```
+   执行详情里会保存 `command`、`stdout`、`stderr`、退出码、错误信息和失败截图路径。
+
+6. **用 `raw_args` 校准参数**
+   如果 preflight 的 `command` 看起来合理但工具版本不认默认参数,先在 PowerShell 里手动跑同一条命令;确认正确参数后,把任务改成 `raw` 或在原任务 params 中加入 `raw_args`:
+   ```json
+   {"raw_args":["--实际参数","值"]}
+   ```
+   需要改可执行文件或工作目录时,同一个 params 里还可以加 `"exe":"..."` / `"working_dir":"..."`。
 
 ---
 
@@ -138,8 +185,100 @@ go build -o bin/ctl.exe    ./cmd/ctl
 - **执行详情弹窗**:点最近记录的任意一行(或卡片上的状态徽章),查看完整命令、错误、**stdout/stderr**、退出码、时间,以及失败**截图缩略图**(由 `/screenshots/` 提供)。若仍在运行,弹窗内有**取消**按钮(`POST /api/executions/{id}/cancel`,会杀整棵进程树)。
 - **完整增删改**:头部 **+ 游戏 / + 任务** 按钮,以及每张卡上的 **+ 添加 / ✎ 编辑 / ✕ 删除**,无需命令行即可管理游戏/任务/计划。
 - **图形化任务配置**:任务表单按各工具的**操作类型**下拉选择(如 BetterGI 的「一条龙/调度器配置组/JS 脚本」、ok-ww 的「一键任务(-t N)」、M9A 的「配置名(-c)」),每种类型给出对应的输入框/数字/开关,带说明文字——**不用手写 params JSON**(高级 JSON 仍保留为逃生口,手改后以其为准)。schema 由 `GET /api/meta` 下发。游戏表单同理:崩铁的 Python 路径 / March7thAssistant / Fhoe-Rail 目录都是图形字段,自动合并进 `extra_config`。
+- **路线资产中心**:头部「路线」按钮可扫描本地脚本目录、搜索路线、查看标签/类型/来源、最近运行时间、成功/失败次数,并一键从路线创建任务。
 - **执行历史**:**历史** 按钮打开可筛选的历史视图(按状态、限制条数),点行进详情弹窗。
 - **资源监控面板**:顶部用**环形仪表**实时显示本机 **CPU / 内存 / 磁盘** 使用率,各带**历史曲线**(随 SSE 持续刷新);超过阈值时变红并弹出**过载横幅**(见下节)。
+
+---
+
+## 🗂️ 路线资产中心 v1
+
+路线资产中心把本地脚本库里的路线文件和你收藏的攻略来源整理到 `routes` 表里。它仍然只做**资产管理 + 任务创建**,不做视频自动学习、不做画面识别、不做外挂能力。
+
+### 路线字段
+
+`routes` 现在保存:
+
+- `adapter`、`route_type`、`tags`
+- `file_path`、`description`
+- `source_url`、`source_title`
+- `last_run_at`、`success_count`、`fail_count`
+- `created_at`、`updated_at`
+
+旧 SQLite 数据库会自动迁移:只追加列和索引,不会删表重建。
+
+### 扫描与搜索
+
+扫描入口:
+
+- 看板:「路线」→「扫描入库」
+- CLI:`ctl routes scan [-game id]`
+- API:`POST /api/routes/scan` body 可选 `{"game_id":"genshin"}`
+
+扫描目录来自游戏配置:
+
+- `extra_config.scripts_dir`
+- `extra_config.fhoe_dir`
+- `extra_config.march7th_dir`
+
+支持文件类型:`.json` / `.js` / `.txt`。扫描时会按文件名和路径保守推断:
+
+- `collect`:采集/材料/collect
+- `farm`:锄地/刷取/farm/echo
+- `daily`:每日/日常/委托/daily
+- `event`:活动/event
+- `abyss`:深渊/忘却/abyss
+- `other`:无法判断
+
+搜索入口:
+
+```powershell
+ctl -server $S -game genshin -q "风车菊" routes search
+ctl -server $S -game genshin -type collect routes search
+ctl -server $S -game genshin -tag 蒙德 routes search
+```
+
+搜索会匹配路线名、文件路径、描述、来源标题/链接和 tags。
+
+常用 `ctl` 示例:
+
+```powershell
+$S = "http://127.0.0.1:8080"
+
+# 扫描某个游戏的本地路线目录并入库
+ctl -server $S -game genshin routes scan
+
+# 搜索路线
+ctl -server $S -game genshin -q "风车菊" routes search
+ctl -server $S -game genshin -type collect routes search
+ctl -server $S -game genshin -tag 蒙德 routes search
+
+# 手工新增一条路线资产
+ctl -server $S -data '{"game_id":"genshin","adapter":"genshin","route_type":"collect","tags":["蒙德","collect"],"name":"风车菊采集","file_path":"D:/routes/风车菊.json","source_url":"https://www.bilibili.com/video/BV...","source_title":"风车菊路线攻略"}' routes add
+
+# 更新路线来源/标签
+ctl -server $S -data '{"game_id":"genshin","adapter":"genshin","route_type":"collect","tags":["蒙德","风车菊"],"name":"风车菊采集","file_path":"D:/routes/风车菊.json","source_url":"https://www.bilibili.com/video/BV...","source_title":"新版路线攻略"}' routes update <路线id>
+
+# 从路线创建任务,随后 preflight 和手动运行
+ctl -server $S routes create-task <路线id>
+ctl -server $S tasks preflight <任务id>
+ctl -server $S tasks run <任务id>
+```
+
+### 从路线创建任务
+
+```powershell
+ctl -server $S routes create-task <路线id>
+```
+
+映射规则:
+
+- `genshin` → `script`, params 里写入 `script=<file_path>`
+- `hsr` → `fhoe_route`, params 里写入 `route=<file_path>`
+- `wuwa` → `farm`, 使用 `task_index=1` 和路线名
+- `r1999` → `run`, daily/farm 路线会把路线名作为 `config`
+
+创建出的任务会带 `route_id`。执行结束后,如果任务关联路线,会自动更新该路线的 `last_run_at`、`success_count` 或 `fail_count`。
 
 ---
 
@@ -156,7 +295,7 @@ go build -o bin/ctl.exe    ./cmd/ctl
 | 锄大地路线 | hsr 配置 `fhoe_dir` 后同样按文件名匹配 Fhoe-Rail 路线 → 建 `fhoe_route` 任务 |
 | 主线 / 支线 | 视频供人看;自动执行走 BetterGI 一条龙/自动剧情、M9A 常规作战等**工具自带能力**(建对应类型任务即可) |
 | 活动速刷 | 搜「活动名 + 速刷」看视频;若社区脚本库已出对应脚本,匹配后一键建任务 |
-| 收藏攻略 | 视频「收藏」按钮 → 存为该游戏的路线备注(routes 表,`description` 存视频链接) |
+| 收藏攻略 | 视频「收藏」按钮 → 存入路线资产中心的 `source_url` / `source_title` |
 
 ### 部署
 
@@ -170,14 +309,14 @@ go build -o bin/ctl.exe    ./cmd/ctl
 
 ### 使用
 
-- **看板**:头部「**攻略**」按钮 → 选游戏、输关键词 → 上半区 B站视频(新窗口打开/收藏),下半区本地匹配(**建任务** 自动按适配器预填:原神→`script`、崩铁→`fhoe_route`;**存为路线** 记入 routes)。
+- **看板**:头部「**攻略**」按钮 → 选游戏、输关键词 → 上半区 B站视频(新窗口打开/收藏),下半区本地匹配(**建任务** 自动按适配器预填:原神→`script`、崩铁→`fhoe_route`;**存为路线** 记入路线资产中心)。
 - **CLI**:`ctl -game genshin -q "风车菊 采集" guides`
 - **API**:`GET /api/guides/search?q=<关键词>&game_id=<id>[&source=video|local|all]`
 
 ### 已知限制
 
 - B站对匿名搜索有**风控**:可能返回空结果或 `-412`,稍等重试即可(接口会把错误如实放在 `videos_error` 字段,不影响本地匹配)。
-- 本地匹配是**按文件名**的关键词匹配——脚本库文件名起得好,匹配才准;匹配不到就去脚本库目录里自己找,或在 BetterGI 内订阅后重试。
+- 本地匹配会看文件名、路径和推断标签,但仍依赖脚本库文件命名;匹配不到就去脚本库目录里自己找,或在 BetterGI 内订阅后重试。
 - 视频→脚本之间**没有自动对应关系**,需要人判断"这个视频讲的就是这条路线"。
 
 ---
@@ -222,7 +361,7 @@ ctl [-server URL] [-token T] <资源> <动作> [id]
 
 games   list | get <id> | add | update <id> | delete <id>
 tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> | preflight <id>
-routes  list [-game id] | add | delete <id>
+routes  list/search [-game id] [-q text] [-type t] [-tag tag] | add | update <id> | delete <id> | scan [-game id] | create-task <id>
 plans   list | get <id> | add | update <id> | delete <id>
 execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
 discover [-paths "F:/Games;D:/Tools"]    扫描磁盘查找工具
@@ -242,8 +381,11 @@ health
 | `GET/POST /api/games`、`GET/PUT/DELETE /api/games/{id}` | 游戏增删改查 |
 | `GET/POST /api/tasks`、`GET/PUT/DELETE /api/tasks/{id}` | 任务增删改查(`?game_id=`) |
 | `POST /api/tasks/{id}/run` | **手动触发**(返回 pending 执行) |
-| `GET /api/tasks/{id}/preflight` | 拼命令并检查工具是否存在,**不运行** |
-| `GET/POST /api/routes`、`DELETE /api/routes/{id}` | 路线(`?game_id=`) |
+| `GET /api/tasks/{id}/preflight` | 拼命令并检查可执行文件/目录/Python 入口,返回 `checks` 与 `missing`,**不运行** |
+| `GET/POST /api/routes`、`PUT/DELETE /api/routes/{id}` | 路线资产(`?game_id=&q=&type=&tag=`) |
+| `POST /api/routes/scan` | 扫描 `scripts_dir` / `fhoe_dir` / `march7th_dir` 入库 |
+| `GET /api/routes/search` | 路线搜索(`?q=&game_id=&type=&tag=`) |
+| `POST /api/routes/{id}/create-task` | 从路线资产创建关联任务 |
 | `GET/POST /api/plans`、`GET/PUT/DELETE /api/plans/{id}` | 定时计划(cron 会校验) |
 | `GET /api/executions`、`GET /api/executions/{id}` | 执行日志(`?task_id=&status=&limit=`) |
 | `POST /api/executions/{id}/cancel` | 取消运行中的执行 |
