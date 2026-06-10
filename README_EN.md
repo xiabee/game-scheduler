@@ -190,6 +190,20 @@ It shows:
 The board is driven entirely by the REST API, so anything it shows is also
 available programmatically.
 
+### Bilibili guide search & route import
+
+The **攻略 (guides)** button searches Bilibili for strategy videos (public
+read-only API, no login — the project's only outbound request) and matches the
+keyword against the game's locally installed script libraries (set
+`extra_config.scripts_dir`, e.g. a [bettergi-scripts-list](https://github.com/babalae/bettergi-scripts-list)
+clone; hsr's `fhoe_dir`/`march7th_dir` are used automatically). Matches can be
+turned into runnable tasks with one click (genshin → `script`, hsr →
+`fhoe_route`); videos can be bookmarked as route notes. It deliberately does
+**not** attempt to synthesize gameplay from video — videos inform the human,
+community route files feed the tools. Bilibili may rate-limit anonymous
+searches (reported in `videos_error`; retry later). Also via
+`ctl guides -q "..." [-game id]` and `GET /api/guides/search`.
+
 ### Notifications
 
 A dashboard banner only helps if someone's watching. Set `notify_cmd` (or

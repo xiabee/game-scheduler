@@ -30,6 +30,7 @@
 - **进程树终止**:取消/超时会用 `taskkill /T` 杀掉整棵子进程树,避免工具残留控制游戏。
 - **控制看板**(类 Grafana):实时推送、增删改查、执行历史、失败截图缩略图——见下文。
 - **REST API + CLI**(`ctl`),**可选令牌鉴权**。
+- **B站攻略搜索**:看板内搜攻略视频(只读公开 API),并在本地脚本库中匹配可执行路线,一键建任务(见下文专节)。
 - **持续集成 + 定期安全扫描**:Linux/Windows 双平台测试、`-race`、`govulncheck`、Dependabot。
 
 ---
@@ -142,6 +143,45 @@ go build -o bin/ctl.exe    ./cmd/ctl
 
 ---
 
+## 📺 B站攻略搜索与路线导入
+
+> **功能定位(请先读)**:本功能**不会**"AI 看视频后自动打游戏"——把任意视频转成游戏操作等于自研一套视觉自动化引擎,超出本项目"只编排、不实现自动化"的边界,也不可靠。
+> 实际闭环是:**搜攻略视频给人看 → 匹配本地脚本库里同名/同主题的可执行路线 → 一键建任务交给工具执行**。社区脚本库(如 bettergi-scripts-list)本来就是攻略视频的配套产物,这是攻略到自动化最可靠的桥。
+
+### 它能做什么
+
+| 你的目标 | 怎么落地 |
+|---|---|
+| 跑图 / 材料收集 | 「攻略」里搜关键词(如 `风车菊`)→ B站视频供参考 + 本地脚本库匹配出 `风车菊采集路线.json` → **建任务**(自动预填 BetterGI `script` 类型) |
+| 锄大地路线 | hsr 配置 `fhoe_dir` 后同样按文件名匹配 Fhoe-Rail 路线 → 建 `fhoe_route` 任务 |
+| 主线 / 支线 | 视频供人看;自动执行走 BetterGI 一条龙/自动剧情、M9A 常规作战等**工具自带能力**(建对应类型任务即可) |
+| 活动速刷 | 搜「活动名 + 速刷」看视频;若社区脚本库已出对应脚本,匹配后一键建任务 |
+| 收藏攻略 | 视频「收藏」按钮 → 存为该游戏的路线备注(routes 表,`description` 存视频链接) |
+
+### 部署
+
+无需额外组件。只要:
+
+1. 服务器能**出站 HTTPS 访问 `api.bilibili.com`**(只读公开搜索、不登录、无凭据;这是本项目唯一的出站请求)。
+2. 给游戏配置**本地脚本库目录**(没有它就只有视频、没有可执行匹配):
+   - 原神:`git clone https://github.com/babalae/bettergi-scripts-list`,然后在游戏的 `extra_config` 里设 `{"scripts_dir":"<克隆目录>"}`(看板编辑游戏 → 高级 extra_config);
+   - 崩铁:已配置的 `fhoe_dir` / `march7th_dir` 自动作为匹配目录;
+   - 也可以把任意自己录制的路线文件夹设为 `scripts_dir`。
+
+### 使用
+
+- **看板**:头部「**攻略**」按钮 → 选游戏、输关键词 → 上半区 B站视频(新窗口打开/收藏),下半区本地匹配(**建任务** 自动按适配器预填:原神→`script`、崩铁→`fhoe_route`;**存为路线** 记入 routes)。
+- **CLI**:`ctl -game genshin -q "风车菊 采集" guides`
+- **API**:`GET /api/guides/search?q=<关键词>&game_id=<id>[&source=video|local|all]`
+
+### 已知限制
+
+- B站对匿名搜索有**风控**:可能返回空结果或 `-412`,稍等重试即可(接口会把错误如实放在 `videos_error` 字段,不影响本地匹配)。
+- 本地匹配是**按文件名**的关键词匹配——脚本库文件名起得好,匹配才准;匹配不到就去脚本库目录里自己找,或在 BetterGI 内订阅后重试。
+- 视频→脚本之间**没有自动对应关系**,需要人判断"这个视频讲的就是这条路线"。
+
+---
+
 ## 🖥️ 资源监控与过载保护
 
 服务器内置一个轻量监控,按 `monitor_interval_sec`(默认 3 秒)采样本机 **CPU / 内存 / 磁盘**,在看板顶部用**环形仪表 + 历史曲线(sparkline)**实时展示(磁盘取数据目录所在分区,仅作展示、不参与过载判定)。这些工具会吃满 CPU/内存,机器过载时自动化容易出错、卡死甚至连环失败——本功能用来**防止资源过载**。
@@ -185,6 +225,8 @@ tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> 
 routes  list [-game id] | add | delete <id>
 plans   list | get <id> | add | update <id> | delete <id>
 execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
+discover [-paths "F:/Games;D:/Tools"]    扫描磁盘查找工具
+guides   -q "<关键词>" [-game id]         B站攻略搜索 + 本地路线匹配
 health
 ```
 
@@ -209,6 +251,7 @@ health
 | `GET /api/stream` | SSE 实时推送看板更新 |
 | `GET /api/meta` | 适配器键 + 任务类型(给表单用) |
 | `POST /api/discover` | 扫描磁盘查找工具可执行文件(body 可选 `{"paths":[...],"max_depth":N}`) |
+| `GET /api/guides/search` | B站攻略视频搜索 + 本地路线匹配(`?q=&game_id=&source=`) |
 | `GET /screenshots/{name}` | 取失败截图(受鉴权保护) |
 
 ---

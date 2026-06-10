@@ -12,6 +12,7 @@
 //	plans   list | get <id> | add | update <id> | delete <id>
 //	execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
 //	discover [-paths "F:/Games;D:/Tools"]   scan disk for tool executables
+//	guides   -q "<关键词>" [-game id]        search Bilibili guides + local routes
 //	health
 //
 // "add"/"update" read a JSON body from -data '<json>' or from stdin ('-data -').
@@ -39,6 +40,7 @@ func main() {
 	status := flag.String("status", "", "filter by status (execs list)")
 	limit := flag.String("limit", "", "limit (execs list)")
 	paths := flag.String("paths", "", "scan paths for 'discover', separated by ; or ,")
+	query := flag.String("q", "", "search keyword for 'guides'")
 	flag.Parse()
 
 	args := flag.Args()
@@ -77,6 +79,17 @@ func main() {
 	switch resource {
 	case "health":
 		err = c.do("GET", "/healthz", nil)
+	case "guides":
+		if *query == "" {
+			err = fmt.Errorf("guides requires -q '<关键词>' (and optionally -game <id>)")
+		} else {
+			gq := url.Values{}
+			gq.Set("q", *query)
+			if *gameID != "" {
+				gq.Set("game_id", *gameID)
+			}
+			err = c.do("GET", "/api/guides/search?"+gq.Encode(), nil)
+		}
 	case "discover":
 		body := []byte("{}")
 		if *paths != "" {

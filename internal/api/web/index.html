@@ -140,6 +140,7 @@
   <button onclick="openGameForm()">+ 游戏</button>
   <button onclick="openTaskForm()">+ 任务</button>
   <button onclick="openScan()">扫描</button>
+  <button onclick="openGuides()">攻略</button>
   <button onclick="openHistory()">历史</button>
   <label class="toggle"><span class="live-dot" id="livedot"></span><input type="checkbox" id="live" checked> 实时</label>
   <button id="refresh">刷新</button>
@@ -439,6 +440,95 @@ function fillGameFromCandidate(c){
     pre.tool_path=c.path; pre.name = c.adapter==='genshin'?'原神':(c.adapter==='wuwa'?'鸣潮':c.adapter);
   }
   openGameForm(pre); // create mode (no id), fields prefilled
+}
+
+// ---- modal: guides (B站攻略 + 本地路线) ----
+function fmtPlay(n){ if(!n) return "—"; if(n>=10000) return (n/10000).toFixed(1)+"万"; return String(n); }
+function fmtDur(s){ if(!s) return "—"; const m=Math.floor(s/60), sec=s%60; return m+":"+String(sec).padStart(2,"0"); }
+function openGuides(){
+  const games=(lastData&&lastData.games)||[];
+  const gopts=games.map(g=>`<option value="${esc(g.id)}" data-adapter="${esc(g.adapter)}" data-name="${esc(g.name)}">${esc(g.name)} (${esc(g.id)})</option>`).join("");
+  openModal("攻略搜索", `<div class="form">
+    <div class="two">
+      <label>游戏<select id="gd-game">${gopts||'<option value="">（未配置游戏）</option>'}</select></label>
+      <label>关键词<input id="gd-q" placeholder="如 圣遗物路线 / 风车菊 / 活动速刷"></label>
+    </div>
+    <div class="actions"><button type="button" onclick="closeModal()">关闭</button><button class="primary" onclick="runGuides()">搜索</button></div>
+    <div class="hint">视频来自 B 站公开搜索(只读,供人参考);「本地路线」在该游戏配置的脚本库目录里按文件名匹配,可一键建任务交给工具执行。</div>
+    <div id="gd-res"></div>
+  </div>`);
+  const sel=$("#gd-game");
+  if(sel.selectedOptions[0]&&!$("#gd-q").value)
+    $("#gd-q").placeholder = sel.selectedOptions[0].getAttribute("data-name")+" 攻略关键词…";
+  $("#gd-q").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); runGuides(); } });
+}
+async function runGuides(){
+  const gameId=$("#gd-game").value, q=$("#gd-q").value.trim();
+  if(!q){ $("#gd-res").innerHTML='<div class="empty">请输入关键词</div>'; return; }
+  const sel=$("#gd-game").selectedOptions[0];
+  const gname=sel?sel.getAttribute("data-name"):"";
+  // 给视频搜索自动带上游戏名,本地匹配只用关键词本身
+  $("#gd-res").innerHTML='<div class="empty">搜索中…</div>';
+  try{
+    const kw = gname && q.indexOf(gname)<0 ? (gname+" "+q) : q;
+    const u = `/api/guides/search?q=${encodeURIComponent(kw)}${gameId?'&game_id='+encodeURIComponent(gameId):''}`;
+    const r=await api(u); if(!r.ok) throw new Error("HTTP "+r.status);
+    const res=await r.json();
+    // 本地匹配用原始关键词更准,若带游戏名前缀没匹配到则单独再搜一次本地
+    let locals=res.local_routes||[];
+    if(!locals.length && gameId && kw!==q){
+      const r2=await api(`/api/guides/search?q=${encodeURIComponent(q)}&game_id=${encodeURIComponent(gameId)}&source=local`);
+      if(r2.ok) locals=(await r2.json()).local_routes||[];
+    }
+    const vids=(res.videos||[]).map(v=>`<tr>
+      <td><a href="${esc(v.url)}" target="_blank" rel="noopener noreferrer">${esc(v.title)}</a></td>
+      <td>${esc(v.author)}</td><td>${fmtPlay(v.play)}</td><td>${fmtDur(v.duration_sec)}</td>
+      <td><button onclick="saveVideoAsRoute('${esc(gameId)}',${esc(JSON.stringify(v.title)).replace(/'/g,'&#39;')},'${esc(v.url)}')">收藏</button></td></tr>`).join("");
+    const routes=locals.map(lr=>`<tr>
+      <td>${esc(lr.name)}</td>
+      <td style="font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-all">${esc(lr.path)}</td>
+      <td><button onclick="taskFromRoute('${esc(gameId)}',${esc(JSON.stringify(lr.path)).replace(/'/g,'&#39;')})">建任务</button>
+          <button onclick="saveLocalRoute('${esc(gameId)}',${esc(JSON.stringify(lr.name)).replace(/'/g,'&#39;')},${esc(JSON.stringify(lr.path)).replace(/'/g,'&#39;')})">存为路线</button></td></tr>`).join("");
+    $("#gd-res").innerHTML =
+      `<div class="sub" style="margin-top:10px"><span>B站攻略视频</span></div>`
+      + (res.videos_error?`<div class="hint" style="color:var(--warn)">视频搜索失败:${esc(res.videos_error)}</div>`:"")
+      + (vids?`<table><thead><tr><th>标题</th><th>UP主</th><th>播放</th><th>时长</th><th></th></tr></thead><tbody>${vids}</tbody></table>`:'<div class="empty">无结果</div>')
+      + `<div class="sub" style="margin-top:14px"><span>本地可执行路线/脚本</span></div>`
+      + ((res.local_roots||[]).length
+          ? (routes?`<table><thead><tr><th>名称</th><th>路径</th><th></th></tr></thead><tbody>${routes}</tbody></table>`:'<div class="empty">脚本库中无匹配文件</div>')
+          : '<div class="empty">该游戏未配置脚本库目录(在游戏 extra_config 里设置 scripts_dir,如 bettergi-scripts-list 克隆目录)</div>');
+  }catch(e){ if(String(e).indexOf("unauthorized")<0) $("#gd-res").innerHTML='<div class="empty">搜索失败: '+esc(String(e))+'</div>'; }
+}
+async function saveVideoAsRoute(gameId,title,url){
+  if(!gameId){ $("#err").textContent="请先选择游戏"; return; }
+  try{
+    const r=await api("/api/routes",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({game_id:gameId,name:title,file_path:"",description:url})});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    $("#err").textContent=""; alert("已收藏为路线备注(routes),可在 API/CLI 中查看");
+  }catch(e){ $("#err").textContent="收藏失败: "+e; }
+}
+async function saveLocalRoute(gameId,name,path){
+  try{
+    const r=await api("/api/routes",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({game_id:gameId,name:name,file_path:path,description:""})});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    alert("已保存为路线");
+  }catch(e){ $("#err").textContent="保存失败: "+e; }
+}
+// taskFromRoute opens the task form prefilled for the game's adapter:
+// genshin -> script(脚本路径), hsr -> fhoe_route(路线), 其它 -> raw。
+async function taskFromRoute(gameId,path){
+  const games=(lastData&&lastData.games)||[];
+  const g=games.find(x=>x.id===gameId);
+  if(!g){ $("#err").textContent="请先选择游戏"; return; }
+  await openTaskForm(gameId);
+  await new Promise(r=>setTimeout(r,200));
+  const f=$("#m-body form"); if(!f) return;
+  const base=path.split(/[\\/]/).pop().replace(/\.[^.]*$/,"");
+  if(g.adapter==="genshin"){ f.type.value="script"; renderTaskFields(f); if(f.f_script) f.f_script.value=path; }
+  else if(g.adapter==="hsr"){ f.type.value="fhoe_route"; renderTaskFields(f); if(f.f_route) f.f_route.value=path; }
+  if(!f.name.value) f.name.value=base;
 }
 
 // ---- modal: forms ----

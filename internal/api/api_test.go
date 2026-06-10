@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +18,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
 	"github.com/xiabee/game-scheduler/internal/game/genshin"
+	"github.com/xiabee/game-scheduler/internal/guide"
 	"github.com/xiabee/game-scheduler/internal/scheduler"
 	"github.com/xiabee/game-scheduler/internal/store"
 	"github.com/xiabee/game-scheduler/internal/task"
@@ -194,6 +198,83 @@ func TestMetaEndpoint(t *testing.T) {
 	}
 	if len(m.Adapters) != 1 || m.Adapters[0].Key != "genshin" {
 		t.Errorf("adapters=%+v", m.Adapters)
+	}
+}
+
+type stubSearcher struct {
+	vids []guide.Video
+	err  error
+}
+
+func (s stubSearcher) Search(ctx context.Context, kw string, limit int) ([]guide.Video, error) {
+	return s.vids, s.err
+}
+
+func TestGuidesSearch(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	// game with a local script library containing one matching route
+	scriptDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(scriptDir, "风车菊采集路线.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ecJSON, _ := json.Marshal(map[string]string{"scripts_dir": scriptDir})
+	st.CreateGame(store.Game{ID: "genshin", Name: "原神", Adapter: "genshin", ToolPath: "x", ExtraConfig: string(ecJSON), Enabled: true})
+
+	bus := events.New()
+	reg := game.NewRegistry(genshin.New())
+	cfg := config.Config{DataDir: t.TempDir(), MaxConcurrent: 1}
+	svc := task.NewService(st, reg, cfg, bus, nil)
+	apiSrv := New(st, svc, scheduler.New(st, svc, nil), reg, bus, nil, cfg, nil)
+	apiSrv.SetGuideSearcher(stubSearcher{vids: []guide.Video{{Title: "测试视频", BVID: "BV1", URL: "https://www.bilibili.com/video/BV1"}}})
+	srv := httptest.NewServer(apiSrv.Handler())
+	t.Cleanup(srv.Close)
+
+	resp, err := srv.Client().Get(srv.URL + "/api/guides/search?game_id=genshin&q=" + url.QueryEscape("风车菊"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Videos      []guide.Video      `json:"videos"`
+		LocalRoutes []guide.LocalRoute `json:"local_routes"`
+		VideosError string             `json:"videos_error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Videos) != 1 || out.Videos[0].Title != "测试视频" {
+		t.Errorf("videos=%+v", out.Videos)
+	}
+	if len(out.LocalRoutes) != 1 || out.LocalRoutes[0].Name != "风车菊采集路线" {
+		t.Errorf("local_routes=%+v", out.LocalRoutes)
+	}
+
+	// missing q -> 400
+	r2, _ := srv.Client().Get(srv.URL + "/api/guides/search")
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing q status=%d want 400", r2.StatusCode)
+	}
+
+	// video source failure surfaces in videos_error, local results still work
+	apiSrv.SetGuideSearcher(stubSearcher{err: errors.New("风控")})
+	r3, err := srv.Client().Get(srv.URL + "/api/guides/search?game_id=genshin&q=" + url.QueryEscape("风车菊"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r3.Body.Close()
+	var out3 struct {
+		VideosError string             `json:"videos_error"`
+		LocalRoutes []guide.LocalRoute `json:"local_routes"`
+	}
+	json.NewDecoder(r3.Body).Decode(&out3)
+	if out3.VideosError == "" || len(out3.LocalRoutes) != 1 {
+		t.Errorf("partial failure handling: err=%q routes=%d", out3.VideosError, len(out3.LocalRoutes))
 	}
 }
 

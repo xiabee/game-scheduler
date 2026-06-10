@@ -15,6 +15,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
+	"github.com/xiabee/game-scheduler/internal/guide"
 	"github.com/xiabee/game-scheduler/internal/monitor"
 	"github.com/xiabee/game-scheduler/internal/scheduler"
 	"github.com/xiabee/game-scheduler/internal/store"
@@ -32,10 +33,14 @@ type Server struct {
 	reg           *game.Registry
 	bus           *events.Bus
 	mon           *monitor.Monitor
+	guides        guide.Searcher
 	log           *slog.Logger
 	screenshotDir string
 	authToken     string
 }
+
+// SetGuideSearcher overrides the Bilibili search client (tests inject a stub).
+func (s *Server) SetGuideSearcher(g guide.Searcher) { s.guides = g }
 
 // New builds an API server. mon may be nil (no resource panel).
 func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *game.Registry, bus *events.Bus, mon *monitor.Monitor, cfg config.Config, log *slog.Logger) *Server {
@@ -49,6 +54,7 @@ func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *gam
 		reg:           reg,
 		bus:           bus,
 		mon:           mon,
+		guides:        guide.NewClient(),
 		log:           log,
 		screenshotDir: cfg.ScreenshotDir(),
 		authToken:     cfg.AuthToken,
@@ -69,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/stream", s.stream)
 	mux.HandleFunc("GET /api/meta", s.meta)
 	mux.HandleFunc("POST /api/discover", s.discoverScan)
+	mux.HandleFunc("GET /api/guides/search", s.guidesSearch)
 	mux.HandleFunc("GET /screenshots/{name}", s.screenshot)
 
 	// Games
