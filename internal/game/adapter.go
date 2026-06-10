@@ -61,18 +61,27 @@ func (r *Registry) Keys() []string {
 	return keys
 }
 
-// AdapterInfo describes an adapter for UI/metadata purposes.
+// AdapterInfo describes an adapter for UI/metadata purposes. TaskTypes carries
+// the full form schema so the dashboard can render graphical settings per task
+// type instead of raw JSON.
 type AdapterInfo struct {
-	Key       string   `json:"key"`
-	TaskTypes []string `json:"task_types"`
+	Key       string         `json:"key"`
+	TaskTypes []TaskTypeInfo `json:"task_types"`
 }
 
 // Meta returns metadata for all adapters, sorted by key — used to populate the
-// dashboard's add-game / add-task forms.
+// dashboard's add-game / add-task forms. Adapters without a UI schema fall back
+// to bare type names.
 func (r *Registry) Meta() []AdapterInfo {
 	out := make([]AdapterInfo, 0, len(r.m))
 	for _, k := range r.Keys() {
-		out = append(out, AdapterInfo{Key: k, TaskTypes: r.m[k].TaskTypes()})
+		tts := Schema(k)
+		if tts == nil {
+			for _, t := range r.m[k].TaskTypes() {
+				tts = append(tts, TaskTypeInfo{Type: t, Label: t, Fields: []Field{}})
+			}
+		}
+		out = append(out, AdapterInfo{Key: k, TaskTypes: tts})
 	}
 	return out
 }

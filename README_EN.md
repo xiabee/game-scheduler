@@ -166,7 +166,13 @@ It shows:
   (`POST /api/executions/{id}/cancel`, kills the whole process tree).
 - **Full CRUD inline** — the header's **+ 游戏 / + 任务** buttons and each card's
   **+ 添加 / ✎ (edit) / ✕ (delete)** controls manage games, tasks and plans
-  without the CLI (adapter and task-type lists come from `GET /api/meta`).
+  without the CLI.
+- **Graphical task settings** — the task form is schema-driven (`GET /api/meta`):
+  pick an operation type per tool (BetterGI one-dragon/config-group/script,
+  ok-ww task index, M9A config name, …) and fill typed inputs/toggles instead of
+  hand-writing params JSON (an advanced JSON textarea remains as escape hatch).
+  The game form likewise renders hsr's python/March7thAssistant/Fhoe-Rail paths
+  as fields merged into `extra_config`.
 - **执行历史** — the **历史** button opens a filterable view of past executions
   (by status, with a row limit); click any row for its detail modal.
 - **Resource monitor** — a top panel shows live CPU / RAM / disk usage as ring

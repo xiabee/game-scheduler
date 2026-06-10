@@ -35,6 +35,37 @@ func TestRegistryGetAndMeta(t *testing.T) {
 	}
 }
 
+// TestSchemaMatchesAdapters guards that the UI schema's task types stay in
+// 1:1 sync with what each adapter actually accepts in BuildCommand.
+func TestSchemaMatchesAdapters(t *testing.T) {
+	for _, a := range []game.Adapter{genshin.New(), hsr.New(), wuwa.New(), r1999.New()} {
+		sch := game.Schema(a.Key())
+		if sch == nil {
+			t.Errorf("%s: no UI schema defined", a.Key())
+			continue
+		}
+		want := map[string]bool{}
+		for _, tt := range a.TaskTypes() {
+			want[tt] = true
+		}
+		got := map[string]bool{}
+		for _, tt := range sch {
+			got[tt.Type] = true
+			if !want[tt.Type] {
+				t.Errorf("%s: schema type %q not accepted by adapter", a.Key(), tt.Type)
+			}
+			if tt.Label == "" {
+				t.Errorf("%s/%s: schema type missing label", a.Key(), tt.Type)
+			}
+		}
+		for tt := range want {
+			if !got[tt] {
+				t.Errorf("%s: adapter type %q missing from schema", a.Key(), tt)
+			}
+		}
+	}
+}
+
 func TestGenshinBuildCommand(t *testing.T) {
 	a := genshin.New()
 	g := store.Game{ID: "genshin", Adapter: "genshin", ToolPath: "BetterGI.exe"}

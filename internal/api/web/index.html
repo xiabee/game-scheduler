@@ -120,6 +120,8 @@
   /* forms */
   .form{display:grid;gap:12px}
   .form label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+  .form label.toggle{display:flex;align-items:center;gap:8px}
+  .form label.toggle input{width:auto}
   .form input,.form select,.form textarea{background:var(--bg);border:1px solid var(--border);border-radius:6px;
     color:var(--text);padding:8px 10px;font:13px/1.4 inherit;width:100%}
   .form textarea{font-family:ui-monospace,Consolas,monospace;min-height:64px;resize:vertical}
@@ -446,6 +448,30 @@ let editId=null; // current edit target id (game id / task id / plan id); null =
 // --- game form (create + edit) ---
 // g may be: undefined (blank create), a full game object with .id (edit), or a
 // partial prefill object without .id (create with fields filled, e.g. from scan).
+// Per-adapter graphical fields for the game's tool configuration. hsr's tools
+// live in extra_config JSON, so surface them as inputs; other adapters use the
+// generic tool_path/working_dir fields. hints explain what to point at.
+const GAME_EXTRA_FIELDS = {
+  hsr: [
+    {key:"python_path", label:"Python 路径", ph:"python"},
+    {key:"march7th_dir", label:"March7thAssistant 目录", ph:"D:/Tools/March7thAssistant"},
+    {key:"fhoe_dir", label:"Fhoe-Rail 目录", ph:"D:/Tools/Fhoe-Rail"},
+  ],
+};
+const GAME_HINTS = {
+  genshin: "tool_path 指向 BetterGI.exe",
+  hsr: "Python 项目:至少填 March7thAssistant 或 Fhoe-Rail 其中一个目录",
+  wuwa: "tool_path 指向 ok-ww.exe",
+  r1999: "tool_path 指向 MaaPiCli.exe,工作目录指向 M9A 项目目录(必填)",
+};
+function renderGameExtra(form){
+  const ad=form.adapter.value;
+  $("#gx-hint").textContent = GAME_HINTS[ad]||"";
+  const xf=GAME_EXTRA_FIELDS[ad]||[];
+  let vals={};
+  try{ vals=JSON.parse(form.extra_config.value||"{}"); }catch(_){ }
+  $("#gx-fields").innerHTML = xf.map(x=>`<label>${esc(x.label)}<input name="x_${x.key}" value="${esc(vals[x.key]||'')}" placeholder="${esc(x.ph||'')}"></label>`).join("");
+}
 async function openGameForm(g){
   const m=await ensureMeta();
   const isEdit = !!(g && g.id);
@@ -455,15 +481,19 @@ async function openGameForm(g){
   openModal(isEdit?("编辑游戏 "+esc(g.id)):"添加游戏",`<form class="form" onsubmit="return submitGame(event)">
     <div class="two">
       <label>ID（唯一，如 genshin）<input name="id" required pattern="[A-Za-z0-9_-]+" value="${isEdit?esc(g.id):''}" ${isEdit?'readonly':''}></label>
-      <label>适配器<select name="adapter">${opts}</select></label>
+      <label>适配器<select name="adapter" onchange="renderGameExtra(this.form)">${opts}</select></label>
     </div>
+    <div class="hint" id="gx-hint"></div>
     <label>名称<input name="name" required value="${v('name')}"></label>
     <label>工具路径 tool_path<input name="tool_path" placeholder="如 D:/BetterGI/BetterGI.exe" value="${v('tool_path')}"></label>
-    <label>工作目录 working_dir<input name="working_dir" placeholder="可选" value="${v('working_dir')}"></label>
-    <label>extra_config (JSON)<textarea name="extra_config" placeholder='{"python_path":"python","march7th_dir":"..."}'>${v('extra_config')}</textarea></label>
+    <label>工作目录 working_dir<input name="working_dir" placeholder="可选(r1999 必填 M9A 目录)" value="${v('working_dir')}"></label>
+    <div id="gx-fields"></div>
+    <details><summary class="hint" style="cursor:pointer">高级:extra_config (JSON)</summary>
+      <textarea name="extra_config" placeholder='{"python_path":"python","march7th_dir":"..."}'>${v('extra_config')}</textarea></details>
     <label class="toggle"><input type="checkbox" name="enabled" ${!isEdit||g.enabled?'checked':''}> 启用</label>
     <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">${isEdit?'保存':'创建'}</button></div>
   </form><div id="ferr" class="hint" style="color:var(--err)"></div>`);
+  renderGameExtra($("#m-body form"));
 }
 async function editGame(id){
   try{ const r=await api("/api/games/"+id); if(!r.ok) throw new Error("HTTP "+r.status); openGameForm(await r.json()); }
@@ -471,8 +501,15 @@ async function editGame(id){
 }
 async function submitGame(ev){
   ev.preventDefault(); const f=ev.target;
-  const ec=f.extra_config.value.trim();
-  if(ec){ try{ JSON.parse(ec); }catch(_){ $("#ferr").textContent="extra_config 不是合法 JSON"; return false; } }
+  let ec=f.extra_config.value.trim(), ecObj=null;
+  if(ec){ try{ ecObj=JSON.parse(ec); }catch(_){ $("#ferr").textContent="extra_config 不是合法 JSON"; return false; } }
+  // graphical extra fields override/merge into the JSON
+  const xf=GAME_EXTRA_FIELDS[f.adapter.value]||[];
+  if(xf.length){
+    ecObj=ecObj||{};
+    xf.forEach(x=>{ const el=f["x_"+x.key]; if(!el) return; const v=el.value.trim(); if(v) ecObj[x.key]=v; else delete ecObj[x.key]; });
+    ec=Object.keys(ecObj).length?JSON.stringify(ecObj):"";
+  }
   const body={id:f.id.value.trim(),name:f.name.value.trim(),adapter:f.adapter.value,
     tool_path:f.tool_path.value.trim(),working_dir:f.working_dir.value.trim(),extra_config:ec,enabled:f.enabled.checked};
   const url = editId? "/api/games/"+editId : "/api/games";
@@ -480,47 +517,96 @@ async function submitGame(ev){
   return false;
 }
 
-// --- task form (create + edit) ---
+// --- task form (create + edit, schema-driven) ---
+// The adapter schemas from /api/meta drive a graphical form: pick a task type
+// from a dropdown, fill typed fields (text/number/checkbox), no JSON required.
+// The 高级 JSON textarea remains as an escape hatch; once hand-edited it wins.
+function taskTypesFor(form){
+  const sel=form.game_id.selectedOptions[0];
+  const a=(meta.adapters||[]).find(x=>x.key===(sel?sel.getAttribute("data-adapter"):""));
+  return a? (a.task_types||[]) : [];
+}
+function fieldInput(f, val){
+  const v = val!==undefined? val : (f.default!==undefined? f.default : "");
+  const name="f_"+f.key, help=f.help?`<span class="hint">${esc(f.help)}</span>`:"";
+  if(f.type==="bool")
+    return `<label class="toggle"><input type="checkbox" name="${name}" ${v===true||v==="true"?'checked':''}> ${esc(f.label)}</label>`;
+  if(f.type==="json")
+    return `<label>${esc(f.label)}${f.required?' *':''}<textarea name="${name}" placeholder="${esc(f.placeholder||'')}">${esc(typeof v==="string"?v:(v?JSON.stringify(v):""))}</textarea>${help}</label>`;
+  return `<label>${esc(f.label)}${f.required?' *':''}<input type="${f.type==="number"?"number":"text"}" name="${name}" value="${esc(v===null?"":String(v))}" placeholder="${esc(f.placeholder||'')}" ${f.required?'required':''}>${help}</label>`;
+}
+function renderTaskFields(form, params){
+  const tts=taskTypesFor(form);
+  const tt=tts.find(x=>x.type===form.type.value)||tts[0];
+  $("#tt-desc").textContent = tt? (tt.desc||"") : "";
+  $("#tt-fields").innerHTML = tt? (tt.fields||[]).map(f=>fieldInput(f, params?params[f.key]:undefined)).join("") : "";
+}
+function onTaskGameChange(form, keepType, params){
+  const tts=taskTypesFor(form);
+  form.type.innerHTML = tts.map(t=>`<option value="${esc(t.type)}">${esc(t.label||t.type)}</option>`).join("");
+  if(keepType){
+    if(![...form.type.options].some(o=>o.value===keepType))
+      form.type.insertAdjacentHTML("beforeend", `<option value="${esc(keepType)}">${esc(keepType)}</option>`);
+    form.type.value=keepType;
+  }
+  renderTaskFields(form, params);
+}
 async function openTaskForm(gameId, task){
-  const m=await ensureMeta();
+  await ensureMeta();
   const games=(lastData&&lastData.games)||[];
   if(!games.length){ alert("请先添加游戏"); return; }
   editId = task? task.id : null;
   const cur = task? task.game_id : gameId;
   const gopts=games.map(g=>`<option value="${esc(g.id)}" data-adapter="${esc(g.adapter)}" ${g.id===cur?'selected':''}>${esc(g.name)} (${esc(g.id)})</option>`).join("");
-  const v=k=> task? esc(task[k]==null?"":task[k]) : "";
+  let params=null;
+  if(task){ try{ params=JSON.parse(task.params||"{}"); }catch(_){ params={}; } }
   openModal(task?("编辑任务 #"+task.id):"添加任务",`<form class="form" onsubmit="return submitTask(event)">
     <div class="two">
-      <label>游戏<select name="game_id" onchange="syncTypes(this.form)" ${task?'disabled':''}>${gopts}</select></label>
-      <label>类型 type<input name="type" list="typelist" required value="${v('type')}"><datalist id="typelist"></datalist></label>
+      <label>游戏<select name="game_id" onchange="onTaskGameChange(this.form)" ${task?'disabled':''}>${gopts}</select></label>
+      <label>操作类型<select name="type" onchange="renderTaskFields(this.form)"></select></label>
     </div>
-    <label>名称<input name="name" required value="${v('name')}"></label>
-    <label>params (JSON)<textarea name="params" placeholder='{"group":"采集"}  或  {"task_index":1}'>${task?esc(task.params||"{}"):"{}"}</textarea></label>
+    <div class="hint" id="tt-desc"></div>
+    <div id="tt-fields"></div>
+    <label>名称<input name="name" required value="${task?esc(task.name||""):""}"></label>
     <div class="two">
       <label>超时(秒)<input name="timeout_sec" type="number" min="0" value="${task?(task.timeout_sec||0):0}"></label>
       <label>重试次数<input name="max_retries" type="number" min="0" value="${task?(task.max_retries||0):0}"></label>
     </div>
     <label class="toggle"><input type="checkbox" name="enabled" ${!task||task.enabled?'checked':''}> 启用</label>
+    <details><summary class="hint" style="cursor:pointer">高级:params JSON(手改后以此为准)</summary>
+      <textarea name="adv" oninput="this.dataset.dirty=1">${task?esc(task.params||"{}"):""}</textarea></details>
     <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">${task?'保存':'创建'}</button></div>
   </form><div id="ferr" class="hint" style="color:var(--err)"></div>`);
-  syncTypes($("#m-body form"));
+  onTaskGameChange($("#m-body form"), task?task.type:null, params);
 }
 async function editTask(id){
   try{ const r=await api("/api/tasks/"+id); if(!r.ok) throw new Error("HTTP "+r.status); openTaskForm(null, await r.json()); }
   catch(e){ $("#err").textContent="加载任务失败: "+e; }
 }
-function syncTypes(form){
-  const sel=form.game_id.selectedOptions[0];
-  const adapter=sel?sel.getAttribute("data-adapter"):"";
-  const a=(meta.adapters||[]).find(x=>x.key===adapter);
-  form.querySelector("#typelist").innerHTML=(a?a.task_types:[]).map(t=>`<option value="${t}">`).join("");
-  if(a&&a.task_types.length&&!form.type.value) form.type.value=a.task_types[0];
+// collectParams builds the params JSON from the graphical fields, unless the
+// advanced textarea was hand-edited (then it wins verbatim).
+function collectParams(form){
+  if(form.adv && form.adv.dataset.dirty){
+    const t=form.adv.value.trim()||"{}"; JSON.parse(t); return t;
+  }
+  const tts=taskTypesFor(form);
+  const tt=tts.find(x=>x.type===form.type.value);
+  const o={};
+  (tt?(tt.fields||[]):[]).forEach(f=>{
+    const el=form["f_"+f.key]; if(!el) return;
+    if(f.type==="bool"){ o[f.key]=el.checked; return; }
+    const v=el.value.trim(); if(v==="") return;
+    if(f.type==="number"){ o[f.key]=Number(v); return; }
+    if(f.type==="json"){ o[f.key]=JSON.parse(v); return; }
+    o[f.key]=v;
+  });
+  return JSON.stringify(o);
 }
 async function submitTask(ev){
   ev.preventDefault(); const f=ev.target;
-  const pr=f.params.value.trim()||"{}";
-  try{ JSON.parse(pr); }catch(_){ $("#ferr").textContent="params 不是合法 JSON"; return false; }
-  const body={game_id:f.game_id.value,name:f.name.value.trim(),type:f.type.value.trim(),params:pr,
+  let pr;
+  try{ pr=collectParams(f); }catch(_){ $("#ferr").textContent="参数不是合法 JSON(检查 JSON 字段或高级 params)"; return false; }
+  const body={game_id:f.game_id.value,name:f.name.value.trim(),type:f.type.value,params:pr,
     timeout_sec:+f.timeout_sec.value||0,max_retries:+f.max_retries.value||0,enabled:f.enabled.checked};
   const url = editId? "/api/tasks/"+editId : "/api/tasks";
   await submitForm(url, editId?"PUT":"POST", body);
