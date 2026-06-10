@@ -1,8 +1,6 @@
 package api
 
 import (
-	"encoding/json"
-	"errors"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -10,6 +8,7 @@ import (
 
 	"github.com/xiabee/game-scheduler/internal/guide"
 	"github.com/xiabee/game-scheduler/internal/store"
+	"github.com/xiabee/game-scheduler/internal/taskfactory"
 )
 
 type routeScanRequest struct {
@@ -124,7 +123,7 @@ func (s *Server) createTaskFromRoute(w http.ResponseWriter, r *http.Request) {
 		respond(w, store.Task{}, err)
 		return
 	}
-	t, err := taskForRoute(g, rt)
+	t, err := taskfactory.FromRoute(g, rt)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -166,54 +165,20 @@ func (s *Server) prepareRoute(rt *store.Route) {
 	}
 }
 
-func taskForRoute(g store.Game, rt store.Route) (store.Task, error) {
-	routeID := rt.ID
-	name := rt.Name
-	if name == "" {
-		name = strings.TrimSuffix(filepath.Base(rt.FilePath), filepath.Ext(rt.FilePath))
-	}
-	params := map[string]any{}
-	taskType := "raw"
-	switch g.Adapter {
-	case "genshin":
-		taskType = "script"
-		params["script"] = rt.FilePath
-	case "hsr":
-		taskType = "fhoe_route"
-		params["route"] = rt.FilePath
-	case "wuwa":
-		taskType = "farm"
-		params["task_index"] = 1
-		params["route"] = name
-		params["exit"] = true
-	case "r1999":
-		taskType = "run"
-		if rt.RouteType == "daily" || rt.RouteType == "farm" {
-			params["config"] = name
-		}
-	default:
-		return store.Task{}, errors.New("route adapter is not supported for task creation")
-	}
-	b, err := json.Marshal(params)
-	if err != nil {
-		return store.Task{}, err
-	}
-	return store.Task{
-		GameID:     g.ID,
-		RouteID:    &routeID,
-		Name:       name,
-		Type:       taskType,
-		Params:     string(b),
-		TimeoutSec: 3600,
-		Enabled:    true,
-	}, nil
-}
-
 func intQuery(r *http.Request, key string) int {
 	v := strings.TrimSpace(r.URL.Query().Get(key))
 	if v == "" {
 		return 0
 	}
 	n, _ := strconv.Atoi(v)
+	return n
+}
+
+func int64Query(r *http.Request, key string) int64 {
+	v := strings.TrimSpace(r.URL.Query().Get(key))
+	if v == "" {
+		return 0
+	}
+	n, _ := strconv.ParseInt(v, 10, 64)
 	return n
 }

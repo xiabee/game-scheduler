@@ -373,3 +373,99 @@ func TestRoutesAssetCenterAPI(t *testing.T) {
 		t.Fatalf("created task=%+v", task)
 	}
 }
+
+func TestCharacterPlannerAPI(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "原神", Adapter: "genshin", ToolPath: "BetterGI.exe", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	c := srv.Client()
+	post := func(path, body string, out any) int {
+		t.Helper()
+		resp, err := c.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return resp.StatusCode
+	}
+
+	var ch store.Character
+	if st := post("/api/characters", `{"game_id":"genshin","name":"香菱","role_type":"sub_dps","tags":["pyro"]}`, &ch); st != http.StatusCreated {
+		t.Fatalf("character status=%d", st)
+	}
+	var goal store.CharacterGoal
+	if st := post("/api/character-goals", `{"character_id":`+strconv.FormatInt(ch.ID, 10)+`,"name":"突破90","priority":5}`, &goal); st != http.StatusCreated {
+		t.Fatalf("goal status=%d", st)
+	}
+	var mat store.MaterialItem
+	if st := post("/api/materials", `{"game_id":"genshin","name":"绝云椒椒","category":"collect","source_hint":"绝云","route_type_hint":"collect"}`, &mat); st != http.StatusCreated {
+		t.Fatalf("material status=%d", st)
+	}
+	var req store.MaterialRequirement
+	if st := post("/api/material-requirements", `{"goal_id":`+strconv.FormatInt(goal.ID, 10)+`,"material_id":`+strconv.FormatInt(mat.ID, 10)+`,"required_count":10,"owned_count":2,"priority":8}`, &req); st != http.StatusCreated {
+		t.Fatalf("requirement status=%d", st)
+	}
+	rt, err := st.CreateRoute(store.Route{GameID: "genshin", Adapter: "genshin", RouteType: "collect", Tags: []string{"绝云"}, Name: "绝云椒椒采集", FilePath: "D:/routes/jueyun.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var recs []store.FarmingRecommendation
+	if code := post("/api/planner/recommend", `{"goal_id":`+strconv.FormatInt(goal.ID, 10)+`,"max_tasks":3}`, &recs); code != http.StatusCreated {
+		t.Fatalf("recommend status=%d", code)
+	}
+	if len(recs) != 1 || recs[0].RouteID == nil || *recs[0].RouteID != rt.ID {
+		t.Fatalf("recommendations=%+v", recs)
+	}
+	var task store.Task
+	if code := post("/api/planner/recommendations/"+strconv.FormatInt(recs[0].ID, 10)+"/create-task", `{}`, &task); code != http.StatusCreated {
+		t.Fatalf("create task status=%d", code)
+	}
+	if task.RouteID == nil || *task.RouteID != rt.ID {
+		t.Fatalf("task=%+v", task)
+	}
+	var plan store.Plan
+	if code := post("/api/planner/recommendations/"+strconv.FormatInt(recs[0].ID, 10)+"/create-plan", `{"cron_expr":"0 9 * * *"}`, &plan); code != http.StatusCreated {
+		t.Fatalf("create plan status=%d", code)
+	}
+	if plan.TaskID != task.ID {
+		t.Fatalf("plan=%+v task=%+v", plan, task)
+	}
+	resp, err := c.Get(srv.URL + "/api/planner/recommendations?goal_id=" + strconv.FormatInt(goal.ID, 10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var listed []store.FarmingRecommendation
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].TaskID == nil || listed[0].Status != "planned" {
+		t.Fatalf("listed=%+v", listed)
+	}
+}
+
+func TestRecommendationManualCreateTaskError(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "原神", Adapter: "genshin", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	ch, _ := st.CreateCharacter(store.Character{GameID: "genshin", Name: "角色"})
+	goal, _ := st.CreateCharacterGoal(store.CharacterGoal{CharacterID: ch.ID, Name: "目标"})
+	mat, _ := st.CreateMaterialItem(store.MaterialItem{GameID: "genshin", Name: "未知材料"})
+	rec, _ := st.CreateFarmingRecommendation(store.FarmingRecommendation{GoalID: goal.ID, GameID: "genshin", MaterialID: mat.ID, Title: "手动", Reason: "无路线"})
+	resp, err := srv.Client().Post(srv.URL+"/api/planner/recommendations/"+strconv.FormatInt(rec.ID, 10)+"/create-task", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400", resp.StatusCode)
+	}
+}

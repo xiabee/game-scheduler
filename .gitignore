@@ -1,12 +1,26 @@
 # build output
 /bin/
+bin/
+dist/
 *.exe
 .gocache/
+.gopath/
+.gotelemetry/
 
 # runtime data (db, logs, screenshots)
 /data/
+data/
 /data_test/
+logs/
+screenshots/
+*.db
+*.db-shm
+*.db-wal
+*.log
+tmp/
 config.json
+config.local.*
+.env
 
 # editor/OS
 .idea/

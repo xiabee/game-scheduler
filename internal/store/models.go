@@ -83,6 +83,81 @@ type Route struct {
 	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
+// Character is a manually maintained character entry for cultivation planning.
+type Character struct {
+	ID        int64     `json:"id"`
+	GameID    string    `json:"game_id"`
+	Name      string    `json:"name"`
+	RoleType  string    `json:"role_type"`
+	Element   string    `json:"element"`
+	Weapon    string    `json:"weapon"`
+	Rarity    int       `json:"rarity"`
+	Tags      []string  `json:"tags"`
+	Notes     string    `json:"notes"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CharacterGoal records a target state for one character.
+type CharacterGoal struct {
+	ID              int64     `json:"id"`
+	CharacterID     int64     `json:"character_id"`
+	Name            string    `json:"name"`
+	TargetLevel     string    `json:"target_level"`
+	TargetSkill     string    `json:"target_skill"`
+	TargetEquipment string    `json:"target_equipment"`
+	Priority        int       `json:"priority"`
+	Status          string    `json:"status"`
+	Notes           string    `json:"notes"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// MaterialItem is a manually maintained farmable item and its source hints.
+type MaterialItem struct {
+	ID            int64     `json:"id"`
+	GameID        string    `json:"game_id"`
+	Name          string    `json:"name"`
+	Category      string    `json:"category"`
+	SourceHint    string    `json:"source_hint"`
+	RouteTypeHint string    `json:"route_type_hint"`
+	Notes         string    `json:"notes"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// MaterialRequirement is the counted gap for one material under a goal.
+type MaterialRequirement struct {
+	ID            int64     `json:"id"`
+	GoalID        int64     `json:"goal_id"`
+	MaterialID    int64     `json:"material_id"`
+	RequiredCount int       `json:"required_count"`
+	OwnedCount    int       `json:"owned_count"`
+	Priority      int       `json:"priority"`
+	Notes         string    `json:"notes"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// FarmingRecommendation is the persisted output of the character planner.
+type FarmingRecommendation struct {
+	ID                 int64     `json:"id"`
+	GoalID             int64     `json:"goal_id"`
+	GameID             string    `json:"game_id"`
+	MaterialID         int64     `json:"material_id"`
+	RouteID            *int64    `json:"route_id,omitempty"`
+	TaskID             *int64    `json:"task_id,omitempty"`
+	RecommendationType string    `json:"recommendation_type"`
+	Title              string    `json:"title"`
+	Reason             string    `json:"reason"`
+	Priority           int       `json:"priority"`
+	EstimatedRuns      int       `json:"estimated_runs"`
+	EstimatedStamina   int       `json:"estimated_stamina"`
+	Status             string    `json:"status"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
 // Plan binds a task to a cron schedule.
 type Plan struct {
 	ID        int64      `json:"id"`

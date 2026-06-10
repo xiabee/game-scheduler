@@ -238,3 +238,144 @@ CREATE TABLE tasks (
 		t.Fatalf("route_id not persisted: %+v", tk)
 	}
 }
+
+func TestPlannerTablesCRUD(t *testing.T) {
+	s := newTestStore(t)
+	mkGame(t, s, "g")
+	ch, err := s.CreateCharacter(Character{GameID: "g", Name: "Rover", RoleType: "dps", Tags: []string{"main"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch.Element = "spectro"
+	ch, err = s.UpdateCharacter(ch)
+	if err != nil || ch.Element != "spectro" {
+		t.Fatalf("update character: %v %+v", err, ch)
+	}
+	if got, _ := s.ListCharacters(CharacterFilter{GameID: "g"}); len(got) != 1 || got[0].Tags[0] != "main" {
+		t.Fatalf("list characters: %+v", got)
+	}
+
+	goal, err := s.CreateCharacterGoal(CharacterGoal{CharacterID: ch.ID, Name: "90级", Priority: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal.Status = "active"
+	if _, err := s.UpdateCharacterGoal(goal); err != nil {
+		t.Fatal(err)
+	}
+	mat, err := s.CreateMaterialItem(MaterialItem{GameID: "g", Name: "Boss Core", Category: "boss", SourceHint: "core", RouteTypeHint: "boss"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mat.Notes = "weekly later"
+	if _, err := s.UpdateMaterialItem(mat); err != nil {
+		t.Fatal(err)
+	}
+	req, err := s.CreateMaterialRequirement(MaterialRequirement{GoalID: goal.ID, MaterialID: mat.ID, RequiredCount: 10, OwnedCount: 3, Priority: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.OwnedCount = 4
+	if _, err := s.UpdateMaterialRequirement(req); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := s.CreateFarmingRecommendation(FarmingRecommendation{
+		GoalID: goal.ID, GameID: "g", MaterialID: mat.ID, RecommendationType: "manual",
+		Title: "farm core", Reason: "missing", Priority: 5, EstimatedRuns: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.CreateTask(Task{GameID: "g", Name: "t", Type: "raw", Params: `{}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec, err = s.SetFarmingRecommendationTask(rec.ID, task.ID); err != nil || rec.TaskID == nil || *rec.TaskID != task.ID {
+		t.Fatalf("set task: %v %+v", err, rec)
+	}
+	if rec, err = s.SetFarmingRecommendationStatus(rec.ID, "completed"); err != nil || rec.Status != "completed" {
+		t.Fatalf("set status: %v %+v", err, rec)
+	}
+	if got, _ := s.ListFarmingRecommendations(FarmingRecommendationFilter{GoalID: goal.ID}); len(got) != 1 {
+		t.Fatalf("list recommendations: %+v", got)
+	}
+	if err := s.DeleteFarmingRecommendation(rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteMaterialRequirement(req.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteMaterialItem(mat.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteCharacterGoal(goal.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteCharacter(ch.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlannerMigrationKeepsOldTables(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "old-planner.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	_, err = db.Exec(`
+CREATE TABLE games (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, adapter TEXT NOT NULL,
+    tool_path TEXT NOT NULL DEFAULT '', working_dir TEXT NOT NULL DEFAULT '',
+    extra_config TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+CREATE TABLE tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    route_id INTEGER REFERENCES routes(id) ON DELETE SET NULL,
+    name TEXT NOT NULL, type TEXT NOT NULL, params TEXT NOT NULL DEFAULT '',
+    max_retries INTEGER NOT NULL DEFAULT 0, retry_delay_sec INTEGER NOT NULL DEFAULT 0,
+    timeout_sec INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+CREATE TABLE routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    adapter TEXT NOT NULL DEFAULT '', route_type TEXT NOT NULL DEFAULT 'other', tags TEXT NOT NULL DEFAULT '[]',
+    name TEXT NOT NULL, file_path TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '', source_title TEXT NOT NULL DEFAULT '', last_run_at TIMESTAMP,
+    success_count INTEGER NOT NULL DEFAULT 0, fail_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+CREATE TABLE plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    cron_expr TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_at TIMESTAMP, next_run_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+CREATE TABLE executions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL, trigger TEXT NOT NULL, status TEXT NOT NULL,
+    command TEXT NOT NULL DEFAULT '', stdout TEXT NOT NULL DEFAULT '', stderr TEXT NOT NULL DEFAULT '',
+    exit_code INTEGER, error_msg TEXT NOT NULL DEFAULT '', screenshot_path TEXT NOT NULL DEFAULT '',
+    retry_count INTEGER NOT NULL DEFAULT 0, start_time TIMESTAMP, end_time TIMESTAMP, created_at TIMESTAMP NOT NULL
+);
+INSERT INTO games (id,name,adapter,created_at,updated_at) VALUES ('g','g','genshin',?,?);
+`, now, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.CreateCharacter(Character{GameID: "g", Name: "new"}); err != nil {
+		t.Fatalf("new planner table missing after migration: %v", err)
+	}
+	if games, err := s.ListGames(); err != nil || len(games) != 1 {
+		t.Fatalf("old games table broken: %v %+v", err, games)
+	}
+}

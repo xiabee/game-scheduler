@@ -157,6 +157,85 @@ CREATE TABLE IF NOT EXISTS routes (
 );
 CREATE INDEX IF NOT EXISTS idx_routes_game ON routes(game_id);
 
+CREATE TABLE IF NOT EXISTS characters (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id    TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    role_type  TEXT NOT NULL DEFAULT '',
+    element    TEXT NOT NULL DEFAULT '',
+    weapon     TEXT NOT NULL DEFAULT '',
+    rarity     INTEGER NOT NULL DEFAULT 0,
+    tags       TEXT NOT NULL DEFAULT '[]',
+    notes      TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_characters_game ON characters(game_id);
+
+CREATE TABLE IF NOT EXISTS character_goals (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_id     INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+    name             TEXT NOT NULL,
+    target_level     TEXT NOT NULL DEFAULT '',
+    target_skill     TEXT NOT NULL DEFAULT '',
+    target_equipment TEXT NOT NULL DEFAULT '',
+    priority         INTEGER NOT NULL DEFAULT 0,
+    status           TEXT NOT NULL DEFAULT 'open',
+    notes            TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMP NOT NULL,
+    updated_at       TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_character_goals_character ON character_goals(character_id);
+CREATE INDEX IF NOT EXISTS idx_character_goals_status ON character_goals(status);
+
+CREATE TABLE IF NOT EXISTS material_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id         TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    category        TEXT NOT NULL DEFAULT '',
+    source_hint     TEXT NOT NULL DEFAULT '',
+    route_type_hint TEXT NOT NULL DEFAULT '',
+    notes           TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMP NOT NULL,
+    updated_at      TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_material_items_game ON material_items(game_id);
+
+CREATE TABLE IF NOT EXISTS material_requirements (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id        INTEGER NOT NULL REFERENCES character_goals(id) ON DELETE CASCADE,
+    material_id    INTEGER NOT NULL REFERENCES material_items(id) ON DELETE CASCADE,
+    required_count INTEGER NOT NULL DEFAULT 0,
+    owned_count    INTEGER NOT NULL DEFAULT 0,
+    priority       INTEGER NOT NULL DEFAULT 0,
+    notes          TEXT NOT NULL DEFAULT '',
+    created_at     TIMESTAMP NOT NULL,
+    updated_at     TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_material_requirements_goal ON material_requirements(goal_id);
+CREATE INDEX IF NOT EXISTS idx_material_requirements_material ON material_requirements(material_id);
+
+CREATE TABLE IF NOT EXISTS farming_recommendations (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id             INTEGER NOT NULL REFERENCES character_goals(id) ON DELETE CASCADE,
+    game_id             TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    material_id         INTEGER NOT NULL REFERENCES material_items(id) ON DELETE CASCADE,
+    route_id            INTEGER REFERENCES routes(id) ON DELETE SET NULL,
+    task_id             INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+    recommendation_type TEXT NOT NULL DEFAULT 'manual',
+    title               TEXT NOT NULL,
+    reason              TEXT NOT NULL,
+    priority            INTEGER NOT NULL DEFAULT 0,
+    estimated_runs      INTEGER NOT NULL DEFAULT 0,
+    estimated_stamina   INTEGER NOT NULL DEFAULT 0,
+    status              TEXT NOT NULL DEFAULT 'open',
+    created_at          TIMESTAMP NOT NULL,
+    updated_at          TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_farming_recommendations_goal ON farming_recommendations(goal_id);
+CREATE INDEX IF NOT EXISTS idx_farming_recommendations_game ON farming_recommendations(game_id);
+CREATE INDEX IF NOT EXISTS idx_farming_recommendations_status ON farming_recommendations(status);
+
 CREATE TABLE IF NOT EXISTS plans (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL,

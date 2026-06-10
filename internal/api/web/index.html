@@ -127,8 +127,11 @@
     color:var(--text);padding:8px 10px;font:13px/1.4 inherit;width:100%}
   .form textarea{font-family:ui-monospace,Consolas,monospace;min-height:64px;resize:vertical}
   .form .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .form .three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
   .form .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:4px}
   .hint{color:var(--muted);font-size:11px}
+  .planner-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.planner-cols{grid-template-columns:1fr}.form .three{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -142,6 +145,7 @@
   <button onclick="openTaskForm()">+ 任务</button>
   <button onclick="openScan()">扫描</button>
   <button onclick="openRoutes()">路线</button>
+  <button onclick="openPlanner()">培养计划</button>
   <button onclick="openGuides()">攻略</button>
   <button onclick="openHistory()">历史</button>
   <label class="toggle"><span class="live-dot" id="livedot"></span><input type="checkbox" id="live" checked> 实时</label>
@@ -513,6 +517,180 @@ async function createTaskFromRoute(id){
     $("#err").textContent="已创建路线任务 #"+t.id;
     await load();
   }catch(e){ $("#err").textContent="创建路线任务失败: "+e; }
+}
+
+// ---- modal: character planner ----
+let plannerState={characters:[],goals:[],materials:[],requirements:[],recommendations:[],routes:{}};
+function gameOptions(blank){
+  const games=(lastData&&lastData.games)||[];
+  return (blank?['<option value="">选择游戏</option>']:[]).concat(games.map(g=>`<option value="${esc(g.id)}">${esc(g.name)} (${esc(g.id)})</option>`)).join("");
+}
+async function openPlanner(){
+  openModal("培养计划", `<div class="form">
+    <div class="planner-cols">
+      <div>
+        <div class="sub"><span>角色</span></div>
+        <div class="three">
+          <label>游戏<select id="cp-game">${gameOptions(false)}</select></label>
+          <label>名称<input id="cp-char-name" placeholder="角色名"></label>
+          <label>定位<input id="cp-role" placeholder="主C / 辅助"></label>
+        </div>
+        <div class="three">
+          <label>元素<input id="cp-element"></label>
+          <label>武器<input id="cp-weapon"></label>
+          <label>星级<input id="cp-rarity" type="number" min="0"></label>
+        </div>
+        <div class="actions"><button type="button" onclick="addPlannerCharacter()">新增角色</button></div>
+        <div id="cp-characters"></div>
+      </div>
+      <div>
+        <div class="sub"><span>目标</span></div>
+        <div class="two">
+          <label>角色<select id="cp-goal-char"></select></label>
+          <label>目标名<input id="cp-goal-name" placeholder="90级/天赋/装备"></label>
+        </div>
+        <div class="three">
+          <label>等级<input id="cp-level" placeholder="90"></label>
+          <label>技能<input id="cp-skill" placeholder="10/10/10"></label>
+          <label>优先级<input id="cp-goal-priority" type="number" value="1"></label>
+        </div>
+        <label>装备目标<input id="cp-equipment" placeholder="武器/圣遗物/遗器等"></label>
+        <div class="actions"><button type="button" onclick="addPlannerGoal()">新增目标</button></div>
+        <div id="cp-goals"></div>
+      </div>
+    </div>
+    <div class="sub" style="margin-top:14px"><span>材料需求</span></div>
+    <div class="three">
+      <label>目标<select id="cp-req-goal"></select></label>
+      <label>材料名<input id="cp-material-name"></label>
+      <label>类型<input id="cp-category" placeholder="boss / collect / calyx"></label>
+    </div>
+    <div class="three">
+      <label>需要<input id="cp-required" type="number" min="0" value="1"></label>
+      <label>已有<input id="cp-owned" type="number" min="0" value="0"></label>
+      <label>优先级<input id="cp-req-priority" type="number" value="1"></label>
+    </div>
+    <div class="two">
+      <label>source_hint<input id="cp-source" placeholder="材料来源关键词"></label>
+      <label>route_type_hint<input id="cp-route-type" placeholder="collect / domain / boss ..."></label>
+    </div>
+    <div class="actions"><button type="button" onclick="addPlannerRequirement()">录入需求</button></div>
+    <div id="cp-reqs"></div>
+    <div class="sub" style="margin-top:14px"><span>推荐</span></div>
+    <div class="three">
+      <label>目标<select id="cp-rec-goal"></select></label>
+      <label>每日体力<input id="cp-stamina" type="number" min="0" placeholder="可选"></label>
+      <label>最多任务<input id="cp-max" type="number" min="0" placeholder="可选"></label>
+    </div>
+    <div class="actions"><button class="primary" type="button" onclick="generateRecommendations()">生成推荐</button></div>
+    <div id="cp-recs"></div>
+  </div>`);
+  await loadPlannerData();
+}
+async function loadPlannerData(){
+  const [chars,goals,mats,reqs,recs]=await Promise.all([
+    api("/api/characters").then(r=>r.json()),
+    api("/api/character-goals").then(r=>r.json()),
+    api("/api/materials").then(r=>r.json()),
+    api("/api/material-requirements").then(r=>r.json()),
+    api("/api/planner/recommendations?limit=100").then(r=>r.json()),
+  ]);
+  plannerState={characters:chars||[],goals:goals||[],materials:mats||[],requirements:reqs||[],recommendations:recs||[],routes:{}};
+  await renderPlanner();
+}
+function selectOptions(items, labelFn){
+  return (items||[]).map(x=>`<option value="${x.id}">${esc(labelFn(x))}</option>`).join("");
+}
+async function renderPlanner(){
+  $("#cp-goal-char").innerHTML=selectOptions(plannerState.characters,c=>`${c.name} (${c.game_id})`);
+  $("#cp-req-goal").innerHTML=selectOptions(plannerState.goals,g=>`${g.name} #${g.id}`);
+  $("#cp-rec-goal").innerHTML=$("#cp-req-goal").innerHTML;
+  $("#cp-characters").innerHTML=plannerState.characters.length?`<table><thead><tr><th>角色</th><th>游戏</th><th>标签</th></tr></thead><tbody>`+
+    plannerState.characters.map(c=>`<tr><td><strong>${esc(c.name)}</strong><div class="hint">${esc(c.role_type||'')} ${esc(c.element||'')} ${esc(c.weapon||'')}</div></td><td>${esc(c.game_id)}</td><td>${tagList(c.tags)}</td></tr>`).join("")+`</tbody></table>`:
+    '<div class="empty">暂无角色</div>';
+  $("#cp-goals").innerHTML=plannerState.goals.length?`<table><thead><tr><th>目标</th><th>角色</th><th>状态/优先级</th></tr></thead><tbody>`+
+    plannerState.goals.map(g=>`<tr><td>${esc(g.name)}<div class="hint">${esc(g.target_level)} ${esc(g.target_skill)} ${esc(g.target_equipment)}</div></td><td>#${g.character_id}</td><td><span class="badge">${esc(g.status||'open')}</span> ${g.priority||0}</td></tr>`).join("")+`</tbody></table>`:
+    '<div class="empty">暂无目标</div>';
+  $("#cp-reqs").innerHTML=plannerState.requirements.length?`<table><thead><tr><th>目标</th><th>材料</th><th>缺口</th><th>优先级</th></tr></thead><tbody>`+
+    plannerState.requirements.map(req=>{
+      const m=plannerState.materials.find(x=>x.id===req.material_id)||{};
+      return `<tr><td>#${req.goal_id}</td><td>${esc(m.name||('#'+req.material_id))}<div class="hint">${esc(m.category||'')} ${esc(m.source_hint||'')} ${esc(m.route_type_hint||'')}</div></td><td>${Math.max(0,(req.required_count||0)-(req.owned_count||0))}</td><td>${req.priority||0}</td></tr>`;
+    }).join("")+`</tbody></table>`:'<div class="empty">暂无材料需求</div>';
+  await renderRecommendations();
+}
+async function routeName(id){
+  if(!id) return "手动建议";
+  if(plannerState.routes[id]) return plannerState.routes[id];
+  const r=await api("/api/routes/search?limit=200").then(x=>x.json()).catch(()=>[]);
+  (r||[]).forEach(x=>plannerState.routes[x.id]=x.name);
+  return plannerState.routes[id]||("#"+id);
+}
+async function renderRecommendations(){
+  const rows=[];
+  for(const rec of plannerState.recommendations){
+    rows.push(`<tr>
+      <td><strong>${esc(rec.title)}</strong><div class="hint">${esc(rec.reason)}</div></td>
+      <td>${esc(await routeName(rec.route_id))}</td>
+      <td>${rec.estimated_runs||0} 次 / ${rec.estimated_stamina||0}</td>
+      <td><span class="badge">${esc(rec.status||'open')}</span></td>
+      <td><button onclick="plannerCreateTask(${rec.id})">任务</button> <button onclick="plannerCreatePlan(${rec.id})">计划</button> <button onclick="plannerMark(${rec.id},'complete')">完成</button> <button onclick="plannerMark(${rec.id},'dismiss')">忽略</button></td>
+    </tr>`);
+  }
+  $("#cp-recs").innerHTML=rows.length?`<table><thead><tr><th>推荐</th><th>路线</th><th>预计</th><th>状态</th><th></th></tr></thead><tbody>${rows.join("")}</tbody></table>`:
+    '<div class="empty">暂无推荐</div>';
+}
+async function addPlannerCharacter(){
+  const body={game_id:$("#cp-game").value,name:$("#cp-char-name").value.trim(),role_type:$("#cp-role").value.trim(),
+    element:$("#cp-element").value.trim(),weapon:$("#cp-weapon").value.trim(),rarity:+$("#cp-rarity").value||0,tags:[]};
+  if(!body.game_id||!body.name){ $("#err").textContent="角色需要游戏和名称"; return; }
+  const r=await api("/api/characters",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok){ $("#err").textContent="新增角色失败"; return; }
+  await loadPlannerData();
+}
+async function addPlannerGoal(){
+  const body={character_id:+$("#cp-goal-char").value,name:$("#cp-goal-name").value.trim(),target_level:$("#cp-level").value.trim(),
+    target_skill:$("#cp-skill").value.trim(),target_equipment:$("#cp-equipment").value.trim(),priority:+$("#cp-goal-priority").value||0,status:"open"};
+  if(!body.character_id||!body.name){ $("#err").textContent="目标需要角色和名称"; return; }
+  const r=await api("/api/character-goals",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok){ $("#err").textContent="新增目标失败"; return; }
+  await loadPlannerData();
+}
+async function addPlannerRequirement(){
+  const goal=plannerState.goals.find(g=>g.id===+$("#cp-req-goal").value);
+  const ch=goal?plannerState.characters.find(c=>c.id===goal.character_id):null;
+  if(!goal||!ch){ $("#err").textContent="请先选择目标"; return; }
+  const mat={game_id:ch.game_id,name:$("#cp-material-name").value.trim(),category:$("#cp-category").value.trim(),
+    source_hint:$("#cp-source").value.trim(),route_type_hint:$("#cp-route-type").value.trim()};
+  if(!mat.name){ $("#err").textContent="材料名必填"; return; }
+  const mr=await api("/api/materials",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(mat)});
+  if(!mr.ok){ $("#err").textContent="创建材料失败"; return; }
+  const m=await mr.json();
+  const req={goal_id:goal.id,material_id:m.id,required_count:+$("#cp-required").value||0,owned_count:+$("#cp-owned").value||0,priority:+$("#cp-req-priority").value||0};
+  const rr=await api("/api/material-requirements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(req)});
+  if(!rr.ok){ $("#err").textContent="创建需求失败"; return; }
+  await loadPlannerData();
+}
+async function generateRecommendations(){
+  const body={goal_id:+$("#cp-rec-goal").value,daily_stamina:+$("#cp-stamina").value||0,max_tasks:+$("#cp-max").value||0};
+  if(!body.goal_id){ $("#err").textContent="请选择目标"; return; }
+  const r=await api("/api/planner/recommend",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok){ $("#err").textContent="生成推荐失败"; return; }
+  await loadPlannerData();
+}
+async function plannerCreateTask(id){
+  const r=await api(`/api/planner/recommendations/${id}/create-task`,{method:"POST"});
+  if(!r.ok){ const e=await r.json().catch(()=>({error:"创建失败"})); $("#err").textContent=e.error; return; }
+  await load(); await loadPlannerData();
+}
+async function plannerCreatePlan(id){
+  const r=await api(`/api/planner/recommendations/${id}/create-plan`,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+  if(!r.ok){ const e=await r.json().catch(()=>({error:"创建失败"})); $("#err").textContent=e.error; return; }
+  await load(); await loadPlannerData();
+}
+async function plannerMark(id, action){
+  const r=await api(`/api/planner/recommendations/${id}/${action}`,{method:"POST"});
+  if(!r.ok){ $("#err").textContent="更新推荐状态失败"; return; }
+  await loadPlannerData();
 }
 
 // ---- modal: guides (B站攻略 + 本地路线) ----

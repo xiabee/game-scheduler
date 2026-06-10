@@ -9,6 +9,11 @@
 //	games   list | get <id> | add | update <id> | delete <id>
 //	tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> | preflight <id>
 //	routes  list [-game id] | search [-q text] [-game id] [-type t] [-tag tag] | add | update <id> | delete <id> | scan [-game id] | create-task <id>
+//	characters list [-game id] | get <id> | add | update <id> | delete <id>
+//	goals   list [-character id] | get <id> | add | update <id> | delete <id>
+//	materials list [-game id] | get <id> | add | update <id> | delete <id>
+//	requirements list [-goal id] | get <id> | add | update <id> | delete <id>
+//	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | create-plan <id>
 //	plans   list | get <id> | add | update <id> | delete <id>
 //	execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
 //	discover [-paths "F:/Games;D:/Tools"]   scan disk for tool executables
@@ -43,6 +48,8 @@ func main() {
 	query := flag.String("q", "", "search keyword for 'guides'")
 	routeType := flag.String("type", "", "route type filter (routes search/list)")
 	tag := flag.String("tag", "", "route tag filter (routes search/list)")
+	characterID := flag.String("character", "", "filter by character id (goals list)")
+	goalID := flag.String("goal", "", "filter by goal id (requirements/recommendations list)")
 	flag.Parse()
 
 	args := flag.Args()
@@ -69,6 +76,12 @@ func main() {
 	}
 	if *taskID != "" {
 		q.Set("task_id", *taskID)
+	}
+	if *characterID != "" {
+		q.Set("character_id", *characterID)
+	}
+	if *goalID != "" {
+		q.Set("goal_id", *goalID)
 	}
 	if *status != "" {
 		q.Set("status", *status)
@@ -141,6 +154,47 @@ func main() {
 		}
 	case "plans":
 		err = c.crud("/api/plans", action, id, *data, nil)
+	case "characters":
+		err = c.crud("/api/characters", action, id, *data, q)
+	case "goals":
+		err = c.crud("/api/character-goals", action, id, *data, q)
+	case "materials":
+		err = c.crud("/api/materials", action, id, *data, q)
+	case "requirements":
+		err = c.crud("/api/material-requirements", action, id, *data, q)
+	case "planner":
+		switch action {
+		case "recommend":
+			body, e := readData(*data)
+			if e != nil {
+				err = e
+			} else {
+				err = c.do("POST", "/api/planner/recommend", body)
+			}
+		case "recommendations", "", "list":
+			p := "/api/planner/recommendations"
+			if len(q) > 0 {
+				p += "?" + q.Encode()
+			}
+			err = c.do("GET", p, nil)
+		case "create-task":
+			err = c.do("POST", "/api/planner/recommendations/"+id+"/create-task", nil)
+		case "create-plan":
+			body := []byte("{}")
+			if *data != "" {
+				var e error
+				body, e = readData(*data)
+				if e != nil {
+					err = e
+					break
+				}
+			}
+			err = c.do("POST", "/api/planner/recommendations/"+id+"/create-plan", body)
+		case "dismiss", "complete":
+			err = c.do("POST", "/api/planner/recommendations/"+id+"/"+action, nil)
+		default:
+			err = fmt.Errorf("unknown planner action %q", action)
+		}
 	case "execs", "executions":
 		switch action {
 		case "cancel":

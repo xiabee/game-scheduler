@@ -31,6 +31,7 @@
 - **控制看板**(类 Grafana):实时推送、增删改查、执行历史、失败截图缩略图——见下文。
 - **REST API + CLI**(`ctl`),**可选令牌鉴权**。
 - **B站攻略搜索**:看板内搜攻略视频(只读公开 API),并在本地脚本库中匹配可执行路线,一键建任务(见下文专节)。
+- **角色培养计划器**:手动维护角色/目标/材料缺口,按路线资产生成刷取推荐,并一键创建任务/计划。
 - **持续集成 + 定期安全扫描**:Linux/Windows 双平台测试、`-race`、`govulncheck`、Dependabot。
 
 ---
@@ -186,6 +187,7 @@ go build -o bin/ctl.exe    ./cmd/ctl
 - **完整增删改**:头部 **+ 游戏 / + 任务** 按钮,以及每张卡上的 **+ 添加 / ✎ 编辑 / ✕ 删除**,无需命令行即可管理游戏/任务/计划。
 - **图形化任务配置**:任务表单按各工具的**操作类型**下拉选择(如 BetterGI 的「一条龙/调度器配置组/JS 脚本」、ok-ww 的「一键任务(-t N)」、M9A 的「配置名(-c)」),每种类型给出对应的输入框/数字/开关,带说明文字——**不用手写 params JSON**(高级 JSON 仍保留为逃生口,手改后以其为准)。schema 由 `GET /api/meta` 下发。游戏表单同理:崩铁的 Python 路径 / March7thAssistant / Fhoe-Rail 目录都是图形字段,自动合并进 `extra_config`。
 - **路线资产中心**:头部「路线」按钮可扫描本地脚本目录、搜索路线、查看标签/类型/来源、最近运行时间、成功/失败次数,并一键从路线创建任务。
+- **培养计划器**:头部「培养计划」按钮维护角色、目标和材料需求,根据路线资产生成刷取推荐,并创建任务/计划。
 - **执行历史**:**历史** 按钮打开可筛选的历史视图(按状态、限制条数),点行进详情弹窗。
 - **资源监控面板**:顶部用**环形仪表**实时显示本机 **CPU / 内存 / 磁盘** 使用率,各带**历史曲线**(随 SSE 持续刷新);超过阈值时变红并弹出**过载横幅**(见下节)。
 
@@ -279,6 +281,93 @@ ctl -server $S routes create-task <路线id>
 - `r1999` → `run`, daily/farm 路线会把路线名作为 `config`
 
 创建出的任务会带 `route_id`。执行结束后,如果任务关联路线,会自动更新该路线的 `last_run_at`、`success_count` 或 `fail_count`。
+
+---
+
+## 🧪 角色培养计划器 v1
+
+角色培养计划器是一个**手动维护 + 推荐生成**模块:你录入角色、培养目标、材料需求和已有数量,系统计算材料缺口,再用路线资产中心里的 `route_type` / `tags` / `source_title` / 描述做匹配,生成刷取建议。它不会自动识别背包或角色状态,也不会接入游戏画面识别。
+
+### 功能说明
+
+新增数据:
+
+- `characters`:角色基础信息、标签、备注。
+- `character_goals`:培养目标,如等级/技能/装备目标、优先级、状态。
+- `material_items`:材料、类型、`source_hint`、`route_type_hint`。
+- `material_requirements`:某个目标下的需要数量、已有数量、需求优先级。
+- `farming_recommendations`:生成后的刷取建议,可关联路线、任务和计划。
+
+推荐逻辑:
+
+- `missing = required_count - owned_count`;缺口小于等于 0 不生成建议。
+- 按 `material_requirements.priority` 从高到低推荐。
+- `material.route_type_hint` 匹配 `routes.route_type` 时优先。
+- `material.source_hint` 会匹配路线名、tags、描述和 `source_title`。
+- 找不到路线时仍生成**手动刷取建议**,但 `route_id` 为空。
+- 每条建议都有 `reason`,并估算 `estimated_runs` / `estimated_stamina`。
+- 支持 `daily_stamina` 和 `max_tasks` 控制一次推荐的预算和数量。
+
+### 使用流程
+
+1. 在「路线」里先扫描或手工维护路线资产,尽量补好 `route_type`、tags、来源标题。
+2. 在「培养计划」里新增角色。
+3. 给角色新增培养目标。
+4. 录入材料需求:材料名、类型、需要/已有数量、优先级、`source_hint`、`route_type_hint`。
+5. 点击「生成推荐」。
+6. 对有 `route_id` 的推荐一键创建任务或计划;无路线建议先补路线资产或手工处理。
+
+### API 示例
+
+```powershell
+$S = "http://127.0.0.1:8080"
+
+Invoke-RestMethod "$S/api/characters" -Method POST -ContentType application/json -Body '{"game_id":"genshin","name":"香菱","role_type":"sub_dps","element":"pyro","weapon":"polearm","rarity":4,"tags":["深渊"]}'
+Invoke-RestMethod "$S/api/character-goals" -Method POST -ContentType application/json -Body '{"character_id":1,"name":"突破90","target_level":"90","target_skill":"10/10/10","priority":5,"status":"open"}'
+Invoke-RestMethod "$S/api/materials" -Method POST -ContentType application/json -Body '{"game_id":"genshin","name":"绝云椒椒","category":"collect","source_hint":"绝云","route_type_hint":"collect"}'
+Invoke-RestMethod "$S/api/material-requirements" -Method POST -ContentType application/json -Body '{"goal_id":1,"material_id":1,"required_count":168,"owned_count":42,"priority":8}'
+Invoke-RestMethod "$S/api/planner/recommend" -Method POST -ContentType application/json -Body '{"goal_id":1,"daily_stamina":160,"max_tasks":3}'
+Invoke-RestMethod "$S/api/planner/recommendations?goal_id=1"
+Invoke-RestMethod "$S/api/planner/recommendations/1/create-task" -Method POST
+Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -ContentType application/json -Body '{"cron_expr":"0 9 * * *"}'
+```
+
+### CLI 示例
+
+```powershell
+$S = "http://127.0.0.1:8080"
+
+ctl -server $S -data '{"game_id":"genshin","name":"香菱","role_type":"sub_dps","element":"pyro","weapon":"polearm","rarity":4,"tags":["深渊"]}' characters add
+ctl -server $S characters list
+
+ctl -server $S -data '{"character_id":1,"name":"突破90","target_level":"90","target_skill":"10/10/10","priority":5,"status":"open"}' goals add
+ctl -server $S -character 1 goals list
+
+ctl -server $S -data '{"game_id":"genshin","name":"绝云椒椒","category":"collect","source_hint":"绝云","route_type_hint":"collect"}' materials add
+ctl -server $S -data '{"goal_id":1,"material_id":1,"required_count":168,"owned_count":42,"priority":8}' requirements add
+ctl -server $S -goal 1 requirements list
+
+ctl -server $S -data '{"goal_id":1,"daily_stamina":160,"max_tasks":3}' planner recommend
+ctl -server $S -goal 1 planner recommendations
+ctl -server $S planner create-task <推荐id>
+ctl -server $S -data '{"cron_expr":"0 9 * * *"}' planner create-plan <推荐id>
+```
+
+### 看板使用说明
+
+头部「培养计划」按钮打开计划器。当前 v1 是轻量内嵌 UI:
+
+- 左侧维护角色,右侧维护培养目标。
+- 下方录入材料需求;材料会写入 `material_items`,需求写入 `material_requirements`。
+- 推荐表展示标题、原因、关联路线、预计次数、预计体力和状态。
+- 推荐可创建任务、创建计划、标记完成或忽略。
+
+### 限制
+
+- 不自动识别背包材料数量。
+- 不自动识别角色等级/技能/装备状态。
+- 不读写游戏内存、不抓包、不封包、不注入、不反检测。
+- 本阶段不依赖 OCR/YOLO;后续可以在安全边界内扩展截图识别辅助录入,但执行仍只通过外部工具任务。
 
 ---
 

@@ -349,6 +349,75 @@ GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs gofmt
 + vet, builds and tests on **Linux and Windows** (so the platform-specific
 `*_windows.go` files are exercised), and runs the race detector on Linux.
 
+## Character Planner v1
+
+The character planner is a manual cultivation-planning module. You maintain
+characters, goals, material requirements and owned counts; the server computes
+material gaps and matches them against the route asset center using
+`route_type`, tags, descriptions and source titles. It does not inspect the
+game client, inventory, screenshots, memory or network traffic.
+
+New compatible SQLite tables: `characters`, `character_goals`,
+`material_items`, `material_requirements`, and `farming_recommendations`.
+Migrations are additive (`CREATE TABLE IF NOT EXISTS` / indexes); existing
+databases are not rebuilt.
+
+Recommendation logic:
+
+- `missing = required_count - owned_count`; no recommendation when
+  `missing <= 0`.
+- Requirements are ordered by `material_requirements.priority` descending.
+- `material.route_type_hint` matching `routes.route_type` is preferred.
+- `material.source_hint` matches route name, tags, description and
+  `source_title`.
+- If no route matches, a manual recommendation is still written with
+  `route_id = null`.
+- Every recommendation includes a `reason`, `estimated_runs` and
+  `estimated_stamina`.
+- `daily_stamina` and `max_tasks` can bound a recommendation run.
+
+API examples:
+
+```powershell
+$S = "http://127.0.0.1:8080"
+
+Invoke-RestMethod "$S/api/characters" -Method POST -ContentType application/json -Body '{"game_id":"genshin","name":"Xiangling","role_type":"sub_dps","element":"pyro","weapon":"polearm","rarity":4}'
+Invoke-RestMethod "$S/api/character-goals" -Method POST -ContentType application/json -Body '{"character_id":1,"name":"Level 90","target_level":"90","target_skill":"10/10/10","priority":5,"status":"open"}'
+Invoke-RestMethod "$S/api/materials" -Method POST -ContentType application/json -Body '{"game_id":"genshin","name":"Jueyun Chili","category":"collect","source_hint":"jueyun","route_type_hint":"collect"}'
+Invoke-RestMethod "$S/api/material-requirements" -Method POST -ContentType application/json -Body '{"goal_id":1,"material_id":1,"required_count":168,"owned_count":42,"priority":8}'
+Invoke-RestMethod "$S/api/planner/recommend" -Method POST -ContentType application/json -Body '{"goal_id":1,"daily_stamina":160,"max_tasks":3}'
+Invoke-RestMethod "$S/api/planner/recommendations?goal_id=1"
+Invoke-RestMethod "$S/api/planner/recommendations/1/create-task" -Method POST
+Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -ContentType application/json -Body '{"cron_expr":"0 9 * * *"}'
+```
+
+CLI examples:
+
+```powershell
+$S = "http://127.0.0.1:8080"
+
+ctl -server $S -data '{"game_id":"genshin","name":"Xiangling","role_type":"sub_dps","element":"pyro","weapon":"polearm","rarity":4}' characters add
+ctl -server $S characters list
+ctl -server $S -data '{"character_id":1,"name":"Level 90","target_level":"90","target_skill":"10/10/10","priority":5,"status":"open"}' goals add
+ctl -server $S -character 1 goals list
+ctl -server $S -data '{"game_id":"genshin","name":"Jueyun Chili","category":"collect","source_hint":"jueyun","route_type_hint":"collect"}' materials add
+ctl -server $S -data '{"goal_id":1,"material_id":1,"required_count":168,"owned_count":42,"priority":8}' requirements add
+ctl -server $S -data '{"goal_id":1,"daily_stamina":160,"max_tasks":3}' planner recommend
+ctl -server $S -goal 1 planner recommendations
+ctl -server $S planner create-task <recommendation-id>
+ctl -server $S -data '{"cron_expr":"0 9 * * *"}' planner create-plan <recommendation-id>
+```
+
+Dashboard flow: open **培养计划** in the header. The modal lets you add
+characters, goals and material requirements, generate recommendations, then
+create tasks/plans or mark recommendations completed/dismissed.
+
+Limits: the planner does not auto-detect inventory, character state, skill
+levels or equipment. It does not read memory, inject code, intercept packets,
+use OCR/YOLO or bypass detection. Future screenshot-assisted data entry can be
+added inside that boundary; actual execution still goes through external tool
+tasks only.
+
 ## Notes & limitations (MVP)
 
 - Tool CLI flags differ across versions; adapter defaults are documented best
