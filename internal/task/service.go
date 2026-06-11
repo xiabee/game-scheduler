@@ -438,10 +438,13 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 		exec.Status = store.StatusSuccess
 	}
 
+	// Record route stats BEFORE the final status write: anyone who observes a
+	// finished execution (pollers, the dashboard, tests) can then rely on the
+	// route counters already reflecting this run.
+	s.recordRouteRun(t, exec)
 	if err := s.store.UpdateExecution(exec); err != nil {
 		return err
 	}
-	s.recordRouteRun(t, exec)
 	s.bus.Notify()
 	if exec.Status == store.StatusFailed {
 		s.alert("task_failed", "任务失败:"+t.Name, exec.ErrorMsg)
@@ -462,11 +465,12 @@ func (s *Service) finishWithError(exec store.Execution, cause error) error {
 	exec.ScreenshotPath = s.captureScreenshot(exec.ID)
 	s.log.Error("task setup failed", "exec_id", exec.ID, "err", cause)
 	s.alert("task_failed", fmt.Sprintf("任务启动失败 #%d", exec.TaskID), cause.Error())
-	err := s.store.UpdateExecution(exec)
+	// Same ordering invariant as execute(): route stats land before the final
+	// status becomes observable.
 	if t, loadErr := s.store.GetTask(exec.TaskID); loadErr == nil {
 		s.recordRouteRun(t, exec)
 	}
-	return err
+	return s.store.UpdateExecution(exec)
 }
 
 func (s *Service) recordRouteRun(t store.Task, exec store.Execution) {
