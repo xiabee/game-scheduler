@@ -455,6 +455,12 @@ plans   list | get <id> | add | update <id> | delete <id>
 execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
 discover [-paths "F:/Games;D:/Tools"]    扫描磁盘查找工具
 guides   -q "<关键词>" [-game id]         B站攻略搜索 + 本地路线匹配
+characters list [-game id] | get <id> | add | update <id> | delete <id>
+goals    list [-character id] [-game id] [-status s] | get <id> | add | update <id> | delete <id>
+materials list [-game id] [-category c] | get <id> | add | update <id> | delete <id>
+requirements list [-goal id] | get <id> | add | update <id> | delete <id>
+planner  recommend | recommendations [-goal id] [-game id] [-status s] [-limit n]
+         | create-task <id> | create-plan <id> | dismiss <id> | complete <id>
 health
 ```
 

@@ -60,6 +60,7 @@ func (s *Server) deleteCharacter(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listCharacterGoals(w http.ResponseWriter, r *http.Request) {
 	out, err := s.store.ListCharacterGoals(store.CharacterGoalFilter{
 		CharacterID: int64Query(r, "character_id"),
+		GameID:      r.URL.Query().Get("game_id"),
 		Status:      r.URL.Query().Get("status"),
 	})
 	respond(w, out, err)
@@ -106,7 +107,10 @@ func (s *Server) deleteCharacterGoal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listMaterials(w http.ResponseWriter, r *http.Request) {
-	out, err := s.store.ListMaterialItems(store.MaterialFilter{GameID: r.URL.Query().Get("game_id")})
+	out, err := s.store.ListMaterialItems(store.MaterialFilter{
+		GameID:   r.URL.Query().Get("game_id"),
+		Category: r.URL.Query().Get("category"),
+	})
 	respond(w, out, err)
 }
 

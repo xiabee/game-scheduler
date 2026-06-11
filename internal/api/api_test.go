@@ -466,6 +466,81 @@ func TestRecommendationManualCreateTaskError(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status=%d want 400", resp.StatusCode)
+		t.Fatalf("create-task status=%d want 400", resp.StatusCode)
+	}
+
+	// create-plan on a recommendation with neither route nor task must also 400
+	// (and must not create a dangling plan).
+	resp2, err := srv.Client().Post(srv.URL+"/api/planner/recommendations/"+strconv.FormatInt(rec.ID, 10)+"/create-plan", "application/json", strings.NewReader(`{"cron_expr":"0 9 * * *"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("create-plan status=%d want 400", resp2.StatusCode)
+	}
+	if plans, _ := st.ListPlans(false); len(plans) != 0 {
+		t.Fatalf("no plan should be created on failure, got %+v", plans)
+	}
+}
+
+func TestPlannerListFilters(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	for _, gid := range []string{"genshin", "hsr"} {
+		adapter := gid
+		if _, err := st.CreateGame(store.Game{ID: gid, Name: gid, Adapter: adapter, ToolPath: "x", ExtraConfig: `{"march7th_dir":"C:/x"}`, Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chG, _ := st.CreateCharacter(store.Character{GameID: "genshin", Name: "甲"})
+	chH, _ := st.CreateCharacter(store.Character{GameID: "hsr", Name: "乙"})
+	st.CreateCharacterGoal(store.CharacterGoal{CharacterID: chG.ID, Name: "g-open"})                 // status defaults open
+	st.CreateCharacterGoal(store.CharacterGoal{CharacterID: chG.ID, Name: "g-done", Status: "done"}) //
+	st.CreateCharacterGoal(store.CharacterGoal{CharacterID: chH.ID, Name: "h-open"})                 //
+	st.CreateMaterialItem(store.MaterialItem{GameID: "genshin", Name: "花", Category: "collect"})     //
+	st.CreateMaterialItem(store.MaterialItem{GameID: "genshin", Name: "核", Category: "boss"})        //
+	st.CreateMaterialItem(store.MaterialItem{GameID: "hsr", Name: "矿", Category: "collect"})         //
+
+	getJSON := func(path string, out any) {
+		t.Helper()
+		resp, err := srv.Client().Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s status=%d", path, resp.StatusCode)
+		}
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var goals []store.CharacterGoal
+	getJSON("/api/character-goals?game_id=genshin", &goals)
+	if len(goals) != 2 {
+		t.Fatalf("goals by game_id=%d want 2: %+v", len(goals), goals)
+	}
+	getJSON("/api/character-goals?game_id=genshin&status=open", &goals)
+	if len(goals) != 1 || goals[0].Name != "g-open" {
+		t.Fatalf("goals by game_id+status: %+v", goals)
+	}
+	getJSON("/api/character-goals?game_id=hsr", &goals)
+	if len(goals) != 1 || goals[0].Name != "h-open" {
+		t.Fatalf("goals by other game: %+v", goals)
+	}
+
+	var mats []store.MaterialItem
+	getJSON("/api/materials?game_id=genshin", &mats)
+	if len(mats) != 2 {
+		t.Fatalf("materials by game_id=%d want 2", len(mats))
+	}
+	getJSON("/api/materials?game_id=genshin&category=boss", &mats)
+	if len(mats) != 1 || mats[0].Name != "核" {
+		t.Fatalf("materials by game_id+category: %+v", mats)
+	}
+	getJSON("/api/materials?category=collect", &mats)
+	if len(mats) != 2 {
+		t.Fatalf("materials by category across games=%d want 2", len(mats))
 	}
 }

@@ -10,8 +10,8 @@
 //	tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> | preflight <id>
 //	routes  list [-game id] | search [-q text] [-game id] [-type t] [-tag tag] | add | update <id> | delete <id> | scan [-game id] | create-task <id>
 //	characters list [-game id] | get <id> | add | update <id> | delete <id>
-//	goals   list [-character id] | get <id> | add | update <id> | delete <id>
-//	materials list [-game id] | get <id> | add | update <id> | delete <id>
+//	goals   list [-character id] [-game id] [-status s] | get <id> | add | update <id> | delete <id>
+//	materials list [-game id] [-category c] | get <id> | add | update <id> | delete <id>
 //	requirements list [-goal id] | get <id> | add | update <id> | delete <id>
 //	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | create-plan <id>
 //	plans   list | get <id> | add | update <id> | delete <id>
@@ -50,6 +50,7 @@ func main() {
 	tag := flag.String("tag", "", "route tag filter (routes search/list)")
 	characterID := flag.String("character", "", "filter by character id (goals list)")
 	goalID := flag.String("goal", "", "filter by goal id (requirements/recommendations list)")
+	category := flag.String("category", "", "filter by category (materials list)")
 	flag.Parse()
 
 	args := flag.Args()
@@ -82,6 +83,9 @@ func main() {
 	}
 	if *goalID != "" {
 		q.Set("goal_id", *goalID)
+	}
+	if *category != "" {
+		q.Set("category", *category)
 	}
 	if *status != "" {
 		q.Set("status", *status)

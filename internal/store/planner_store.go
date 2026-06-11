@@ -98,9 +98,11 @@ func (s *Store) ListCharacters(f CharacterFilter) ([]Character, error) {
 	return out, rows.Err()
 }
 
-// CharacterGoalFilter narrows ListCharacterGoals.
+// CharacterGoalFilter narrows ListCharacterGoals. GameID filters through the
+// owning character (join), so callers can list one game's goals directly.
 type CharacterGoalFilter struct {
 	CharacterID int64
+	GameID      string
 	Status      string
 }
 
@@ -158,17 +160,25 @@ func (s *Store) DeleteCharacterGoal(id int64) error {
 }
 
 func (s *Store) ListCharacterGoals(f CharacterGoalFilter) ([]CharacterGoal, error) {
-	q := `SELECT id,character_id,name,target_level,target_skill,target_equipment,priority,status,notes,created_at,updated_at FROM character_goals WHERE 1=1`
+	q := `SELECT g.id,g.character_id,g.name,g.target_level,g.target_skill,g.target_equipment,g.priority,g.status,g.notes,g.created_at,g.updated_at FROM character_goals g`
 	var args []any
+	if f.GameID != "" {
+		q += ` JOIN characters c ON c.id=g.character_id`
+	}
+	q += ` WHERE 1=1`
+	if f.GameID != "" {
+		q += ` AND c.game_id=?`
+		args = append(args, f.GameID)
+	}
 	if f.CharacterID != 0 {
-		q += ` AND character_id=?`
+		q += ` AND g.character_id=?`
 		args = append(args, f.CharacterID)
 	}
 	if f.Status != "" {
-		q += ` AND status=?`
+		q += ` AND g.status=?`
 		args = append(args, f.Status)
 	}
-	q += ` ORDER BY priority DESC,id`
+	q += ` ORDER BY g.priority DESC,g.id`
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -187,7 +197,8 @@ func (s *Store) ListCharacterGoals(f CharacterGoalFilter) ([]CharacterGoal, erro
 
 // MaterialFilter narrows ListMaterialItems.
 type MaterialFilter struct {
-	GameID string
+	GameID   string
+	Category string
 }
 
 func (s *Store) CreateMaterialItem(m MaterialItem) (MaterialItem, error) {
@@ -243,6 +254,10 @@ func (s *Store) ListMaterialItems(f MaterialFilter) ([]MaterialItem, error) {
 	if f.GameID != "" {
 		q += ` AND game_id=?`
 		args = append(args, f.GameID)
+	}
+	if f.Category != "" {
+		q += ` AND category=?`
+		args = append(args, f.Category)
 	}
 	q += ` ORDER BY game_id,name,id`
 	rows, err := s.db.Query(q, args...)

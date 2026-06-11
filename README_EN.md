@@ -224,9 +224,17 @@ ctl [-server URL] <resource> <action> [id]
 
 games   list | get <id> | add | update <id> | delete <id>
 tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> | preflight <id>
-routes  list [-game id] | add | delete <id>
+routes  list/search [-game id] [-q text] [-type t] [-tag tag] | add | update <id> | delete <id> | scan [-game id] | create-task <id>
 plans   list | get <id> | add | update <id> | delete <id>
 execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
+discover [-paths "F:/Games;D:/Tools"]    scan disk for tool executables
+guides   -q "<keyword>" [-game id]        Bilibili guide search + local routes
+characters list [-game id] | get <id> | add | update <id> | delete <id>
+goals    list [-character id] [-game id] [-status s] | get <id> | add | update <id> | delete <id>
+materials list [-game id] [-category c] | get <id> | add | update <id> | delete <id>
+requirements list [-goal id] | get <id> | add | update <id> | delete <id>
+planner  recommend | recommendations [-goal id] [-game id] [-status s] [-limit n]
+         | create-task <id> | create-plan <id> | dismiss <id> | complete <id>
 health
 ```
 
