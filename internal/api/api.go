@@ -130,6 +130,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/planner/recommendations/{id}/create-plan", s.createPlanFromRecommendation)
 	mux.HandleFunc("POST /api/planner/recommendations/{id}/dismiss", s.dismissRecommendation)
 	mux.HandleFunc("POST /api/planner/recommendations/{id}/complete", s.completeRecommendation)
+	mux.HandleFunc("GET /api/planner/export", s.plannerExport)
+	mux.HandleFunc("POST /api/planner/import", s.plannerImport)
 
 	// Plans
 	mux.HandleFunc("GET /api/plans", s.listPlans)

@@ -14,6 +14,7 @@
 //	materials list [-game id] [-category c] | get <id> | add | update <id> | delete <id>
 //	requirements list [-goal id] | get <id> | add | update <id> | delete <id>
 //	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | create-plan <id>
+//	        | export -game <id> | import -data '<json>'|@file.json|-
 //	plans   list | get <id> | add | update <id> | delete <id>
 //	execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
 //	discover [-paths "F:/Games;D:/Tools"]   scan disk for tool executables
@@ -196,6 +197,19 @@ func main() {
 			err = c.do("POST", "/api/planner/recommendations/"+id+"/create-plan", body)
 		case "dismiss", "complete":
 			err = c.do("POST", "/api/planner/recommendations/"+id+"/"+action, nil)
+		case "export":
+			if *gameID == "" {
+				err = fmt.Errorf("planner export requires -game <id>")
+			} else {
+				err = c.do("GET", "/api/planner/export?game_id="+url.QueryEscape(*gameID), nil)
+			}
+		case "import":
+			body, e := readData(*data)
+			if e != nil {
+				err = e
+			} else {
+				err = c.do("POST", "/api/planner/import", body)
+			}
 		default:
 			err = fmt.Errorf("unknown planner action %q", action)
 		}
@@ -287,12 +301,32 @@ func (c *client) do(method, path string, body []byte) error {
 
 func readData(data string) ([]byte, error) {
 	if data == "-" {
-		return io.ReadAll(os.Stdin)
+		b, err := io.ReadAll(os.Stdin)
+		return stripBOM(b), err
 	}
 	if data == "" {
-		return nil, fmt.Errorf("this action requires -data '<json>' (or -data - for stdin)")
+		return nil, fmt.Errorf("this action requires -data '<json>' (or -data - for stdin, -data @file.json for a file)")
+	}
+	// @path/to/file.json reads the body from a file (handy on PowerShell where
+	// quoting large JSON inline is painful).
+	if strings.HasPrefix(data, "@") {
+		path := strings.TrimPrefix(data, "@")
+		if path == "" {
+			return nil, fmt.Errorf("-data @ requires a file path, e.g. -data @seed.json")
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read -data file: %w", err)
+		}
+		return stripBOM(b), nil
 	}
 	return []byte(data), nil
+}
+
+// stripBOM removes a UTF-8 byte order mark. Windows tools (Notepad, PowerShell
+// 5.1's Set-Content -Encoding UTF8) write one, and Go's JSON decoder rejects it.
+func stripBOM(b []byte) []byte {
+	return bytes.TrimPrefix(b, []byte{0xEF, 0xBB, 0xBF})
 }
 
 func prettify(raw []byte) string {

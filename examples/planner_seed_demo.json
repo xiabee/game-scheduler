@@ -1,0 +1,83 @@
+{
+  "dry_run": false,
+  "upsert": true,
+  "data": {
+    "version": 1,
+    "game_id": "demo-genshin",
+    "characters": [
+      {
+        "id": 1,
+        "name": "DemoPyroDPS",
+        "role_type": "dps",
+        "element": "pyro",
+        "weapon": "polearm",
+        "rarity": 4,
+        "tags": ["demo", "main-team"],
+        "notes": "sample character for trying out the planner"
+      },
+      {
+        "id": 2,
+        "name": "DemoHealer",
+        "role_type": "support",
+        "element": "hydro",
+        "weapon": "catalyst",
+        "rarity": 5,
+        "tags": ["demo"],
+        "notes": ""
+      }
+    ],
+    "character_goals": [
+      {
+        "id": 11,
+        "character_id": 1,
+        "name": "Ascend to 90",
+        "target_level": "90",
+        "target_skill": "9/9/9",
+        "priority": 5,
+        "status": "open",
+        "notes": "demo goal"
+      },
+      {
+        "id": 12,
+        "character_id": 2,
+        "name": "Talent 8",
+        "target_level": "80",
+        "target_skill": "8",
+        "priority": 3,
+        "status": "open",
+        "notes": ""
+      }
+    ],
+    "material_items": [
+      {
+        "id": 21,
+        "name": "Demo Flower",
+        "category": "collect",
+        "source_hint": "open-world pickup, north plains",
+        "route_type_hint": "collect",
+        "notes": "matches collect routes by name"
+      },
+      {
+        "id": 22,
+        "name": "Demo Boss Core",
+        "category": "boss",
+        "source_hint": "weekly boss drop",
+        "route_type_hint": "boss",
+        "notes": ""
+      },
+      {
+        "id": 23,
+        "name": "Demo Ore",
+        "category": "collect",
+        "source_hint": "mining spots",
+        "route_type_hint": "collect",
+        "notes": ""
+      }
+    ],
+    "material_requirements": [
+      { "goal_id": 11, "material_id": 21, "required_count": 60, "owned_count": 12, "priority": 8 },
+      { "goal_id": 11, "material_id": 22, "required_count": 6, "owned_count": 1, "priority": 9 },
+      { "goal_id": 12, "material_id": 23, "required_count": 30, "owned_count": 0, "priority": 4 }
+    ]
+  }
+}

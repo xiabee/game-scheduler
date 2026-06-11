@@ -484,6 +484,135 @@ func TestRecommendationManualCreateTaskError(t *testing.T) {
 	}
 }
 
+func TestPlannerExportImport(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	c := srv.Client()
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "原神", Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	postJSON := func(path, body string, out any) int {
+		t.Helper()
+		resp, err := c.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return resp.StatusCode
+	}
+
+	importBody := `{"dry_run":%v,"upsert":true,"data":{
+		"version":1,"game_id":"genshin",
+		"characters":[{"id":7,"name":"香菱","role_type":"dps","tags":["pyro"]}],
+		"character_goals":[{"id":70,"character_id":7,"name":"突破90","priority":5}],
+		"material_items":[{"id":700,"name":"绝云椒椒","category":"collect","source_hint":"绝云间"}],
+		"material_requirements":[{"goal_id":70,"material_id":700,"required_count":10,"owned_count":2}]}}`
+
+	// 1) dry_run reports creations but writes nothing
+	var dry plannerImportResult
+	if code := postJSON("/api/planner/import", strings.Replace(importBody, "%v", "true", 1), &dry); code != http.StatusOK {
+		t.Fatalf("dry_run status=%d", code)
+	}
+	if !dry.DryRun || dry.Created != 4 || dry.Updated != 0 || len(dry.Errors) != 0 {
+		t.Fatalf("dry_run result=%+v", dry)
+	}
+	if chars, _ := st.ListCharacters(store.CharacterFilter{GameID: "genshin"}); len(chars) != 0 {
+		t.Fatalf("dry_run must not write, found %d characters", len(chars))
+	}
+
+	// 2) real import creates everything with remapped ids
+	var imp plannerImportResult
+	if code := postJSON("/api/planner/import", strings.Replace(importBody, "%v", "false", 1), &imp); code != http.StatusOK {
+		t.Fatalf("import status=%d", code)
+	}
+	if imp.Created != 4 || len(imp.Errors) != 0 {
+		t.Fatalf("import result=%+v", imp)
+	}
+	chars, _ := st.ListCharacters(store.CharacterFilter{GameID: "genshin"})
+	if len(chars) != 1 || chars[0].ID == 7 && chars[0].Name != "香菱" {
+		t.Fatalf("characters=%+v", chars)
+	}
+	goals, _ := st.ListCharacterGoals(store.CharacterGoalFilter{GameID: "genshin"})
+	if len(goals) != 1 || goals[0].CharacterID != chars[0].ID {
+		t.Fatalf("goal character_id not remapped: goals=%+v chars=%+v", goals, chars)
+	}
+	mats, _ := st.ListMaterialItems(store.MaterialFilter{GameID: "genshin"})
+	if len(mats) != 1 {
+		t.Fatalf("materials=%+v", mats)
+	}
+	reqs, _ := st.ListMaterialRequirements(store.MaterialRequirementFilter{GoalID: goals[0].ID})
+	if len(reqs) != 1 || reqs[0].MaterialID != mats[0].ID {
+		t.Fatalf("requirement ids not remapped: %+v (material %d)", reqs, mats[0].ID)
+	}
+
+	// 3) re-import with upsert: updates, no duplicates
+	var again plannerImportResult
+	if code := postJSON("/api/planner/import", strings.Replace(importBody, "%v", "false", 1), &again); code != http.StatusOK {
+		t.Fatalf("re-import status=%d", code)
+	}
+	if again.Created != 0 || again.Updated != 4 {
+		t.Fatalf("re-import should update not duplicate: %+v", again)
+	}
+	if chars, _ := st.ListCharacters(store.CharacterFilter{GameID: "genshin"}); len(chars) != 1 {
+		t.Fatalf("duplicated characters: %+v", chars)
+	}
+	if reqs, _ := st.ListMaterialRequirements(store.MaterialRequirementFilter{GoalID: goals[0].ID}); len(reqs) != 1 {
+		t.Fatalf("duplicated requirements: %+v", reqs)
+	}
+
+	// 4) export round-trips the data
+	resp, err := c.Get(srv.URL + "/api/planner/export?game_id=genshin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var exp PlannerExport
+	if err := json.NewDecoder(resp.Body).Decode(&exp); err != nil {
+		t.Fatal(err)
+	}
+	if exp.Version != 1 || exp.GameID != "genshin" ||
+		len(exp.Characters) != 1 || len(exp.Goals) != 1 || len(exp.Materials) != 1 || len(exp.Requirements) != 1 {
+		t.Fatalf("export=%+v", exp)
+	}
+
+	// 5) clear validation errors
+	cases := []struct {
+		name, body string
+	}{
+		{"missing game_id", `{"data":{"version":1,"characters":[]}}`},
+		{"unknown game", `{"data":{"version":1,"game_id":"nope"}}`},
+		{"goal references unknown character", `{"data":{"version":1,"game_id":"genshin","characters":[{"id":1,"name":"a"}],"character_goals":[{"id":2,"character_id":99,"name":"g"}]}}`},
+		{"character missing name", `{"data":{"version":1,"game_id":"genshin","characters":[{"id":1}]}}`},
+		{"future version", `{"data":{"version":99,"game_id":"genshin"}}`},
+		{"malformed json", `{"data":{`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var e struct {
+				Error string `json:"error"`
+			}
+			if code := postJSON("/api/planner/import", tc.body, &e); code != http.StatusBadRequest {
+				t.Fatalf("status=%d want 400 (err=%q)", code, e.Error)
+			}
+			if e.Error == "" {
+				t.Fatal("expected a clear error message")
+			}
+		})
+	}
+
+	// 6) export requires game_id / existing game
+	r2, _ := c.Get(srv.URL + "/api/planner/export")
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("export without game_id status=%d", r2.StatusCode)
+	}
+}
+
 func TestPlannerListFilters(t *testing.T) {
 	srv, st, _ := newTestServer(t, "")
 	for _, gid := range []string{"genshin", "hsr"} {

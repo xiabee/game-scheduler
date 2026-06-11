@@ -235,6 +235,7 @@ materials list [-game id] [-category c] | get <id> | add | update <id> | delete 
 requirements list [-goal id] | get <id> | add | update <id> | delete <id>
 planner  recommend | recommendations [-goal id] [-game id] [-status s] [-limit n]
          | create-task <id> | create-plan <id> | dismiss <id> | complete <id>
+         | export -game <id> | import -data '<json>'|@file.json|-
 health
 ```
 
@@ -420,11 +421,48 @@ Dashboard flow: open **培养计划** in the header. The modal lets you add
 characters, goals and material requirements, generate recommendations, then
 create tasks/plans or mark recommendations completed/dismissed.
 
+### Planner export / import (backup, migration, seeding)
+
+- **Export** `GET /api/planner/export?game_id=<id>` — returns the game's
+  characters / goals / materials / requirements as one JSON document
+  (recommendations are intentionally **not** exported; regenerate them after
+  import so they are never stale).
+- **Import** `POST /api/planner/import` with
+  `{"dry_run":bool,"upsert":bool,"data":<export>}`:
+  - `dry_run: true` validates and counts (`created/updated/skipped`) **without
+    writing**;
+  - `upsert: true` updates existing rows, `false` skips them;
+  - dedupe keys: characters & materials on `(game_id,name)`, goals on
+    `(character,name)`, requirements on `(goal,material)`;
+  - ids inside the file are only used to wire its own rows together and are
+    **always remapped** to fresh database ids — never trusted;
+  - `data.game_id` must reference an existing game; broken references, missing
+    names, malformed JSON and unknown versions return a descriptive 400;
+  - the body shares the global 1 MiB request cap.
+
+```powershell
+ctl -server $S -game genshin planner export > planner_backup.json
+ctl -server $S -data @examples/planner_seed_demo.json planner import   # demo seed
+Get-Content req.json | ctl -server $S -data - planner import           # stdin
+```
+
+`-data` now accepts three forms everywhere: inline JSON, `-` (stdin) and
+`@path/to/file.json`.
+
+[examples/planner_seed_demo.json](examples/planner_seed_demo.json) is a
+self-contained demo import request (2 characters, 2 goals, 3 materials, 3
+requirements for a `demo-genshin` game — create that game first).
+[examples/planner_quickstart.ps1](examples/planner_quickstart.ps1) walks the
+whole flow on Windows PowerShell, parsing every id from API responses, so it
+works on a non-empty database and reuses an existing demo game.
+
 Limits: the planner does not auto-detect inventory, character state, skill
 levels or equipment. It does not read memory, inject code, intercept packets,
-use OCR/YOLO or bypass detection. Future screenshot-assisted data entry can be
-added inside that boundary; actual execution still goes through external tool
-tasks only.
+use OCR/YOLO or bypass detection. Import/export and the demo seed do **not**
+generate real route files — turning a recommendation into a runnable task still
+requires a route asset pointing at a real route file. Future
+screenshot-assisted data entry can be added inside that boundary; actual
+execution still goes through external tool tasks only.
 
 ## Notes & limitations (MVP)
 

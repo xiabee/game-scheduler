@@ -353,6 +353,33 @@ ctl -server $S planner create-task <推荐id>
 ctl -server $S -data '{"cron_expr":"0 9 * * *"}' planner create-plan <推荐id>
 ```
 
+### 数据导出 / 导入(备份、迁移、初始化)
+
+计划器数据可以整体导出为 JSON、在另一台机器(或清库后)导入恢复,也可以用示例 seed 一键初始化体验。
+
+- **导出** `GET /api/planner/export?game_id=<id>`:返回该游戏的 `characters` / `character_goals` / `material_items` / `material_requirements`(**默认不含** `farming_recommendations`,避免导入过期推荐;推荐重新生成即可)。
+- **导入** `POST /api/planner/import`:请求体为 `{"dry_run":bool,"upsert":bool,"data":<导出结构>}`。
+  - `dry_run: true`:**只校验、只统计,不写库**——先看 created/updated/skipped 再实导。
+  - `upsert: true`:已存在的同名数据按导入内容**更新**;`false` 则**跳过**(计入 skipped)。
+  - 去重键:角色与材料按 `(game_id, name)`,目标按 `(角色, name)`,需求按 `(目标, 材料)`。
+  - 文件里的旧 `id` **只用于文件内部连线**(目标→角色、需求→材料),导入时一律**重映射为新 id**,绝不直接写入。
+  - `data.game_id` 必须是已存在的游戏;跨表引用、缺名字、版本过高、JSON 损坏都会返回带原因的 400。
+  - 请求体沿用全局 1 MiB 上限,防止超大 JSON 占用内存。
+  - 返回:`{"created":N,"updated":N,"skipped":N,"errors":[...]}`。
+
+```powershell
+# 导出备份
+ctl -server $S -game genshin planner export > planner_backup.json
+
+# 试运行导入(不写库)与实导;-data 支持 @文件 与 - (stdin)
+ctl -server $S -data '{"dry_run":true,"upsert":true,"data":{...}}' planner import
+ctl -server $S -data @examples/planner_seed_demo.json planner import
+Get-Content backup_request.json | ctl -server $S -data - planner import
+```
+
+> 📦 **示例数据**:[examples/planner_seed_demo.json](examples/planner_seed_demo.json) 是一份完整的导入请求(demo-genshin 的 2 角色 / 2 目标 / 3 材料 / 3 需求,含 `source_hint`/`route_type_hint` 示例)。先 `ctl games add` 创建 `demo-genshin` 再导入;数据纯演示,不含真实路径或账号。生成可执行任务仍需真实路线文件(见「限制」)。
+> 🚀 **PowerShell 快速上手**:[examples/planner_quickstart.ps1](examples/planner_quickstart.ps1) 走完 角色→目标→材料→需求→推荐→导出 全流程,**所有 id 从 API 返回中解析**,不要求空库,demo 游戏已存在时自动复用。
+
 ### 看板使用说明
 
 头部「培养计划」按钮打开计划器。当前 v1 是轻量内嵌 UI:
@@ -368,6 +395,7 @@ ctl -server $S -data '{"cron_expr":"0 9 * * *"}' planner create-plan <推荐id>
 - 不自动识别角色等级/技能/装备状态。
 - 不读写游戏内存、不抓包、不封包、不注入、不反检测。
 - 本阶段不依赖 OCR/YOLO;后续可以在安全边界内扩展截图识别辅助录入,但执行仍只通过外部工具任务。
+- 导入/导出与示例 seed **不会自动生成真实路线文件**——推荐要变成可执行任务,仍需路线资产中心里指向真实路线文件(如 bettergi-scripts-list)的条目。
 
 ---
 
@@ -461,10 +489,11 @@ materials list [-game id] [-category c] | get <id> | add | update <id> | delete 
 requirements list [-goal id] | get <id> | add | update <id> | delete <id>
 planner  recommend | recommendations [-goal id] [-game id] [-status s] [-limit n]
          | create-task <id> | create-plan <id> | dismiss <id> | complete <id>
+         | export -game <id> | import -data '<json>'|@file.json|-
 health
 ```
 
-`add`/`update` 从 `-data '<json>'` 或 `-data -`(stdin)读取请求体。`-server` 默认 `$GS_SERVER` 或 `http://127.0.0.1:8080`。
+`add`/`update`/`import` 的请求体支持三种来源:`-data '<json>'`(内联)、`-data -`(stdin)、`-data @path/to/file.json`(文件)。`-server` 默认 `$GS_SERVER` 或 `http://127.0.0.1:8080`。
 
 ---
 
