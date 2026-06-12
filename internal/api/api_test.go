@@ -31,14 +31,20 @@ func newTestServer(t *testing.T, token string) (*httptest.Server, *store.Store, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { st.Close() })
 	bus := events.New()
 	reg := game.NewRegistry(genshin.New())
 	cfg := config.Config{DataDir: t.TempDir(), AuthToken: token, MaxConcurrent: 1}
 	svc := task.NewService(st, reg, cfg, bus, nil)
 	sched := scheduler.New(st, svc, nil)
 	srv := httptest.NewServer(New(st, svc, sched, reg, bus, nil, cfg, nil).Handler())
-	t.Cleanup(srv.Close)
+	// Order matters: stop HTTP, drain in-flight task workers, then close the DB.
+	t.Cleanup(func() {
+		srv.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		svc.Shutdown(ctx)
+		st.Close()
+	})
 	return srv, st, bus
 }
 

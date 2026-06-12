@@ -35,6 +35,9 @@ import (
 // key (e.g. "task_failed"), title/message are human-readable.
 type NotifyFunc func(event, title, message string)
 
+// errShuttingDown is returned by Enqueue once Shutdown has begun.
+var errShuttingDown = fmt.Errorf("task: service is shutting down")
+
 // Service runs tasks and records executions.
 type Service struct {
 	store *store.Store
@@ -50,6 +53,8 @@ type Service struct {
 	mu      sync.Mutex
 	running map[int64]context.CancelFunc // execID -> cancel
 	active  map[int64]int                // taskID -> count of pending/running execs
+	wg      sync.WaitGroup               // tracks in-flight workers
+	closing bool                         // set by Shutdown; rejects new Enqueue
 }
 
 // SetNotify installs an operator-alert hook, called when a task fails.
@@ -93,6 +98,10 @@ func (s *Service) Enqueue(taskID int64, trigger string, planID *int64, skipIfAct
 	}
 
 	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		return store.Execution{}, false, errShuttingDown
+	}
 	if skipIfActive && s.active[taskID] > 0 {
 		s.mu.Unlock()
 		return store.Execution{}, true, nil
@@ -107,6 +116,9 @@ func (s *Service) Enqueue(taskID int64, trigger string, planID *int64, skipIfAct
 	ctx, cancel := context.WithCancel(context.Background())
 	s.active[taskID]++
 	s.running[exec.ID] = cancel
+	// Add under the same lock that Shutdown takes before waiting, so a worker is
+	// never registered after Shutdown decides to wait (no Add-after-Wait race).
+	s.wg.Add(1)
 	s.mu.Unlock()
 
 	go s.worker(ctx, exec.ID, taskID)
@@ -117,6 +129,7 @@ func (s *Service) Enqueue(taskID int64, trigger string, planID *int64, skipIfAct
 // worker waits for a run slot, then executes. It owns the execution's context
 // lifecycle and the bookkeeping maps.
 func (s *Service) worker(ctx context.Context, execID, taskID int64) {
+	defer s.wg.Done()
 	defer func() {
 		s.mu.Lock()
 		if cancel, ok := s.running[execID]; ok {
@@ -156,6 +169,29 @@ func (s *Service) Cancel(execID int64) error {
 	}
 	cancel()
 	return nil
+}
+
+// Shutdown rejects new enqueues, cancels every in-flight/queued execution, and
+// waits for their workers to finish (bounded by ctx). Workers do their final
+// store write before returning, so once Shutdown returns the store has no
+// pending writers and the caller can safely close it. Idempotent.
+func (s *Service) Shutdown(ctx context.Context) {
+	s.mu.Lock()
+	s.closing = true
+	for _, cancel := range s.running {
+		cancel()
+	}
+	s.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // markCancelledBeforeStart records cancellation of a run that never left the

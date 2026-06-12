@@ -67,6 +67,14 @@ func main() {
 	reg := game.NewRegistry(genshin.New(), hsr.New(), wuwa.New(), r1999.New())
 	svc := task.NewService(st, reg, cfg, bus, log)
 	svc.SetNotify(notifier.Send)
+	// Drain in-flight task workers before the deferred st.Close() runs (defers
+	// are LIFO, so registering this after st.Close keeps the order: scheduler
+	// stop -> drain executions -> close store).
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		svc.Shutdown(ctx)
+	}()
 
 	// Resource monitor: live CPU/RAM sampling + optional overload gating.
 	monCtx, monCancel := context.WithCancel(context.Background())

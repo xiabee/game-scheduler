@@ -1,6 +1,7 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -75,10 +76,19 @@ func newSvc(t *testing.T, maxConc int) (*Service, *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { st.Close() })
 	reg := game.NewRegistry(stubAdapter{})
 	cfg := config.Config{MaxConcurrent: maxConc, DataDir: t.TempDir()}
-	return NewService(st, reg, cfg, events.New(), nil), st
+	svc := NewService(st, reg, cfg, events.New(), nil)
+	// Drain in-flight workers before closing the store, otherwise a worker that
+	// is still finishing (e.g. after a test only waited for "running") writes to
+	// a closed DB and logs a spurious "sql: database is closed" error.
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		svc.Shutdown(ctx)
+		st.Close()
+	})
+	return svc, st
 }
 
 func mkTask(t *testing.T, st *store.Store, typ string, retries int) store.Task {
