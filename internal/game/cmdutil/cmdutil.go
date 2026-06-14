@@ -5,6 +5,7 @@ package cmdutil
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/xiabee/game-scheduler/internal/runner"
@@ -99,12 +100,21 @@ func Timeout(t store.Task) time.Duration {
 }
 
 // BaseSpec builds a Spec honouring exe/working_dir overrides and the task
-// timeout, with the given args.
+// timeout, with the given args. When no working dir is configured and the
+// executable is an absolute path, the working dir defaults to the executable's
+// own folder — GUI tools like BetterGI / ok-ww resolve their resources and
+// config relative to the install directory and fail (e.g. BetterGI exit 553)
+// when launched with the scheduler's working directory instead.
 func BaseSpec(g store.Game, t store.Task, params map[string]any, args []string) runner.Spec {
+	exe := Exe(g, params)
+	dir := Dir(g, params)
+	if dir == "" && filepath.IsAbs(exe) {
+		dir = filepath.Dir(exe)
+	}
 	return runner.Spec{
-		Path:    Exe(g, params),
+		Path:    exe,
 		Args:    args,
-		Dir:     Dir(g, params),
+		Dir:     dir,
 		Timeout: Timeout(t),
 	}
 }

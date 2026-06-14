@@ -48,6 +48,19 @@ executable exists, and a `ready` flag, without launching the game.
 dirs (read-only, runs nothing) and lets you one-click prefill a new game. Empty
 paths scan all drives; passing paths is faster.
 
+**Run as Administrator (or BetterGI etc. fail with exit code 553).** These tools
+simulate mouse/keyboard input into a game that runs elevated, so the tools — and
+the scheduler that launches them — must be elevated too. A child can only
+inherit elevation, so `server.exe` itself must be started as admin. Convenience
+script: `powershell -ExecutionPolicy Bypass -File examples\run-admin.ps1`
+(accept the UAC prompt). When not elevated, the server logs a warning at startup.
+
+**Working directory auto-default:** if a game has no `working_dir` and its
+`tool_path` is absolute, the scheduler runs the tool from the executable's own
+folder — GUI tools like BetterGI / ok-ww resolve resources relative to their
+install dir (another cause of exit 553). Override via the game's `working_dir`
+or a task param when needed.
+
 ## Architecture
 
 ```

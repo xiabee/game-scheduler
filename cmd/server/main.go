@@ -47,6 +47,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Many supported tools (e.g. BetterGI) must run with administrator rights to
+	// simulate input into an elevated game; a child process can only inherit
+	// elevation, so the scheduler itself has to be elevated. Warn early — this is
+	// the usual cause of BetterGI exit code 553.
+	if elevated, known := isElevated(); known && !elevated {
+		log.Warn("not running as Administrator: tools that control the game (e.g. BetterGI) may fail with exit code 553; relaunch via examples/run-admin.ps1")
+	}
+
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
 		log.Error("open store", "err", err)
