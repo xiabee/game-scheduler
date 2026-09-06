@@ -142,7 +142,7 @@ rows are never touched, so the database stays bounded over long runs.
 > powershell -ExecutionPolicy Bypass -File examples\windows_smoke.ps1 -Server http://127.0.0.1:8080
 > ```
 >
-> `SMOKE PASS` means all 10 steps are OK — the scheduler itself is wired up
+> `SMOKE PASS` means all 11 steps are OK — the scheduler itself is wired up
 > correctly before you plug real tools in.
 
 ### Concurrency (important)

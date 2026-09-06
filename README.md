@@ -69,7 +69,7 @@
 > ```powershell
 > powershell -ExecutionPolicy Bypass -File examples\windows_smoke.ps1 -Server http://127.0.0.1:8080
 > ```
-> 全部 10 步 OK 输出 `SMOKE PASS`。之后再用下面的流程接入真实工具。
+> 全部 11 步 OK 输出 `SMOKE PASS`(含"删除运行中任务"会终止工具进程的验证)。之后再用下面的流程接入真实工具。
 
 1. **安装外部工具**
    - BetterGI:安装/解压后确认 `BetterGI.exe` 可手动打开。
