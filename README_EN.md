@@ -266,6 +266,17 @@ only logged. Example (webhook): `curl -s -X POST https://example.com/notify -d "
 > Global flags (`-server`, `-token`, `-data`, `-game`, …) must come **before**
 > the resource/action, e.g. `ctl -server http://... -data '{...}' games add`.
 > Pass `-token` (or `GS_TOKEN`) when the server requires auth.
+>
+> ⚠️ **PowerShell 5.1 caveat** (the blue window Windows ships with): it strips
+> embedded double quotes, mangling inline JSON (`invalid character ... 400`).
+> Use one of these instead:
+> 1. **`-data @file`** (recommended, as planner_quickstart.ps1 does):
+>    `ctl -server $S -data @body.json games add` (UTF-8 file, BOM stripped);
+> 2. **stdin pipe** (ASCII-only JSON): `'{"id":"zz"}' | ctl -server $S -data - games add`;
+> 3. inline JSON is fine in PowerShell 7+ (pwsh 7.3+) and in cmd/bash.
+>
+> `examples\planner_quickstart.ps1` and `examples\windows_smoke.ps1` already
+> avoid the issue and run as-is.
 
 ```
 ctl [-server URL] <resource> <action> [id]

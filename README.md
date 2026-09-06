@@ -499,7 +499,14 @@ Get-Content backup_request.json | ctl -server $S -data - planner import
 
 ## 🖥️ 命令行(`ctl`)
 
-> 全局参数(`-server`、`-token`、`-data`、`-game` …)必须放在**资源/动作之前**,例如 `ctl -server http://... -data '{...}' games add`。服务器开启鉴权时传 `-token`(或 `GS_TOKEN`)。
+> 全局参数(`-server`、``-token``、`-data`、`-game` …)必须放在**资源/动作之前**,例如 `ctl -server http://... -data '{...}' games add`。服务器开启鉴权时传 `-token`(或 `GS_TOKEN`)。
+
+> ⚠️ **PowerShell 5.1 用户注意**(Windows 自带的蓝色窗口):它会把内嵌双引号剥掉,内联 JSON 会损坏(`invalid character ... 400`)。请改用以下任一方式:
+> 1. **`-data @文件`**(推荐,`planner_quickstart.ps1` 就这么做):`ctl -server $S -data @body.json games add`(UTF-8 文件,自动去 BOM);
+> 2. **stdin 管道**(JSON 不含中文时):`'{"id":"zz"}' | ctl -server $S -data - games add`;
+> 3. PowerShell 7+(pwsh 7.3+)或 cmd/bash 下内联 JSON 正常。
+>
+> `examples\planner_quickstart.ps1` 与 `examples\windows_smoke.ps1` 已全部规避此问题,可直接运行。
 
 ```
 ctl [-server URL] [-token T] <资源> <动作> [id]
