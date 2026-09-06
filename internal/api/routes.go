@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -50,6 +51,10 @@ func (s *Server) updateRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	var rt store.Route
 	if !decode(w, r, &rt) {
+		return
+	}
+	if !urlSchemeOK(rt.SourceURL) {
+		writeErr(w, http.StatusBadRequest, errors.New("source_url must be an absolute http(s) URL"))
 		return
 	}
 	rt.ID = id

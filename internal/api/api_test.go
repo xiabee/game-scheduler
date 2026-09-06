@@ -820,3 +820,62 @@ func TestPlannerListFilters(t *testing.T) {
 		t.Fatalf("materials by category across games=%d want 2", len(mats))
 	}
 }
+
+func TestGameIDAndSourceURLValidation(t *testing.T) {
+	srv, _, _ := newTestServer(t, "")
+	c := srv.Client()
+	post := func(path, body string) int {
+		t.Helper()
+		resp, err := c.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// game id character set is enforced server-side (it flows into URLs and
+	// JS handler args on the dashboard)
+	cases := []struct {
+		id   string
+		want int
+	}{
+		{"genshin-2_x", http.StatusCreated},
+		{"", http.StatusBadRequest},
+		{"has space", http.StatusBadRequest},
+		{"quote'id", http.StatusBadRequest},
+		{"paren(id", http.StatusBadRequest},
+		{strings.Repeat("x", 200), http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		body := `{"id":"` + tc.id + `","name":"n","adapter":"genshin","tool_path":"x","enabled":true}`
+		if code := post("/api/games", body); code != tc.want {
+			t.Errorf("game id %q: status=%d want %d", tc.id, code, tc.want)
+		}
+	}
+
+	// route source_url must be empty or absolute http(s)
+	if _, err := c.Post(srv.URL+"/api/routes", "application/json", strings.NewReader(``)); err != nil {
+		t.Fatal(err)
+	}
+	var rt store.Route
+	resp, err := c.Post(srv.URL+"/api/routes", "application/json", strings.NewReader(`{"game_id":"genshin-2_x","name":"r","file_path":"D:/x.json"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rt); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("route without source_url: status=%d", resp.StatusCode)
+	}
+	bad := `{"game_id":"genshin-2_x","name":"bad","file_path":"D:/x.json","source_url":"javascript:alert(1)"}`
+	if code := post("/api/routes", bad); code != http.StatusBadRequest {
+		t.Fatalf("javascript: source_url accepted (status=%d)", code)
+	}
+	good := `{"game_id":"genshin-2_x","name":"ok","file_path":"D:/x.json","source_url":"https://example.com/v"}`
+	if code := post("/api/routes", good); code != http.StatusCreated {
+		t.Fatalf("https source_url rejected (status=%d)", code)
+	}
+}

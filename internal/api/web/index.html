@@ -224,7 +224,7 @@ function gameCard(g){
       <span style="display:flex;align-items:center;gap:6px"><button onclick="runTask(${t.id},this)">运行</button>
       <button onclick="preflightTask(${t.id})" title="运行前检查：可执行文件 / 工作目录 / 入口">检查</button>
       <span class="icon-e" title="编辑任务" onclick="editTask(${t.id})">✎</span>
-      <span class="icon-x" title="删除任务" onclick="delTask(${t.id},'${esc(t.name)}')">✕</span></span></div>`).join("")
+      <span class="icon-x" title="删除任务" onclick="delTask(${t.id})">✕</span></span></div>`).join("")
       || `<div class="meta">未配置任务</div>`;
   const plans = (g.plan_list||[]).map(p=>`
       <div class="plan">
@@ -235,7 +235,7 @@ function gameCard(g){
             <span class="slider"></span>
           </label>
           <span class="icon-e" title="编辑计划" onclick="editPlan(${esc(JSON.stringify(p)).replace(/'/g,'&#39;')})">✎</span>
-          <span class="icon-x" title="删除计划" onclick="delPlan(${p.id},'${esc(p.name)}')">✕</span>
+          <span class="icon-x" title="删除计划" onclick="delPlan(${p.id})">✕</span>
         </span>
       </div>`).join("");
   const plansBlock = `<div class="plans"><div class="sub"><span>计划</span><span class="add" onclick="openPlanForm('${esc(g.id)}')">+ 添加</span></div>${plans||'<div class="meta">无计划</div>'}</div>`;
@@ -367,13 +367,17 @@ async function delGame(id){
   try{ const r=await api("/api/games/"+id,{method:"DELETE"}); if(!r.ok&&r.status!==204) throw new Error("HTTP "+r.status); load(); }
   catch(e){ $("#err").textContent="删除失败: "+e; }
 }
-async function delTask(id,name){
-  if(!confirm("删除任务「"+name+"」？")) return;
+// names for confirm dialogs are looked up client-side from the loaded
+// dashboard data — user strings are never embedded into onclick handlers
+function taskName(id){ return ((lastData&&lastData.games)||[]).flatMap(g=>g.task_list||[]).find(t=>t.id===id)?.name || ("#"+id); }
+function planName(id){ return ((lastData&&lastData.games)||[]).flatMap(g=>g.plan_list||[]).find(p=>p.id===id)?.name || ("#"+id); }
+async function delTask(id){
+  if(!confirm("删除任务「"+taskName(id)+"」？")) return;
   try{ const r=await api("/api/tasks/"+id,{method:"DELETE"}); if(!r.ok&&r.status!==204) throw new Error("HTTP "+r.status); load(); }
   catch(e){ $("#err").textContent="删除失败: "+e; }
 }
-async function delPlan(id,name){
-  if(!confirm("删除计划「"+name+"」？")) return;
+async function delPlan(id){
+  if(!confirm("删除计划「"+planName(id)+"」？")) return;
   try{ const r=await api("/api/plans/"+id,{method:"DELETE"}); if(!r.ok&&r.status!==204) throw new Error("HTTP "+r.status); load(); }
   catch(e){ $("#err").textContent="删除失败: "+e; }
 }
@@ -517,7 +521,7 @@ function renderRouteTable(routes){
       <td><strong>${esc(r.name)}</strong><div class="hint">${esc(r.game_id)} · ${esc(r.adapter||'')}</div></td>
       <td><span class="badge">${esc(r.route_type||'other')}</span><div>${tagList(r.tags)}</div></td>
       <td><span class="pill ok">✓ ${r.success_count||0}</span> <span class="pill err">✗ ${r.fail_count||0}</span><div class="hint">${r.last_run_at?fmtTime(r.last_run_at):'未运行'}</div></td>
-      <td style="max-width:360px;word-break:break-all">${r.source_url?`<a href="${esc(r.source_url)}" target="_blank" rel="noopener noreferrer">${esc(r.source_title||r.source_url)}</a>`:esc(r.file_path||r.description||'—')}</td>
+      <td style="max-width:360px;word-break:break-all">${(r.source_url&&/^https?:\/\//i.test(r.source_url))?`<a href="${esc(r.source_url)}" target="_blank" rel="noopener noreferrer">${esc(r.source_title||r.source_url)}</a>`:esc(r.file_path||r.description||'—')}</td>
       <td><button onclick="createTaskFromRoute(${r.id})">建任务</button></td>
     </tr>`).join("")+`</tbody></table>`;
 }

@@ -9,6 +9,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -184,9 +186,36 @@ func (s *Server) listGames(w http.ResponseWriter, r *http.Request) {
 	respond(w, games, err)
 }
 
+// gameIDPattern is the character set allowed for game ids. They surface in
+// URLs, JS handler args and filenames; restricting them here closes injection
+// into all three at the write boundary (the dashboard form already enforces
+// the same pattern client-side).
+var gameIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func validGameID(id string) bool { return id != "" && len(id) <= 128 && gameIDPattern.MatchString(id) }
+
+// urlSchemeOK accepts only empty or absolute http(s) URLs for operator-facing
+// link fields (route source_url), blocking javascript:/data: style payloads.
+func urlSchemeOK(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	s := strings.ToLower(u.Scheme)
+	return s == "http" || s == "https"
+}
+
 func (s *Server) createGame(w http.ResponseWriter, r *http.Request) {
 	var g store.Game
 	if !decode(w, r, &g) {
+		return
+	}
+	if !validGameID(g.ID) {
+		writeErr(w, http.StatusBadRequest, errors.New("game id must be 1-128 characters of [A-Za-z0-9_-]"))
 		return
 	}
 	if _, err := s.reg.Get(g.Adapter); err != nil {
@@ -208,6 +237,14 @@ func (s *Server) updateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g.ID = r.PathValue("id")
+	if !validGameID(g.ID) {
+		writeErr(w, http.StatusBadRequest, errors.New("game id must be 1-128 characters of [A-Za-z0-9_-]"))
+		return
+	}
+	if _, err := s.reg.Get(g.Adapter); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	out, err := s.store.UpdateGame(g)
 	respond(w, out, s.changed(err))
 }
@@ -299,6 +336,10 @@ func (s *Server) listRoutes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	var rt store.Route
 	if !decode(w, r, &rt) {
+		return
+	}
+	if !urlSchemeOK(rt.SourceURL) {
+		writeErr(w, http.StatusBadRequest, errors.New("source_url must be an absolute http(s) URL"))
 		return
 	}
 	s.prepareRoute(&rt)
