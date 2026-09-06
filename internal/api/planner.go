@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/xiabee/game-scheduler/internal/planner"
@@ -11,6 +12,49 @@ import (
 )
 
 var errRecommendationNoRoute = errors.New("recommendation has no route_id; create or attach a route before creating a task")
+
+// attachRouteRequest is the POST .../attach-route body.
+type attachRouteRequest struct {
+	RouteID int64 `json:"route_id"`
+}
+
+// attachRecommendationRoute binds an existing route to a recommendation that
+// has none, so it can move on to create-task/create-plan. The route must
+// belong to the same game as the recommendation.
+func (s *Server) attachRecommendationRoute(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req attachRouteRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.RouteID == 0 {
+		writeErr(w, http.StatusBadRequest, errors.New("route_id is required"))
+		return
+	}
+	rec, err := s.store.GetFarmingRecommendation(id)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	rt, err := s.store.GetRoute(req.RouteID)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	if rt.GameID != rec.GameID {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("route %q belongs to game %q, but the recommendation belongs to %q", rt.Name, rt.GameID, rec.GameID))
+		return
+	}
+	rec.RouteID = &rt.ID
+	if rec.RecommendationType == "manual" {
+		rec.RecommendationType = "route"
+	}
+	out, err := s.store.UpdateFarmingRecommendation(rec)
+	respond(w, out, s.changed(err))
+}
 
 func (s *Server) listCharacters(w http.ResponseWriter, r *http.Request) {
 	out, err := s.store.ListCharacters(store.CharacterFilter{GameID: r.URL.Query().Get("game_id")})

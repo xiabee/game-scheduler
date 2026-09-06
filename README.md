@@ -332,9 +332,12 @@ Invoke-RestMethod "$S/api/materials" -Method POST -ContentType application/json 
 Invoke-RestMethod "$S/api/material-requirements" -Method POST -ContentType application/json -Body '{"goal_id":1,"material_id":1,"required_count":168,"owned_count":42,"priority":8}'
 Invoke-RestMethod "$S/api/planner/recommend" -Method POST -ContentType application/json -Body '{"goal_id":1,"daily_stamina":160,"max_tasks":3}'
 Invoke-RestMethod "$S/api/planner/recommendations?goal_id=1"
+Invoke-RestMethod "$S/api/planner/recommendations/1/attach-route" -Method POST -ContentType application/json -Body '{"route_id":3}'
 Invoke-RestMethod "$S/api/planner/recommendations/1/create-task" -Method POST
 Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -ContentType application/json -Body '{"cron_expr":"0 9 * * *"}'
 ```
+
+> 💡 **手动绑定路线**:推荐没有匹配到路线时(`recommendation_type=manual`),可以用 `POST /api/planner/recommendations/{id}/attach-route` + `{"route_id":N}` 手动绑定已有路线;路线的游戏必须与推荐一致,否则返回 400。看板「培养计划 → 推荐」中对手动建议直接点「绑定路线」即可按关键词 / 类型搜索并绑定,绑定后即可创建任务 / 计划。
 
 ### CLI 示例
 

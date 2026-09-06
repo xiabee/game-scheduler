@@ -127,6 +127,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/planner/recommend", s.recommendFarming)
 	mux.HandleFunc("GET /api/planner/recommendations", s.listFarmingRecommendations)
 	mux.HandleFunc("POST /api/planner/recommendations/{id}/create-task", s.createTaskFromRecommendation)
+	mux.HandleFunc("POST /api/planner/recommendations/{id}/attach-route", s.attachRecommendationRoute)
 	mux.HandleFunc("POST /api/planner/recommendations/{id}/create-plan", s.createPlanFromRecommendation)
 	mux.HandleFunc("POST /api/planner/recommendations/{id}/dismiss", s.dismissRecommendation)
 	mux.HandleFunc("POST /api/planner/recommendations/{id}/complete", s.completeRecommendation)

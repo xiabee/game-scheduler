@@ -490,6 +490,107 @@ func TestRecommendationManualCreateTaskError(t *testing.T) {
 	}
 }
 
+func TestPlannerAttachRoute(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	for _, gid := range []string{"genshin", "hsr"} {
+		if _, err := st.CreateGame(store.Game{ID: gid, Name: gid, Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := srv.Client()
+	post := func(path, body string, out any) int {
+		t.Helper()
+		resp, err := c.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return resp.StatusCode
+	}
+
+	ch, err := st.CreateCharacter(store.Character{GameID: "genshin", Name: "香菱"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal, err := st.CreateCharacterGoal(store.CharacterGoal{CharacterID: ch.ID, Name: "突破90", Priority: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mat, err := st.CreateMaterialItem(store.MaterialItem{GameID: "genshin", Name: "绝云椒椒", Category: "collect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateMaterialRequirement(store.MaterialRequirement{GoalID: goal.ID, MaterialID: mat.ID, RequiredCount: 10, OwnedCount: 2, Priority: 8}); err != nil {
+		t.Fatal(err)
+	}
+	// no routes yet: the recommendation comes out as manual, without a route
+	var recs []store.FarmingRecommendation
+	if code := post("/api/planner/recommend", `{"goal_id":`+strconv.FormatInt(goal.ID, 10)+`,"max_tasks":3}`, &recs); code != http.StatusCreated {
+		t.Fatalf("recommend status=%d", code)
+	}
+	if len(recs) != 1 || recs[0].RouteID != nil || recs[0].RecommendationType != "manual" {
+		t.Fatalf("recommendations=%+v", recs)
+	}
+	recID := strconv.FormatInt(recs[0].ID, 10)
+
+	// create-task without a route fails with a clear 400
+	var e struct {
+		Error string `json:"error"`
+	}
+	if code := post("/api/planner/recommendations/"+recID+"/create-task", `{}`, &e); code != http.StatusBadRequest || e.Error == "" {
+		t.Fatalf("create-task without route: status=%d err=%q", code, e.Error)
+	}
+
+	rtG, err := st.CreateRoute(store.Route{GameID: "genshin", Adapter: "genshin", RouteType: "collect", Name: "绝云椒椒采集", FilePath: "D:/routes/jueyun.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtH, err := st.CreateRoute(store.Route{GameID: "hsr", Adapter: "genshin", RouteType: "collect", Name: "hsr路线", FilePath: "D:/routes/h.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// route of another game is rejected
+	if code := post("/api/planner/recommendations/"+recID+"/attach-route", `{"route_id":`+strconv.FormatInt(rtH.ID, 10)+`}`, &e); code != http.StatusBadRequest || e.Error == "" {
+		t.Fatalf("cross-game attach: status=%d err=%q", code, e.Error)
+	}
+	// missing route_id is rejected
+	if code := post("/api/planner/recommendations/"+recID+"/attach-route", `{}`, &e); code != http.StatusBadRequest {
+		t.Fatalf("attach without route_id: status=%d", code)
+	}
+	// unknown route is 404
+	if code := post("/api/planner/recommendations/"+recID+"/attach-route", `{"route_id":424242}`, &e); code != http.StatusNotFound {
+		t.Fatalf("attach unknown route: status=%d", code)
+	}
+	// attach succeeds and flips type to route
+	var out store.FarmingRecommendation
+	if code := post("/api/planner/recommendations/"+recID+"/attach-route", `{"route_id":`+strconv.FormatInt(rtG.ID, 10)+`}`, &out); code != http.StatusOK {
+		t.Fatalf("attach status=%d", code)
+	}
+	if out.RouteID == nil || *out.RouteID != rtG.ID || out.RecommendationType != "route" {
+		t.Fatalf("attach result=%+v", out)
+	}
+
+	// the recommendation can now produce a task bound to the attached route
+	var task store.Task
+	if code := post("/api/planner/recommendations/"+recID+"/create-task", `{}`, &task); code != http.StatusCreated {
+		t.Fatalf("create-task after attach status=%d", code)
+	}
+	if task.RouteID == nil || *task.RouteID != rtG.ID {
+		t.Fatalf("task=%+v", task)
+	}
+
+	// unknown recommendation is 404
+	if code := post("/api/planner/recommendations/424242/attach-route", `{"route_id":`+strconv.FormatInt(rtG.ID, 10)+`}`, &e); code != http.StatusNotFound {
+		t.Fatalf("attach unknown recommendation: status=%d", code)
+	}
+}
+
 func TestPlannerExportImport(t *testing.T) {
 	srv, st, _ := newTestServer(t, "")
 	c := srv.Client()

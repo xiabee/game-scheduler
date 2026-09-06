@@ -584,6 +584,22 @@ async function openPlanner(){
     </div>
     <div class="actions"><button class="primary" type="button" onclick="generateRecommendations()">生成推荐</button></div>
     <div id="cp-recs"></div>
+    <div class="sub" style="margin-top:14px"><span>备份 / 恢复（导出 / 导入 JSON）</span></div>
+    <div class="three">
+      <label>游戏<select id="cp-bk-game">${gameOptions(false)}</select></label>
+      <div style="display:grid;gap:4px;font-size:12px;color:var(--muted)">导入选项
+        <label class="toggle"><input type="checkbox" id="cp-bk-dry" checked> 先 dry_run 校验</label>
+        <label class="toggle"><input type="checkbox" id="cp-bk-upsert"> upsert 更新已有数据</label>
+      </div>
+      <label style="display:flex;align-items:flex-end;gap:8px">
+        <button type="button" onclick="plannerExport()">导出</button>
+        <button type="button" onclick="plannerImport(false)">导入</button>
+        <button type="button" onclick="plannerImport(true)">仅校验</button>
+      </label>
+    </div>
+    <textarea id="cp-bk-json" placeholder="导出结果会显示在这里；也可以粘贴一份导出 JSON 后点「导入」。"></textarea>
+    <div class="actions"><button type="button" onclick="plannerCopyExport()">复制 JSON</button></div>
+    <div class="hint" id="cp-bk-status"></div>
   </div>`);
   await loadPlannerData();
 }
@@ -628,9 +644,12 @@ async function routeName(id){
 async function renderRecommendations(){
   const rows=[];
   for(const rec of plannerState.recommendations){
+    const routeCell = rec.route_id
+      ? esc(await routeName(rec.route_id))
+      : `<span class="meta">手动建议</span> <button type="button" onclick="openAttachRoute(${rec.id},'${esc(rec.game_id||'')}')">绑定路线</button>`;
     rows.push(`<tr>
       <td><strong>${esc(rec.title)}</strong><div class="hint">${esc(rec.reason)}</div></td>
-      <td>${esc(await routeName(rec.route_id))}</td>
+      <td>${routeCell}</td>
       <td>${rec.estimated_runs||0} 次 / ${rec.estimated_stamina||0}</td>
       <td><span class="badge">${esc(rec.status||'open')}</span></td>
       <td><button onclick="plannerCreateTask(${rec.id})">任务</button> <button onclick="plannerCreatePlan(${rec.id})">计划</button> <button onclick="plannerMark(${rec.id},'complete')">完成</button> <button onclick="plannerMark(${rec.id},'dismiss')">忽略</button></td>
@@ -659,15 +678,28 @@ async function addPlannerRequirement(){
   const goal=plannerState.goals.find(g=>g.id===+$("#cp-req-goal").value);
   const ch=goal?plannerState.characters.find(c=>c.id===goal.character_id):null;
   if(!goal||!ch){ $("#err").textContent="请先选择目标"; return; }
-  const mat={game_id:ch.game_id,name:$("#cp-material-name").value.trim(),category:$("#cp-category").value.trim(),
-    source_hint:$("#cp-source").value.trim(),route_type_hint:$("#cp-route-type").value.trim()};
-  if(!mat.name){ $("#err").textContent="材料名必填"; return; }
-  const mr=await api("/api/materials",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(mat)});
-  if(!mr.ok){ $("#err").textContent="创建材料失败"; return; }
-  const m=await mr.json();
-  const req={goal_id:goal.id,material_id:m.id,required_count:+$("#cp-required").value||0,owned_count:+$("#cp-owned").value||0,priority:+$("#cp-req-priority").value||0};
-  const rr=await api("/api/material-requirements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(req)});
-  if(!rr.ok){ $("#err").textContent="创建需求失败"; return; }
+  const name=$("#cp-material-name").value.trim();
+  if(!name){ $("#err").textContent="材料名必填"; return; }
+  // reuse an existing material of the same game+name instead of creating a
+  // duplicate row; hints can be edited separately
+  const key=name.toLowerCase();
+  let m=plannerState.materials.find(x=>x.game_id===ch.game_id&&(x.name||"").trim().toLowerCase()===key);
+  if(!m){
+    const mat={game_id:ch.game_id,name,category:$("#cp-category").value.trim(),
+      source_hint:$("#cp-source").value.trim(),route_type_hint:$("#cp-route-type").value.trim()};
+    const mr=await api("/api/materials",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(mat)});
+    if(!mr.ok){ $("#err").textContent="创建材料失败"; return; }
+    m=await mr.json();
+  }
+  const body={goal_id:goal.id,material_id:m.id,
+    required_count:+$("#cp-required").value||0,owned_count:+$("#cp-owned").value||0,priority:+$("#cp-req-priority").value||0};
+  // same goal+material already tracked: update the counts instead of duplicating
+  const exr=plannerState.requirements.find(r=>r.goal_id===goal.id&&r.material_id===m.id);
+  const rr=exr
+    ?await api("/api/material-requirements/"+exr.id,{method:"PUT",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(Object.assign({notes:exr.notes||""},body))})
+    :await api("/api/material-requirements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!rr.ok){ $("#err").textContent=exr?"更新需求失败":"创建需求失败"; return; }
   await loadPlannerData();
 }
 async function generateRecommendations(){
@@ -691,6 +723,102 @@ async function plannerMark(id, action){
   const r=await api(`/api/planner/recommendations/${id}/${action}`,{method:"POST"});
   if(!r.ok){ $("#err").textContent="更新推荐状态失败"; return; }
   await loadPlannerData();
+}
+
+// ---- planner backup: export / import ----
+async function plannerExport(){
+  const gameId=$("#cp-bk-game")?.value||"";
+  const box=$("#cp-bk-status");
+  if(!gameId){ box.textContent="请先选择要导出的游戏。"; return; }
+  box.textContent="导出中…";
+  try{
+    const r=await api("/api/planner/export?game_id="+encodeURIComponent(gameId));
+    if(!r.ok){ const e=await r.json().catch(()=>({error:"HTTP "+r.status})); throw new Error(e.error||("HTTP "+r.status)); }
+    const data=await r.json();
+    const text=JSON.stringify(data,null,2);
+    $("#cp-bk-json").value=text;
+    const blob=new Blob([text],{type:"application/json"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="planner-"+gameId+"-"+new Date().toISOString().slice(0,10)+".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+    box.textContent=`已导出 ${data.game_id}：角色 ${data.characters.length}、目标 ${data.character_goals.length}、材料 ${data.material_items.length}、需求 ${data.material_requirements.length}，已开始下载（内容也显示在下方，可复制）。`;
+  }catch(e){ if(String(e).indexOf("unauthorized")<0) box.textContent="导出失败: "+esc(String(e.message||e)); }
+}
+async function plannerCopyExport(){
+  const text=$("#cp-bk-json").value||"";
+  if(!text){ $("#cp-bk-status").textContent="没有可复制的内容。"; return; }
+  try{ await navigator.clipboard.writeText(text); $("#cp-bk-status").textContent="已复制到剪贴板。"; }
+  catch(e){ $("#cp-bk-json").select(); document.execCommand("copy"); $("#cp-bk-status").textContent="已复制（选中内容）。"; }
+}
+async function plannerImport(dryOnly){
+  const box=$("#cp-bk-status");
+  const raw=($("#cp-bk-json").value||"").trim();
+  if(!raw){ box.textContent="请先把导出 JSON 粘贴到文本框。"; return; }
+  let data;
+  try{ data=JSON.parse(raw); }
+  catch(e){ box.textContent="JSON 解析失败: "+e.message; return; }
+  const dry=dryOnly||$("#cp-bk-dry").checked;
+  box.textContent=(dry?"校验中…":"导入中…");
+  try{
+    const r=await api("/api/planner/import",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({dry_run:dry,upsert:$("#cp-bk-upsert").checked,data})});
+    const out=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(out.error||("HTTP "+r.status));
+    box.textContent=(dry?"[dry_run] ":"")+(data.game_id||out.game_id||"")+`：新建 ${out.created}、更新 ${out.updated}、跳过 ${out.skipped}`+
+      (dry?"。确认无误后可去掉 dry_run 再导入。":"。已写入数据库。");
+    if(!dry){ await load(); await loadPlannerData(); }
+  }catch(e){ if(String(e).indexOf("unauthorized")<0) box.textContent="导入失败: "+esc(String(e.message||e)); }
+}
+
+// ---- planner: attach an existing route to a recommendation ----
+function openAttachRoute(recId, gameId){
+  openModal("为推荐 #"+recId+" 绑定路线", `<div class="form">
+    <div class="three">
+      <label>关键词<input id="ar-q" placeholder="路线名 / 路径 / 标签 / 来源"></label>
+      <label>类型<select id="ar-type"><option value="">全部类型</option><option value="collect">collect</option><option value="farm">farm</option><option value="daily">daily</option><option value="event">event</option><option value="abyss">abyss</option><option value="other">other</option></select></label>
+      <label style="display:flex;align-items:flex-end"><button type="button" onclick="searchAttachRoutes(${recId})">搜索</button></label>
+    </div>
+    <div class="hint">只显示游戏 <strong>${esc(gameId||'')}</strong> 下的路线；绑定后即可创建任务 / 计划。</div>
+    <div id="ar-res"><div class="empty">加载中…</div></div>
+    <div class="actions"><button type="button" onclick="openPlanner()">返回培养计划</button></div>
+  </div>`);
+  $("#ar-q").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); searchAttachRoutes(recId, gameId); } });
+  searchAttachRoutes(recId, gameId);
+}
+async function searchAttachRoutes(recId, gameId){
+  const box=$("#ar-res"); if(!box) return;
+  box.innerHTML='<div class="empty">加载中…</div>';
+  const q=new URLSearchParams();
+  if(gameId) q.set("game_id",gameId);
+  const kw=($("#ar-q")?.value||"").trim(); if(kw) q.set("q",kw);
+  const typ=$("#ar-type")?.value||""; if(typ) q.set("type",typ);
+  q.set("limit","50");
+  try{
+    const r=await api("/api/routes/search?"+q.toString());
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const routes=await r.json();
+    if(!routes.length){ box.innerHTML='<div class="empty">没有匹配的路线。可先在「路线资产」中扫描 / 收藏路线。</div>'; return; }
+    box.innerHTML=`<table><thead><tr><th>路线</th><th>类型/标签</th><th></th></tr></thead><tbody>`+
+      routes.map(rt=>`<tr>
+        <td><strong>${esc(rt.name)}</strong><div class="hint">${esc(rt.game_id)} · ${esc(rt.file_path||rt.description||'')}</div></td>
+        <td><span class="badge">${esc(rt.route_type||'other')}</span><div>${tagList(rt.tags)}</div></td>
+        <td><button type="button" onclick="doAttachRoute(${recId},${rt.id})">绑定</button></td>
+      </tr>`).join("")+`</tbody></table>`;
+  }catch(e){ if(String(e).indexOf("unauthorized")<0) box.innerHTML='<div class="empty">路线加载失败: '+esc(String(e))+'</div>'; }
+}
+async function doAttachRoute(recId, routeId){
+  try{
+    const r=await api(`/api/planner/recommendations/${recId}/attach-route`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({route_id:routeId})});
+    const out=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(out.error||("HTTP "+r.status));
+    $("#err").textContent="已绑定路线，推荐 #"+recId+" 现在可以创建任务 / 计划。";
+    await openPlanner();
+  }catch(e){
+    const box=$("#ar-res");
+    if(box) box.innerHTML='<div class="empty">绑定失败: '+esc(String(e.message||e))+'</div>';
+  }
 }
 
 // ---- modal: guides (B站攻略 + 本地路线) ----

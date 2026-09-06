@@ -409,9 +409,18 @@ Invoke-RestMethod "$S/api/materials" -Method POST -ContentType application/json 
 Invoke-RestMethod "$S/api/material-requirements" -Method POST -ContentType application/json -Body '{"goal_id":1,"material_id":1,"required_count":168,"owned_count":42,"priority":8}'
 Invoke-RestMethod "$S/api/planner/recommend" -Method POST -ContentType application/json -Body '{"goal_id":1,"daily_stamina":160,"max_tasks":3}'
 Invoke-RestMethod "$S/api/planner/recommendations?goal_id=1"
+Invoke-RestMethod "$S/api/planner/recommendations/1/attach-route" -Method POST -ContentType application/json -Body '{"route_id":3}'
 Invoke-RestMethod "$S/api/planner/recommendations/1/create-task" -Method POST
 Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -ContentType application/json -Body '{"cron_expr":"0 9 * * *"}'
 ```
+
+> 💡 **Attaching a route manually**: when a recommendation has no route
+> (`recommendation_type=manual`), bind one with
+> `POST /api/planner/recommendations/{id}/attach-route` + `{"route_id":N}`.
+> The route must belong to the same game as the recommendation, otherwise a
+> 400 is returned. In the dashboard's character planner, unmatched
+> recommendations show a "绑定路线" (attach route) button with keyword/type
+> search; once attached, create-task/create-plan work as usual.
 
 CLI examples:
 
