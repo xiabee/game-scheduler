@@ -78,16 +78,22 @@ func (s *Scheduler) Reload() error {
 
 	for _, p := range plans {
 		p := p
-		id, err := s.cron.AddFunc(p.CronExpr, func() { s.fire(p) })
+		sch, err := cron.ParseStandard(p.CronExpr)
 		if err != nil {
 			s.log.Error("invalid cron expr; skipping plan", "plan_id", p.ID, "expr", p.CronExpr, "err", err)
 			continue
 		}
-		s.entries[p.ID] = id
-		if entry := s.cron.Entry(id); !entry.Next.IsZero() {
-			next := entry.Next
-			_ = s.store.SetPlanRunTimes(p.ID, p.LastRunAt, &next)
+		id, aerr := s.cron.AddFunc(p.CronExpr, func() { s.fire(p) })
+		if aerr != nil {
+			s.log.Error("cron refused expr; skipping plan", "plan_id", p.ID, "expr", p.CronExpr, "err", aerr)
+			continue
 		}
+		s.entries[p.ID] = id
+		// Compute the next fire from the schedule directly: cron.Entry()'s Next
+		// stays zero until the engine has started, which would leave
+		// next_run_at unset on the very first reload after boot.
+		next := sch.Next(time.Now())
+		_ = s.store.SetPlanRunTimes(p.ID, p.LastRunAt, &next)
 	}
 	return nil
 }
@@ -95,6 +101,17 @@ func (s *Scheduler) Reload() error {
 func (s *Scheduler) fire(p store.Plan) {
 	if s.pauseGate != nil && s.pauseGate() {
 		s.log.Warn("plan fire skipped; resource overload (policy=pause)", "plan_id", p.ID, "task_id", p.TaskID)
+		return
+	}
+	// A plan can stay enabled while its task was disabled afterwards; firing a
+	// disabled task would run something the operator explicitly turned off.
+	t, err := s.store.GetTask(p.TaskID)
+	if err != nil {
+		s.log.Error("plan fire failed to load task", "plan_id", p.ID, "task_id", p.TaskID, "err", err)
+		return
+	}
+	if !t.Enabled {
+		s.log.Info("plan fire skipped; task is disabled", "plan_id", p.ID, "task_id", p.TaskID, "name", t.Name)
 		return
 	}
 	s.log.Info("plan firing", "plan_id", p.ID, "task_id", p.TaskID, "name", p.Name)
