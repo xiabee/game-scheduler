@@ -164,7 +164,9 @@ go build -ldflags "-X github.com/xiabee/game-scheduler/internal/version.Version=
 ```
 
 配置优先级:默认值 → `config.json`(见 `config.example.json`) → 环境变量
-(`GS_ADDR`、`GS_DATA_DIR`、`GS_DB_PATH`、`GS_SCREENSHOT_CMD`、`GS_MAX_CONCURRENT`、`GS_AUTH_TOKEN`、`GS_MONITOR_ENABLED`、`GS_CPU_THRESHOLD`、`GS_MEM_THRESHOLD`、`GS_MONITOR_INTERVAL_SEC`、`GS_OVERLOAD_POLICY`、`GS_NOTIFY_CMD`) → `-addr` 参数。
+(`GS_ADDR`、`GS_DATA_DIR`、`GS_DB_PATH`、`GS_SCREENSHOT_CMD`、`GS_MAX_CONCURRENT`、`GS_AUTH_TOKEN`、`GS_MONITOR_ENABLED`、`GS_CPU_THRESHOLD`、`GS_MEM_THRESHOLD`、`GS_MONITOR_INTERVAL_SEC`、`GS_OVERLOAD_POLICY`、`GS_NOTIFY_CMD`、`GS_EXECUTION_RETENTION_DAYS`) → `-addr` 参数。
+
+执行日志会自动清理:已结束且超过 `execution_retention_days`(默认 30,`0` 关闭)的记录在启动时和每 6 小时删除一次;**至少保留最近 1000 条**,进行中(pending/running)的记录永不删除——长期运行数据库也不会无限膨胀。
 
 ### 并发(重要）
 

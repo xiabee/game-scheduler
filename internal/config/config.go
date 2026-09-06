@@ -55,6 +55,12 @@ type Config struct {
 	// {{.Message}} (each sanitized of shell metacharacters). Example (Windows
 	// toast via BurntToast, or just a log): see README. Empty disables it.
 	NotifyCmd string `json:"notify_cmd"`
+
+	// ExecutionRetentionDays prunes finished executions older than this many
+	// days on startup and every 6 hours (default 30). At least the newest 1000
+	// rows are always kept, and pending/running rows are never deleted.
+	// 0 or less disables pruning.
+	ExecutionRetentionDays int `json:"execution_retention_days"`
 }
 
 // Default returns a Config with sensible defaults. DBPath is intentionally
@@ -62,14 +68,15 @@ type Config struct {
 // DataDir; an explicit db_path in the config file or GS_DB_PATH still wins.
 func Default() Config {
 	return Config{
-		Addr:               "127.0.0.1:8080",
-		DataDir:            "data",
-		MaxConcurrent:      1,
-		MonitorEnabled:     true,
-		CPUThreshold:       90,
-		MemThreshold:       90,
-		MonitorIntervalSec: 3,
-		OverloadPolicy:     "alert",
+		Addr:                   "127.0.0.1:8080",
+		DataDir:                "data",
+		MaxConcurrent:          1,
+		MonitorEnabled:         true,
+		CPUThreshold:           90,
+		MemThreshold:           90,
+		MonitorIntervalSec:     3,
+		OverloadPolicy:         "alert",
+		ExecutionRetentionDays: 30,
 	}
 }
 
@@ -132,6 +139,11 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("GS_NOTIFY_CMD"); v != "" {
 		cfg.NotifyCmd = v
+	}
+	if v := os.Getenv("GS_EXECUTION_RETENTION_DAYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.ExecutionRetentionDays = n
+		}
 	}
 	if cfg.MaxConcurrent < 1 {
 		cfg.MaxConcurrent = 1

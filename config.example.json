@@ -10,5 +10,6 @@
   "mem_threshold": 90,
   "monitor_interval_sec": 3,
   "overload_policy": "alert",
-  "notify_cmd": ""
+  "notify_cmd": "",
+  "execution_retention_days": 30
 }

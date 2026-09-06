@@ -900,3 +900,24 @@ func (s *Store) ListExecutionMetas(f ExecutionFilter) ([]ExecutionMeta, error) {
 	}
 	return out, rows.Err()
 }
+
+// keepRecentExecutions is the hard floor for PruneExecutions: even very old
+// rows stay until they fall out of the newest N, so a fresh install with a
+// single nightly task never loses its entire history to the retention window.
+const keepRecentExecutions = 1000
+
+// PruneExecutions deletes finished executions created before olderThan,
+// keeping at least the newest keepRecentExecutions rows regardless of age.
+// Pending/running rows are never touched. Returns the number of rows deleted.
+func (s *Store) PruneExecutions(olderThan time.Time) (int64, error) {
+	res, err := s.db.Exec(`
+DELETE FROM executions WHERE
+  status NOT IN ('pending','running') AND
+  created_at < ? AND
+  id NOT IN (SELECT id FROM executions ORDER BY id DESC LIMIT ?)`,
+		olderThan, keepRecentExecutions)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

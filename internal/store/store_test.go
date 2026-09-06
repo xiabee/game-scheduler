@@ -379,3 +379,70 @@ INSERT INTO games (id,name,adapter,created_at,updated_at) VALUES ('g','g','gensh
 		t.Fatalf("old games table broken: %v %+v", err, games)
 	}
 }
+
+func TestPruneExecutions(t *testing.T) {
+	s := newTestStore(t)
+	mkGame(t, s, "genshin")
+	task, err := s.CreateTask(Task{GameID: "genshin", Name: "t", Type: "raw", Params: "{}", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	old := time.Now().UTC().Add(-24 * time.Hour * 365)
+	// 10 old finished rows
+	for i := 0; i < 10; i++ {
+		e, err := s.CreateExecution(Execution{TaskID: task.ID, Trigger: TriggerManual, Status: StatusSuccess})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`UPDATE executions SET created_at=? WHERE id=?`, old, e.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// one old row still running: must survive the prune
+	running, err := s.CreateExecution(Execution{TaskID: task.ID, Trigger: TriggerManual, Status: StatusRunning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE executions SET created_at=? WHERE id=?`, old, running.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// cutoff far in the future: keep the newest 1000 (there are only 11), so
+	// everything finished but older than cutoff... wait — keepRecent floor
+	// protects all 11 rows here; nothing is deletable.
+	deleted, err := s.PruneExecutions(time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 {
+		t.Fatalf("keep-recent floor violated: deleted %d of 11 rows", deleted)
+	}
+
+	// With the floor satisfied (11 rows < 1000 keeps all), lower the floor via
+	// a cutoff in the past instead: nothing older than a past cutoff exists.
+	deleted, err = s.PruneExecutions(time.Now().UTC().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 {
+		t.Fatalf("unexpected deletions: %d", deleted)
+	}
+
+	// Seed enough rows to push the old ones out of the newest-1000 window.
+	for i := 0; i < keepRecentExecutions; i++ {
+		if _, err := s.CreateExecution(Execution{TaskID: task.ID, Trigger: TriggerManual, Status: StatusSuccess}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deleted, err = s.PruneExecutions(time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 10 {
+		t.Fatalf("deleted=%d want 10 old finished rows", deleted)
+	}
+	if _, err := s.GetExecution(running.ID); err != nil {
+		t.Fatalf("running row was pruned: %v", err)
+	}
+}

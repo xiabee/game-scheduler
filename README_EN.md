@@ -125,7 +125,12 @@ SHA256SUMS.
 
 Configuration precedence: defaults → `config.json` (see `config.example.json`) →
 environment (`GS_ADDR`, `GS_DATA_DIR`, `GS_DB_PATH`, `GS_SCREENSHOT_CMD`,
-`GS_MAX_CONCURRENT`, `GS_AUTH_TOKEN`) → `-addr` flag.
+`GS_MAX_CONCURRENT`, `GS_AUTH_TOKEN`, `GS_EXECUTION_RETENTION_DAYS`) → `-addr` flag.
+
+Execution logs are pruned automatically: finished executions older than
+`execution_retention_days` (default 30, `0` disables) are deleted at startup
+and every 6 hours; the newest 1000 rows are always kept and pending/running
+rows are never touched, so the database stays bounded over long runs.
 
 > 🤖 **One-command smoke test (no game involved)**:
 > [examples/windows_smoke.ps1](examples/windows_smoke.ps1) walks the whole chain

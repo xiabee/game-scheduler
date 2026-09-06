@@ -113,6 +113,33 @@ func main() {
 	}
 	defer sched.Stop()
 
+	// Execution-log retention: delete finished executions older than the
+	// configured window (default 30 days) so the database does not grow
+	// without bound. Runs once at startup and then every 6 hours.
+	if cfg.ExecutionRetentionDays > 0 {
+		prune := func() {
+			cutoff := time.Now().UTC().AddDate(0, 0, -cfg.ExecutionRetentionDays)
+			if n, err := st.PruneExecutions(cutoff); err != nil {
+				log.Warn("prune executions", "err", err)
+			} else if n > 0 {
+				log.Info("pruned old executions", "count", n, "retention_days", cfg.ExecutionRetentionDays)
+			}
+		}
+		go func() {
+			prune()
+			ticker := time.NewTicker(6 * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-monCtx.Done():
+					return
+				case <-ticker.C:
+					prune()
+				}
+			}
+		}()
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           api.New(st, svc, sched, reg, bus, mon, cfg, log).Handler(),
