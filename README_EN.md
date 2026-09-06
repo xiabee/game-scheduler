@@ -74,6 +74,9 @@ internal/scheduler  robfig/cron engine binding plans to tasks
 internal/game       Adapter interface + registry
 internal/game/{genshin,hsr,wuwa,r1999}   per-tool command builders
 internal/api        net/http JSON REST handlers
+internal/vision     screenshot-assist interface skeleton (Detector / Matcher / OCR /
+                    FrameSource; interfaces only - no models, no inference, reserved
+                    for future capture-assisted data entry and diagnostics)
 ```
 
 Data flow: a **Plan** (cron) or a **manual trigger** runs a **Task**; the task's

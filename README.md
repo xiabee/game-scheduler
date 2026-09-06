@@ -125,6 +125,7 @@ internal/events     轻量事件总线(给看板做实时推送)
 internal/game       Adapter 接口 + 注册表
 internal/game/{genshin,hsr,wuwa,r1999}   各工具的命令构建器
 internal/api        net/http 的 JSON REST + 看板 + SSE 实时流
+internal/vision     截图辅助接口骨架(Detector / Matcher / OCR / FrameSource,纯接口定义,不含任何模型或推理实现,供未来"截图辅助录入 / 诊断"扩展)
 ```
 
 数据流:**计划(cron)** 或**手动触发** → 运行某个**任务**;任务所属**游戏**选定一个**适配器**;适配器把任务翻译成命令行;`runner` 执行,并把
