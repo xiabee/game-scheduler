@@ -511,6 +511,13 @@ func (s *Server) listExecutions(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("limit"); v != "" {
 		f.Limit, _ = strconv.Atoi(v)
 	}
+	// meta=1 skips the potentially large stdout/stderr columns - what list
+	// views (history modal, dashboards) want; detail views use the default.
+	if q.Get("meta") == "1" {
+		execs, err := s.store.ListExecutionMetas(f)
+		respond(w, execs, err)
+		return
+	}
 	execs, err := s.store.ListExecutions(f)
 	respond(w, execs, err)
 }

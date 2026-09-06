@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1022,5 +1023,47 @@ func TestDeleteTaskCancelsRunningExecution(t *testing.T) {
 	}
 	if _, err := st.GetTask(task.ID); err != store.ErrNotFound {
 		t.Fatalf("task still exists: %v", err)
+	}
+}
+
+func TestListExecutionsMetaMode(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "g", Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := st.CreateTask(store.Task{GameID: "genshin", Name: "t", Type: "raw", Params: "{}", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateExecution(store.Execution{TaskID: task.ID, Trigger: store.TriggerManual, Status: store.StatusSuccess, Stdout: "very-long-output", Stderr: "e"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := srv.Client().Get(srv.URL + "/api/executions?meta=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(raw), "very-long-output") {
+		t.Fatal("meta mode leaked stdout")
+	}
+	var metas []store.ExecutionMeta
+	if err := json.Unmarshal(raw, &metas); err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 || metas[0].Status != store.StatusSuccess || metas[0].TaskID != task.ID {
+		t.Fatalf("metas=%+v", metas)
+	}
+
+	// default mode still carries the full output
+	resp2, err := srv.Client().Get(srv.URL + "/api/executions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	raw2, _ := io.ReadAll(resp2.Body)
+	if !strings.Contains(string(raw2), "very-long-output") {
+		t.Fatal("default mode lost stdout")
 	}
 }

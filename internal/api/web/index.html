@@ -1168,7 +1168,7 @@ async function loadHistory(){
   const st=$("#h-status").value, lim=$("#h-limit").value;
   const taskName={}; (lastData&&lastData.games||[]).forEach(g=>(g.task_list||[]).forEach(t=>taskName[t.id]=t.name));
   try{
-    const r=await api(`/api/executions?limit=${lim}${st?'&status='+st:''}`);
+    const r=await api(`/api/executions?meta=1&limit=${lim}${st?'&status='+st:''}`);
     const ex=await r.json();
     $("#h-rows").innerHTML = (ex||[]).map(e=>`<tr onclick="openExec(${e.id})">
       <td>${e.id}</td><td>${esc(taskName[e.task_id]||('#'+e.task_id))}</td>

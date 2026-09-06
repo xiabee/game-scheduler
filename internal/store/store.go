@@ -885,20 +885,20 @@ func (s *Store) ListExecutions(f ExecutionFilter) ([]Execution, error) {
 }
 
 // ExecutionMeta is an execution without its (potentially large) captured
-// output; the dashboard aggregates only need these columns.
+// output; list views only need these columns.
 type ExecutionMeta struct {
-	ID             int64
-	TaskID         int64
-	PlanID         *int64
-	Trigger        string
-	Status         string
-	ExitCode       *int
-	ErrorMsg       string
-	ScreenshotPath string
-	RetryCount     int
-	StartTime      *time.Time
-	EndTime        *time.Time
-	CreatedAt      time.Time
+	ID             int64      `json:"id"`
+	TaskID         int64      `json:"task_id"`
+	PlanID         *int64     `json:"plan_id,omitempty"`
+	Trigger        string     `json:"trigger"`
+	Status         string     `json:"status"`
+	ExitCode       *int       `json:"exit_code,omitempty"`
+	ErrorMsg       string     `json:"error_msg"`
+	ScreenshotPath string     `json:"screenshot_path"`
+	RetryCount     int        `json:"retry_count"`
+	StartTime      *time.Time `json:"start_time,omitempty"`
+	EndTime        *time.Time `json:"end_time,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // ListExecutionMetas behaves like ListExecutions but skips the stdout/stderr
