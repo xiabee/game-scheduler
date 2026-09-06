@@ -941,3 +941,84 @@ func TestReferentialValidationReturns400(t *testing.T) {
 		t.Fatalf("valid task status=%d", resp.StatusCode)
 	}
 }
+
+// TestHelperProcess is re-executed as a child process by
+// TestDeleteTaskCancelsRunningExecution: a cross-platform controllable child.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GS_WANT_HELPER") != "1" {
+		return
+	}
+	args := os.Args
+	for i, a := range args {
+		if a == "--" {
+			args = args[i+1:]
+			break
+		}
+	}
+	if len(args) > 0 && args[0] == "sleep" {
+		d, _ := time.ParseDuration(args[1])
+		time.Sleep(d)
+	}
+	os.Exit(0)
+}
+
+// Deleting a task whose run is still active must return promptly (the service
+// kills the run) instead of leaving an orphaned process with cascaded rows.
+func TestDeleteTaskCancelsRunningExecution(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "g", Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	params, _ := json.Marshal(map[string]any{
+		"exe":      os.Args[0],
+		"raw_args": []string{"-test.run=TestHelperProcess", "--", "sleep", "30s"},
+	})
+	task, err := st.CreateTask(store.Task{GameID: "genshin", Name: "long", Type: "raw", Params: string(params), Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := srv.Client()
+
+	resp, err := c.Post(srv.URL+"/api/tasks/"+strconv.FormatInt(task.ID, 10)+"/run", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// wait until the execution actually starts
+	var status string
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		e, err := st.GetExecution(1)
+		if err == nil {
+			status = e.Status
+			if status == store.StatusRunning {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("execution never started (status=%s)", status)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	start := time.Now()
+	req, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/tasks/"+strconv.FormatInt(task.ID, 10), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delResp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delResp.Body.Close()
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("delete blocked for %s", elapsed)
+	}
+	if delResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status=%d", delResp.StatusCode)
+	}
+	if _, err := st.GetTask(task.ID); err != store.ErrNotFound {
+		t.Fatalf("task still exists: %v", err)
+	}
+}
