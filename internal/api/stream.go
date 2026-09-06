@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/xiabee/game-scheduler/internal/version"
 )
 
 // meta returns adapter metadata (keys + task types) for the dashboard's
-// add-game / add-task forms.
+// add-game / add-task forms, plus the server build version.
 func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"adapters": s.reg.Meta()})
+	writeJSON(w, http.StatusOK, map[string]any{"adapters": s.reg.Meta(), "version": version.Version})
 }
 
 // screenshot serves a failure screenshot from the screenshot directory. Only a

@@ -139,7 +139,20 @@ go build -o bin/server.exe ./cmd/server
 go build -o bin/ctl.exe    ./cmd/ctl
 ```
 
-需要 Go 1.26.4+。无需 cgo(SQLite 驱动是纯 Go)。
+需要 Go 1.26.8+。无需 cgo(SQLite 驱动是纯 Go)。
+
+**版本信息**:两个二进制都支持 `-version`;`server` / `ctl` 的版本号在构建时通过 ldflags 注入,发布打包脚本会自动完成:
+
+```powershell
+# 本地打包:产出 dist\game-scheduler_<版本>_windows_amd64.zip(bin/、示例配置、README、LICENSE、examples/)+ SHA256SUMS
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1                  # 版本自动取 git describe
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Version v0.1.0 -IncludeLinux   # 附带 linux-amd64 tar.gz
+
+# 手动注入版本号
+go build -ldflags "-X github.com/xiabee/game-scheduler/internal/version.Version=v0.1.0" -o bin/server.exe ./cmd/server
+```
+
+**自动发布**:推送 `v*` 标签(如 `git tag v0.1.0 && git push origin v0.1.0`)会触发 [.github/workflows/release.yml](.github/workflows/release.yml),自动构建 windows-amd64 与 linux-amd64 压缩包并创建对应的 GitHub Release(附 SHA256SUMS)。
 
 ```powershell
 # 默认用 ./data 存放 db/日志/截图,监听 127.0.0.1:8080

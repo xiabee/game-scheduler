@@ -89,7 +89,26 @@ go build -o bin/server.exe ./cmd/server
 go build -o bin/ctl.exe    ./cmd/ctl
 ```
 
-Requires Go 1.26+. No cgo (SQLite driver is pure Go).
+Requires Go 1.26.8+. No cgo (SQLite driver is pure Go).
+
+**Version info**: both binaries accept `-version`; the version is injected at
+link time, and the packaging script below does it automatically:
+
+```powershell
+# Local packaging: dist\game-scheduler_<version>_windows_amd64.zip (bin/,
+# example config, README, LICENSE, examples/) plus SHA256SUMS
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1                # version from git describe
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Version v0.1.0 -IncludeLinux   # also linux-amd64 tar.gz
+
+# Manual version injection
+go build -ldflags "-X github.com/xiabee/game-scheduler/internal/version.Version=v0.1.0" -o bin/server.exe ./cmd/server
+```
+
+**Automated releases**: pushing a `v*` tag (e.g.
+`git tag v0.1.0 && git push origin v0.1.0`) triggers
+[.github/workflows/release.yml](.github/workflows/release.yml), which builds
+windows-amd64 and linux-amd64 archives and publishes a GitHub Release with
+SHA256SUMS.
 
 ## Run the server
 

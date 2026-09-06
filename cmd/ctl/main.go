@@ -35,6 +35,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/xiabee/game-scheduler/internal/version"
 )
 
 func main() {
@@ -52,7 +54,13 @@ func main() {
 	characterID := flag.String("character", "", "filter by character id (goals list)")
 	goalID := flag.String("goal", "", "filter by goal id (requirements/recommendations list)")
 	category := flag.String("category", "", "filter by category (materials list)")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("game-scheduler ctl " + version.Version)
+		return
+	}
 
 	args := flag.Args()
 	if len(args) < 1 {

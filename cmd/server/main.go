@@ -24,12 +24,19 @@ import (
 	"github.com/xiabee/game-scheduler/internal/scheduler"
 	"github.com/xiabee/game-scheduler/internal/store"
 	"github.com/xiabee/game-scheduler/internal/task"
+	"github.com/xiabee/game-scheduler/internal/version"
 )
 
 func main() {
 	cfgPath := flag.String("config", "", "path to JSON config file (optional)")
 	addr := flag.String("addr", "", "HTTP listen address override")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		println("game-scheduler server " + version.Version)
+		return
+	}
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
@@ -113,7 +120,7 @@ func main() {
 	}
 
 	go func() {
-		log.Info("server listening", "addr", cfg.Addr, "db", cfg.DBPath, "adapters", reg.Keys())
+		log.Info("server listening", "addr", cfg.Addr, "db", cfg.DBPath, "adapters", reg.Keys(), "version", version.Version)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("http server", "err", err)
 			os.Exit(1)

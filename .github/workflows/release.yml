@@ -1,0 +1,89 @@
+# Release: builds and attaches distributable archives when a tag is pushed.
+# Nothing here creates tags or releases on its own — push a v* tag (e.g.
+# `git tag v0.1.0 && git push origin v0.1.0`) and this workflow packages the
+# same layout as scripts/build.ps1 and publishes it as a GitHub Release draft
+# is NOT used; the release is published directly with generated notes.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {} # manual run: builds artifacts without creating a release
+
+permissions:
+  contents: write # required to create the release and upload assets
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: package (${{ matrix.goos }}-amd64)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [windows, linux]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: amd64
+          CGO_ENABLED: 0
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -e
+          goos="${{ matrix.goos }}"
+          if [ "${{ github.ref_type }}" != "tag" ]; then VERSION="v0.0.0-${GITHUB_SHA::7}"; fi
+          LDFLAGS="-s -w -X github.com/xiabee/game-scheduler/internal/version.Version=${VERSION}"
+          name="game-scheduler-${goos}-amd64"
+          if [ "$goos" = "windows" ]; then ext=".exe"; else ext=""; fi
+          mkdir -p "dist/${name}/bin"
+          go build -trimpath -ldflags "$LDFLAGS" -o "dist/${name}/bin/server${ext}" ./cmd/server
+          go build -trimpath -ldflags "$LDFLAGS" -o "dist/${name}/bin/ctl${ext}" ./cmd/ctl
+          cp config.example.json README.md README_EN.md LICENSE SECURITY.md "dist/${name}/"
+          cp -r examples "dist/${name}/examples"
+          echo "$VERSION" > "dist/${name}/VERSION"
+
+      - name: Archive
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          name="game-scheduler-${{ matrix.goos }}-amd64"
+          if [ "${{ github.ref_type }}" != "tag" ]; then VERSION="v0.0.0-${GITHUB_SHA::7}"; fi
+          cd dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -r "${name}-${VERSION}.zip" "$name"
+          else
+            tar -czf "${name}-${VERSION}.tar.gz" "$name"
+          fi
+          sha256sum "${name}-${VERSION}."* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload artifact (every run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-scheduler-${{ matrix.goos }}-amd64
+          path: |
+            dist/game-scheduler-${{ matrix.goos }}-amd64-*
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Create release (tag pushes only)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --generate-notes \
+            dist/game-scheduler-*
