@@ -89,7 +89,7 @@ func (s *Server) buildDashboard() (dashboard, error) {
 	if err != nil {
 		return dashboard{}, err
 	}
-	execs, err := s.store.ListExecutions(store.ExecutionFilter{Limit: recentWindow})
+	execs, err := s.store.ListExecutionMetas(store.ExecutionFilter{Limit: recentWindow})
 	if err != nil {
 		return dashboard{}, err
 	}
@@ -148,7 +148,7 @@ func (s *Server) buildDashboard() (dashboard, error) {
 				Status:      e.Status,
 				Trigger:     e.Trigger,
 				StartTime:   e.StartTime,
-				DurationSec: durationSec(e),
+				DurationSec: durationSec(e.StartTime, e.EndTime),
 				ExitCode:    e.ExitCode,
 			})
 		}
@@ -203,11 +203,11 @@ type recentExec struct {
 	ExitCode    *int       `json:"exit_code,omitempty"`
 }
 
-func durationSec(e store.Execution) float64 {
-	if e.StartTime == nil || e.EndTime == nil {
+func durationSec(start, end *time.Time) float64 {
+	if start == nil || end == nil {
 		return 0
 	}
-	return e.EndTime.Sub(*e.StartTime).Seconds()
+	return end.Sub(*start).Seconds()
 }
 
 func health(gs *gameSummary) string {

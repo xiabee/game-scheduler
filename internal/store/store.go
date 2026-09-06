@@ -848,3 +848,55 @@ func (s *Store) ListExecutions(f ExecutionFilter) ([]Execution, error) {
 	}
 	return out, rows.Err()
 }
+
+// ExecutionMeta is an execution without its (potentially large) captured
+// output; the dashboard aggregates only need these columns.
+type ExecutionMeta struct {
+	ID             int64
+	TaskID         int64
+	PlanID         *int64
+	Trigger        string
+	Status         string
+	ExitCode       *int
+	ErrorMsg       string
+	ScreenshotPath string
+	RetryCount     int
+	StartTime      *time.Time
+	EndTime        *time.Time
+	CreatedAt      time.Time
+}
+
+// ListExecutionMetas behaves like ListExecutions but skips the stdout/stderr
+// columns, so polling the dashboard never drags megabytes of captured output
+// through the single SQLite connection.
+func (s *Store) ListExecutionMetas(f ExecutionFilter) ([]ExecutionMeta, error) {
+	q := `SELECT id,task_id,plan_id,trigger,status,exit_code,error_msg,screenshot_path,retry_count,start_time,end_time,created_at FROM executions WHERE 1=1`
+	var args []any
+	if f.TaskID != 0 {
+		q += ` AND task_id=?`
+		args = append(args, f.TaskID)
+	}
+	if f.Status != "" {
+		q += ` AND status=?`
+		args = append(args, f.Status)
+	}
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	q += fmt.Sprintf(` ORDER BY id DESC LIMIT %d`, limit)
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ExecutionMeta{}
+	for rows.Next() {
+		var e ExecutionMeta
+		if err := rows.Scan(&e.ID, &e.TaskID, &e.PlanID, &e.Trigger, &e.Status, &e.ExitCode, &e.ErrorMsg, &e.ScreenshotPath, &e.RetryCount, &e.StartTime, &e.EndTime, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
