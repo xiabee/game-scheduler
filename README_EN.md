@@ -105,6 +105,19 @@ Configuration precedence: defaults → `config.json` (see `config.example.json`)
 environment (`GS_ADDR`, `GS_DATA_DIR`, `GS_DB_PATH`, `GS_SCREENSHOT_CMD`,
 `GS_MAX_CONCURRENT`, `GS_AUTH_TOKEN`) → `-addr` flag.
 
+> 🤖 **One-command smoke test (no game involved)**:
+> [examples/windows_smoke.ps1](examples/windows_smoke.ps1) walks the whole chain
+> with a harmless fake tool (a copied cmd.exe) — `discover → create game →
+> create route → create task → preflight → fake execution → execution log →
+> route stats → cleanup`. It never launches a game or any automation tool:
+>
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File examples\windows_smoke.ps1 -Server http://127.0.0.1:8080
+> ```
+>
+> `SMOKE PASS` means all 10 steps are OK — the scheduler itself is wired up
+> correctly before you plug real tools in.
+
 ### Concurrency (important)
 
 `max_concurrent` (default **1**) bounds how many executions run at once. The

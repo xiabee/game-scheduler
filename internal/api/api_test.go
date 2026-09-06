@@ -297,6 +297,41 @@ func TestScreenshotTraversalBlocked(t *testing.T) {
 	}
 }
 
+func TestGetRouteByID(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "原神", Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := st.CreateRoute(store.Route{GameID: "genshin", Adapter: "genshin", RouteType: "collect", Name: "r", FilePath: "D:/routes/r.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := srv.Client().Get(srv.URL + "/api/routes/" + strconv.FormatInt(rt.ID, 10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get route status=%d", resp.StatusCode)
+	}
+	var out store.Route
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.ID != rt.ID || out.Name != "r" {
+		t.Fatalf("route=%+v", out)
+	}
+	// unknown id maps to 404
+	resp2, err := srv.Client().Get(srv.URL + "/api/routes/424242")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown route status=%d", resp2.StatusCode)
+	}
+}
+
 func TestRoutesAssetCenterAPI(t *testing.T) {
 	srv, st, _ := newTestServer(t, "")
 	scriptDir := t.TempDir()

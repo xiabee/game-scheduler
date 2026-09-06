@@ -59,6 +59,13 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
+	// Go's flag parser stops at the first positional argument, so a flag left
+	// after the resource name ("games add -data ...") is silently treated as a
+	// positional word and the option keeps its default — a confusing failure.
+	if bad := misplacedFlag(args); bad != "" {
+		fmt.Fprintf(os.Stderr, "error: %q was not parsed: global flags must come before the resource, e.g. ctl -server %s -data '<json>' games add\n", bad, *server)
+		os.Exit(2)
+	}
 
 	c := &client{base: strings.TrimRight(*server, "/"), token: *token, hc: &http.Client{Timeout: 30 * time.Second}}
 
@@ -346,4 +353,15 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// misplacedFlag returns the first argument that looks like a flag but was left
+// after the resource name (where Go's flag parser no longer sees it), or "".
+func misplacedFlag(args []string) string {
+	for _, a := range args {
+		if len(a) > 1 && a[0] == '-' {
+			return a
+		}
+	}
+	return ""
 }

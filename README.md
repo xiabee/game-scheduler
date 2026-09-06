@@ -62,6 +62,12 @@
 
 这一步只校准外部工具调用,不启动任何注入/内存读写/封包/反检测能力。本项目始终只把已安装工具当作普通子进程运行。
 
+> 🤖 **一键冒烟验收(不碰游戏)**:[examples/windows_smoke.ps1](examples/windows_smoke.ps1) 用一个无害的假工具(复制的 cmd.exe)走完整链路——`discover → 建游戏 → 建路线 → 建任务 → preflight → 假执行 → 执行日志 → 路线统计 → 清理`,全程不启动游戏/自动化工具,适合装好后先确认调度器本身工作正常:
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File examples\windows_smoke.ps1 -Server http://127.0.0.1:8080
+> ```
+> 全部 10 步 OK 输出 `SMOKE PASS`。之后再用下面的流程接入真实工具。
+
 1. **安装外部工具**
    - BetterGI:安装/解压后确认 `BetterGI.exe` 可手动打开。
    - March7thAssistant / Fhoe-Rail:确认 Python 版本满足工具要求,项目目录里存在入口文件(默认 `main.py`)。

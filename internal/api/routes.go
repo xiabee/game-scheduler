@@ -34,6 +34,15 @@ func (s *Server) searchRoutes(w http.ResponseWriter, r *http.Request) {
 	respond(w, routes, err)
 }
 
+func (s *Server) getRoute(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.store.GetRoute(id)
+	respond(w, out, err)
+}
+
 func (s *Server) updateRoute(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {

@@ -64,3 +64,20 @@ func TestPlannerPayloadShape(t *testing.T) {
 		t.Fatalf("planner payload missing goal_id: %s", b)
 	}
 }
+
+func TestMisplacedFlag(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"games", "add"}, ""},
+		{[]string{"health"}, ""},
+		{[]string{"games", "add", "-data", `{"x":1}`}, "-data"},
+		{[]string{"discover", "-paths", "D:/x"}, "-paths"},
+	}
+	for _, tc := range cases {
+		if got := misplacedFlag(tc.args); got != tc.want {
+			t.Errorf("misplacedFlag(%q)=%q want %q", tc.args, got, tc.want)
+		}
+	}
+}
