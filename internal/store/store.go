@@ -829,8 +829,8 @@ func (s *Store) ListExecutions(f ExecutionFilter) ([]Execution, error) {
 		args = append(args, f.Status)
 	}
 	limit := f.Limit
-	if limit <= 0 {
-		limit = 100
+	if limit <= 0 || limit > 500 {
+		limit = 500
 	}
 	q += fmt.Sprintf(` ORDER BY id DESC LIMIT %d`, limit)
 	rows, err := s.db.Query(q, args...)
@@ -881,8 +881,8 @@ func (s *Store) ListExecutionMetas(f ExecutionFilter) ([]ExecutionMeta, error) {
 		args = append(args, f.Status)
 	}
 	limit := f.Limit
-	if limit <= 0 {
-		limit = 100
+	if limit <= 0 || limit > 500 {
+		limit = 500
 	}
 	q += fmt.Sprintf(` ORDER BY id DESC LIMIT %d`, limit)
 	rows, err := s.db.Query(q, args...)

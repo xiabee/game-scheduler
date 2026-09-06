@@ -66,6 +66,9 @@ func (s *Server) createCharacter(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &c) {
 		return
 	}
+	if !s.requireGame(w, c.GameID) {
+		return
+	}
 	out, err := s.store.CreateCharacter(c)
 	respondCreated(w, out, s.changed(err))
 }
@@ -86,6 +89,9 @@ func (s *Server) updateCharacter(w http.ResponseWriter, r *http.Request) {
 	}
 	var c store.Character
 	if !decode(w, r, &c) {
+		return
+	}
+	if !s.requireGame(w, c.GameID) {
 		return
 	}
 	c.ID = id
@@ -110,9 +116,25 @@ func (s *Server) listCharacterGoals(w http.ResponseWriter, r *http.Request) {
 	respond(w, out, err)
 }
 
+// requireCharacter writes a 400 when the referenced character does not exist.
+func (s *Server) requireCharacter(w http.ResponseWriter, characterID int64) bool {
+	if _, err := s.store.GetCharacter(characterID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("character %d does not exist", characterID))
+			return false
+		}
+		writeStoreErr(w, err)
+		return false
+	}
+	return true
+}
+
 func (s *Server) createCharacterGoal(w http.ResponseWriter, r *http.Request) {
 	var g store.CharacterGoal
 	if !decode(w, r, &g) {
+		return
+	}
+	if !s.requireCharacter(w, g.CharacterID) {
 		return
 	}
 	out, err := s.store.CreateCharacterGoal(g)
@@ -135,6 +157,9 @@ func (s *Server) updateCharacterGoal(w http.ResponseWriter, r *http.Request) {
 	}
 	var g store.CharacterGoal
 	if !decode(w, r, &g) {
+		return
+	}
+	if !s.requireCharacter(w, g.CharacterID) {
 		return
 	}
 	g.ID = id
@@ -163,6 +188,9 @@ func (s *Server) createMaterial(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &m) {
 		return
 	}
+	if !s.requireGame(w, m.GameID) {
+		return
+	}
 	out, err := s.store.CreateMaterialItem(m)
 	respondCreated(w, out, s.changed(err))
 }
@@ -185,6 +213,9 @@ func (s *Server) updateMaterial(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &m) {
 		return
 	}
+	if !s.requireGame(w, m.GameID) {
+		return
+	}
 	m.ID = id
 	out, err := s.store.UpdateMaterialItem(m)
 	respond(w, out, s.changed(err))
@@ -203,9 +234,33 @@ func (s *Server) listMaterialRequirements(w http.ResponseWriter, r *http.Request
 	respond(w, out, err)
 }
 
+// requireRequirementRefs validates both halves of a material requirement.
+func (s *Server) requireRequirementRefs(w http.ResponseWriter, goalID, materialID int64) bool {
+	if _, err := s.store.GetCharacterGoal(goalID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("goal %d does not exist", goalID))
+			return false
+		}
+		writeStoreErr(w, err)
+		return false
+	}
+	if _, err := s.store.GetMaterialItem(materialID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("material %d does not exist", materialID))
+			return false
+		}
+		writeStoreErr(w, err)
+		return false
+	}
+	return true
+}
+
 func (s *Server) createMaterialRequirement(w http.ResponseWriter, r *http.Request) {
 	var req store.MaterialRequirement
 	if !decode(w, r, &req) {
+		return
+	}
+	if !s.requireRequirementRefs(w, req.GoalID, req.MaterialID) {
 		return
 	}
 	out, err := s.store.CreateMaterialRequirement(req)
@@ -228,6 +283,9 @@ func (s *Server) updateMaterialRequirement(w http.ResponseWriter, r *http.Reques
 	}
 	var req store.MaterialRequirement
 	if !decode(w, r, &req) {
+		return
+	}
+	if !s.requireRequirementRefs(w, req.GoalID, req.MaterialID) {
 		return
 	}
 	req.ID = id

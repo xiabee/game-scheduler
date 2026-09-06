@@ -879,3 +879,65 @@ func TestGameIDAndSourceURLValidation(t *testing.T) {
 		t.Fatalf("https source_url rejected (status=%d)", code)
 	}
 }
+
+func TestReferentialValidationReturns400(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "g", Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	c := srv.Client()
+	post := func(path, body string) int {
+		t.Helper()
+		resp, err := c.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&e)
+		if resp.StatusCode == http.StatusBadRequest && e.Error == "" {
+			t.Fatalf("400 without an error message for %s", path)
+		}
+		return resp.StatusCode
+	}
+
+	// task referencing a missing game
+	if code := post("/api/tasks", `{"game_id":"nope","name":"t","type":"raw","params":{"raw_args":["a"]}}`); code != http.StatusBadRequest {
+		t.Errorf("task with unknown game: status=%d", code)
+	}
+	// negative retry settings
+	if code := post("/api/tasks", `{"game_id":"genshin","name":"t","type":"raw","max_retries":-1}`); code != http.StatusBadRequest {
+		t.Errorf("negative max_retries: status=%d", code)
+	}
+	if code := post("/api/tasks", `{"game_id":"genshin","name":"t","type":"raw","timeout_sec":-5}`); code != http.StatusBadRequest {
+		t.Errorf("negative timeout_sec: status=%d", code)
+	}
+	// plan referencing a missing task
+	if code := post("/api/plans", `{"name":"p","task_id":424242,"cron_expr":"0 9 * * *"}`); code != http.StatusBadRequest {
+		t.Errorf("plan with unknown task: status=%d", code)
+	}
+	// character with unknown game
+	if code := post("/api/characters", `{"game_id":"nope","name":"a"}`); code != http.StatusBadRequest {
+		t.Errorf("character with unknown game: status=%d", code)
+	}
+	// goal with unknown character
+	if code := post("/api/character-goals", `{"character_id":987,"name":"g"}`); code != http.StatusBadRequest {
+		t.Errorf("goal with unknown character: status=%d", code)
+	}
+	// route with unknown game
+	if code := post("/api/routes", `{"game_id":"nope","name":"r"}`); code != http.StatusBadRequest {
+		t.Errorf("route with unknown game: status=%d", code)
+	}
+
+	// sanity: valid task still goes through
+	resp, err := c.Post(srv.URL+"/api/tasks", "application/json", strings.NewReader(`{"game_id":"genshin","name":"ok","type":"onedragon","params":"{}","max_retries":2,"timeout_sec":10,"enabled":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("valid task status=%d", resp.StatusCode)
+	}
+}

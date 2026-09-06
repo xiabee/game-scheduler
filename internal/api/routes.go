@@ -53,6 +53,9 @@ func (s *Server) updateRoute(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &rt) {
 		return
 	}
+	if !s.requireGame(w, rt.GameID) {
+		return
+	}
 	if !urlSchemeOK(rt.SourceURL) {
 		writeErr(w, http.StatusBadRequest, errors.New("source_url must be an absolute http(s) URL"))
 		return

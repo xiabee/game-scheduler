@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -194,6 +195,33 @@ var gameIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 func validGameID(id string) bool { return id != "" && len(id) <= 128 && gameIDPattern.MatchString(id) }
 
+// requireGame writes a descriptive 400 when the referenced game does not exist
+// (otherwise such inserts die on the FK constraint as an unhelpful 500).
+func (s *Server) requireGame(w http.ResponseWriter, gameID string) bool {
+	if _, err := s.store.GetGame(gameID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("game %q does not exist; create it first", gameID))
+			return false
+		}
+		writeStoreErr(w, err)
+		return false
+	}
+	return true
+}
+
+// requireTask is requireGame for task references (plans).
+func (s *Server) requireTask(w http.ResponseWriter, taskID int64) bool {
+	if _, err := s.store.GetTask(taskID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("task %d does not exist", taskID))
+			return false
+		}
+		writeStoreErr(w, err)
+		return false
+	}
+	return true
+}
+
 // urlSchemeOK accepts only empty or absolute http(s) URLs for operator-facing
 // link fields (route source_url), blocking javascript:/data: style payloads.
 func urlSchemeOK(raw string) bool {
@@ -266,8 +294,26 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &t) {
 		return
 	}
+	if !validTaskFields(w, t) {
+		return
+	}
+	if !s.requireGame(w, t.GameID) {
+		return
+	}
 	out, err := s.store.CreateTask(t)
 	respondCreated(w, out, s.changed(err))
+}
+
+// validTaskFields rejects negative retry/timeout settings: a negative
+// max_retries would zero out the attempt loop entirely (the task would be
+// recorded as a success without ever running), and a negative timeout would
+// silently disable the timeout.
+func validTaskFields(w http.ResponseWriter, t store.Task) bool {
+	if t.MaxRetries < 0 || t.RetryDelaySec < 0 || t.TimeoutSec < 0 {
+		writeErr(w, http.StatusBadRequest, errors.New("max_retries, retry_delay_sec and timeout_sec must be >= 0"))
+		return false
+	}
+	return true
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
@@ -286,6 +332,12 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	var t store.Task
 	if !decode(w, r, &t) {
+		return
+	}
+	if !validTaskFields(w, t) {
+		return
+	}
+	if !s.requireGame(w, t.GameID) {
 		return
 	}
 	t.ID = id
@@ -338,6 +390,9 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &rt) {
 		return
 	}
+	if !s.requireGame(w, rt.GameID) {
+		return
+	}
 	if !urlSchemeOK(rt.SourceURL) {
 		writeErr(w, http.StatusBadRequest, errors.New("source_url must be an absolute http(s) URL"))
 		return
@@ -371,6 +426,9 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if !s.requireTask(w, p.TaskID) {
+		return
+	}
 	out, err := s.store.CreatePlan(p)
 	if err == nil {
 		_ = s.sched.Reload()
@@ -399,6 +457,9 @@ func (s *Server) updatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := scheduler.ValidateCron(p.CronExpr); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if !s.requireTask(w, p.TaskID) {
 		return
 	}
 	p.ID = id
