@@ -7,13 +7,20 @@ package notify
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/xiabee/game-scheduler/internal/shellcmd"
 )
+
+// notifyTimeout bounds how long a notification command may run: it runs
+// synchronously on the execution path, so a hung webhook must not stall the
+// worker.
+const notifyTimeout = 15 * time.Second
 
 // Notifier renders and runs the configured notify command.
 type Notifier struct {
@@ -54,7 +61,9 @@ func (n *Notifier) Send(event, title, message string) {
 }
 
 func (n *Notifier) shellRun(line string) error {
-	cmd := shellcmd.Command(line)
+	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
+	defer cancel()
+	cmd := shellcmd.CommandContext(ctx, line)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

@@ -5,6 +5,7 @@
 package shellcmd
 
 import (
+	"context"
 	"os/exec"
 	"syscall"
 )
@@ -18,6 +19,14 @@ import (
 // cmd strip exactly the outer quotes and run the rest verbatim.
 func Command(line string) *exec.Cmd {
 	c := exec.Command("cmd")
+	c.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd /S /C "` + line + `"`}
+	return c
+}
+
+// CommandContext is Command with a context, so a slow hook (a webhook that
+// never answers) can be abandoned by the caller.
+func CommandContext(ctx context.Context, line string) *exec.Cmd {
+	c := exec.CommandContext(ctx, "cmd")
 	c.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd /S /C "` + line + `"`}
 	return c
 }
