@@ -56,7 +56,14 @@ function Invoke-Ctl {
         throw "ctl $($ResourceArgs -join ' ') failed (exit $LASTEXITCODE): $detail"
     }
     $text = ($out | Out-String).Trim()
-    if ($text) { return $text | ConvertFrom-Json }
+    if ($text) {
+        # ctl prints the plain status line (e.g. "204 No Content") for empty
+        # responses; only attempt a JSON parse when the payload looks like JSON.
+        if ($text.StartsWith("{") -or $text.StartsWith("[")) {
+            try { return $text | ConvertFrom-Json } catch { return $text }
+        }
+        return $text
+    }
     return $null
 }
 
@@ -158,6 +165,23 @@ try {
         if ($rt.success_count -lt 1) { throw "success_count=$($rt.success_count)" }
         if (-not $rt.last_run_at) { throw "last_run_at not recorded" }
     }
+
+    # ---- 8. deleting a running task kills its process and cascades cleanly ----
+    Step "delete running task (process killed, no orphans)" {
+        $body = @{ game_id = $gameId; name = $script:task.name; type = "raw";
+                   route_id = $script:task.route_id;
+                   params = @{ exe = $fakeExe; raw_args = @("/c", "ping", "-n", "8", "127.0.0.1") } | ConvertTo-Json -Compress;
+                   enabled = $true } | ConvertTo-Json -Compress -Depth 4
+        Invoke-Ctl -ResourceArgs @("tasks", "update", "$($script:task.id)") -JsonBody $body | Out-Null
+        $exec = Invoke-Ctl -ResourceArgs @("tasks", "run", "$($script:task.id)")
+        Start-Sleep -Seconds 2
+        $e = Invoke-Ctl -ResourceArgs @("execs", "get", "$($exec.id)")
+        if ($e.status -ne "running") { throw "expected running, got $($e.status)" }
+        $null = Invoke-Ctl -ResourceArgs @("tasks", "delete", "$($script:task.id)")
+        # the execution rows cascade away with the task - nothing may be left
+        $left = Invoke-Ctl -ResourceArgs @("execs") -Flags @("-task", "$($script:task.id)")
+        if ($null -ne $left -and @($left).Count -gt 0) { throw "execution rows survived the cascade" }
+    }
 } finally {
     # ---- 8. cleanup (delete game cascades tasks/routes/executions) ----
     try { $null = Invoke-Ctl -ResourceArgs @("games", "delete", $gameId) } catch { }
@@ -171,5 +195,5 @@ if ($script:Failures.Count -gt 0) {
     exit 1
 }
 Write-Host ""
-Write-Host "SMOKE PASS - discover/game/route/task/preflight/execution/log/stats all OK." -ForegroundColor Green
+Write-Host "SMOKE PASS - all 11 steps OK (discover/game/route/task/preflight/execution/log/stats/running-delete)." -ForegroundColor Green
 exit 0
