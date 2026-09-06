@@ -39,30 +39,22 @@ func (s *Server) plannerExport(w http.ResponseWriter, r *http.Request) {
 		writeStoreErr(w, err)
 		return
 	}
-	out := PlannerExport{Version: plannerExportVersion, GameID: gameID, ExportedAt: time.Now().UTC()}
-	var err error
-	if out.Characters, err = s.store.ListCharacters(store.CharacterFilter{GameID: gameID}); err != nil {
+	// One read transaction: the file's references are guaranteed to resolve
+	// within itself even if the planner is being edited concurrently.
+	d, err := s.store.ExportPlannerData(gameID)
+	if err != nil {
 		writeStoreErr(w, err)
 		return
 	}
-	if out.Goals, err = s.store.ListCharacterGoals(store.CharacterGoalFilter{GameID: gameID}); err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	if out.Materials, err = s.store.ListMaterialItems(store.MaterialFilter{GameID: gameID}); err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	out.Requirements = []store.MaterialRequirement{}
-	for _, g := range out.Goals {
-		reqs, err := s.store.ListMaterialRequirements(store.MaterialRequirementFilter{GoalID: g.ID})
-		if err != nil {
-			writeStoreErr(w, err)
-			return
-		}
-		out.Requirements = append(out.Requirements, reqs...)
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, PlannerExport{
+		Version:      plannerExportVersion,
+		GameID:       gameID,
+		ExportedAt:   time.Now().UTC(),
+		Characters:   d.Characters,
+		Goals:        d.Goals,
+		Materials:    d.Materials,
+		Requirements: d.Requirements,
+	})
 }
 
 // plannerImportRequest is the POST /api/planner/import body.

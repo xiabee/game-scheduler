@@ -647,13 +647,15 @@ async function renderPlanner(){
   $("#cp-characters").innerHTML=plannerState.characters.length?`<table><thead><tr><th>角色</th><th>游戏</th><th>标签</th></tr></thead><tbody>`+
     plannerState.characters.map(c=>`<tr><td><strong>${esc(c.name)}</strong><div class="hint">${esc(c.role_type||'')} ${esc(c.element||'')} ${esc(c.weapon||'')}</div></td><td>${esc(c.game_id)}</td><td>${tagList(c.tags)}</td></tr>`).join("")+`</tbody></table>`:
     '<div class="empty">暂无角色</div>';
+  const charName = cid => (plannerState.characters.find(c=>c.id===cid)||{}).name || ("#"+cid);
+  const goalName = gid => (plannerState.goals.find(g=>g.id===gid)||{}).name || ("#"+gid);
   $("#cp-goals").innerHTML=plannerState.goals.length?`<table><thead><tr><th>目标</th><th>角色</th><th>状态/优先级</th></tr></thead><tbody>`+
-    plannerState.goals.map(g=>`<tr><td>${esc(g.name)}<div class="hint">${esc(g.target_level)} ${esc(g.target_skill)} ${esc(g.target_equipment)}</div></td><td>#${g.character_id}</td><td><span class="badge">${esc(g.status||'open')}</span> ${g.priority||0}</td></tr>`).join("")+`</tbody></table>`:
+    plannerState.goals.map(g=>`<tr><td>${esc(g.name)}<div class="hint">${esc(g.target_level)} ${esc(g.target_skill)} ${esc(g.target_equipment)}</div></td><td>${esc(charName(g.character_id))}</td><td><span class="badge">${esc(g.status||'open')}</span> ${g.priority||0}</td></tr>`).join("")+`</tbody></table>`:
     '<div class="empty">暂无目标</div>';
   $("#cp-reqs").innerHTML=plannerState.requirements.length?`<table><thead><tr><th>目标</th><th>材料</th><th>缺口</th><th>优先级</th></tr></thead><tbody>`+
     plannerState.requirements.map(req=>{
       const m=plannerState.materials.find(x=>x.id===req.material_id)||{};
-      return `<tr><td>#${req.goal_id}</td><td>${esc(m.name||('#'+req.material_id))}<div class="hint">${esc(m.category||'')} ${esc(m.source_hint||'')} ${esc(m.route_type_hint||'')}</div></td><td>${Math.max(0,(req.required_count||0)-(req.owned_count||0))}</td><td>${req.priority||0}</td></tr>`;
+      return `<tr><td>${esc(goalName(req.goal_id))}</td><td>${esc(m.name||('#'+req.material_id))}<div class="hint">${esc(m.category||'')} ${esc(m.source_hint||'')} ${esc(m.route_type_hint||'')}</div></td><td>${Math.max(0,(req.required_count||0)-(req.owned_count||0))}</td><td>${req.priority||0}</td></tr>`;
     }).join("")+`</tbody></table>`:'<div class="empty">暂无材料需求</div>';
   await renderRecommendations();
 }

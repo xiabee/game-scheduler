@@ -206,3 +206,40 @@ func TestImportPlannerDataUnresolvedRequirementFailsAtomically(t *testing.T) {
 		t.Fatalf("failed import left characters behind")
 	}
 }
+
+func TestExportPlannerDataSnapshot(t *testing.T) {
+	s := newTestStore(t)
+	mkGame(t, s, "genshin")
+
+	// empty game: empty (non-nil) sections
+	d, err := s.ExportPlannerData("genshin")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if d.Characters == nil || d.Goals == nil || d.Materials == nil || d.Requirements == nil {
+		t.Fatalf("export sections must be non-nil: %+v", d)
+	}
+
+	if _, err := s.ImportPlannerData("genshin", sampleDataset(), false, false); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	d, err = s.ExportPlannerData("genshin")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if len(d.Characters) != 1 || len(d.Goals) != 1 || len(d.Materials) != 1 || len(d.Requirements) != 1 {
+		t.Fatalf("counts=%+v", d)
+	}
+	// references resolve within the snapshot
+	if d.Goals[0].CharacterID != d.Characters[0].ID || d.Requirements[0].GoalID != d.Goals[0].ID || d.Requirements[0].MaterialID != d.Materials[0].ID {
+		t.Fatalf("snapshot references broken: %+v", d)
+	}
+	// a game that does not exist yields the same empty snapshot, not an error
+	d2, err := s.ExportPlannerData("nope")
+	if err != nil {
+		t.Fatalf("export unknown game: %v", err)
+	}
+	if len(d2.Characters) != 0 {
+		t.Fatalf("unknown game returned rows: %+v", d2)
+	}
+}
