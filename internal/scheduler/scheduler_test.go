@@ -75,6 +75,31 @@ func TestFireSkipsDisabledTask(t *testing.T) {
 	}
 }
 
+// Disabling the game also holds scheduled fires, same as disabling the task.
+func TestFireSkipsDisabledGame(t *testing.T) {
+	st, sched := newFixture(t)
+
+	taskRow, err := st.CreateTask(store.Task{GameID: "genshin", Name: "t", Type: "onedragon", Params: "{}", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := fireAndCount(t, sched, st, taskRow.ID); n != 1 {
+		t.Fatalf("enabled task not fired: %d executions", n)
+	}
+
+	g, err := st.GetGame("genshin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.Enabled = false
+	if _, err := st.UpdateGame(g); err != nil {
+		t.Fatal(err)
+	}
+	if n := fireAndCount(t, sched, st, taskRow.ID); n != 1 {
+		t.Fatalf("task fired while its game was disabled: %d executions", n)
+	}
+}
+
 func TestValidateCron(t *testing.T) {
 	for _, expr := range []string{"0 9 * * *", "@daily", "*/5 * * * *"} {
 		if err := ValidateCron(expr); err != nil {

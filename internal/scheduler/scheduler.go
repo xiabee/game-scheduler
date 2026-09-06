@@ -114,6 +114,15 @@ func (s *Scheduler) fire(p store.Plan) {
 		s.log.Info("plan fire skipped; task is disabled", "plan_id", p.ID, "task_id", p.TaskID, "name", t.Name)
 		return
 	}
+	g, err := s.store.GetGame(t.GameID)
+	if err != nil {
+		s.log.Error("plan fire failed to load game", "plan_id", p.ID, "game", t.GameID, "err", err)
+		return
+	}
+	if !g.Enabled {
+		s.log.Info("plan fire skipped; game is disabled", "plan_id", p.ID, "task_id", p.TaskID, "game", g.ID)
+		return
+	}
 	s.log.Info("plan firing", "plan_id", p.ID, "task_id", p.TaskID, "name", p.Name)
 	planID := p.ID
 	// Scheduled fires skip if the task is still active, so a long task on a
