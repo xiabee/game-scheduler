@@ -91,8 +91,9 @@ func (s *Scheduler) Reload() error {
 		s.entries[p.ID] = id
 		// Compute the next fire from the schedule directly: cron.Entry()'s Next
 		// stays zero until the engine has started, which would leave
-		// next_run_at unset on the very first reload after boot.
-		next := sch.Next(time.Now())
+		// next_run_at unset on the very first reload after boot. Stored in UTC
+		// to match every other timestamp column.
+		next := sch.Next(time.Now()).UTC()
 		_ = s.store.SetPlanRunTimes(p.ID, p.LastRunAt, &next)
 	}
 	return nil
@@ -136,12 +137,12 @@ func (s *Scheduler) fire(p store.Plan) {
 		s.log.Warn("plan fire skipped; previous run still active", "plan_id", p.ID, "task_id", p.TaskID)
 		return
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	var next *time.Time
 	s.mu.Lock()
 	if id, ok := s.entries[p.ID]; ok {
 		if e := s.cron.Entry(id); !e.Next.IsZero() {
-			n := e.Next
+			n := e.Next.UTC()
 			next = &n
 		}
 	}

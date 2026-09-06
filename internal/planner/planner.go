@@ -33,6 +33,8 @@ type gap struct {
 }
 
 // Recommend calculates current gaps and persists fresh open recommendations.
+// The stale open recommendations are replaced atomically: either the new set
+// lands in full or the previous one stays untouched.
 func (s *Service) Recommend(opts Options) ([]store.FarmingRecommendation, error) {
 	if opts.GoalID == 0 {
 		return nil, fmt.Errorf("goal_id is required")
@@ -67,32 +69,25 @@ func (s *Service) Recommend(opts Options) ([]store.FarmingRecommendation, error)
 		}
 		return gaps[i].req.Priority > gaps[j].req.Priority
 	})
-	if err := s.store.ClearFarmingRecommendations(goal.ID); err != nil {
-		return nil, err
-	}
 
 	maxTasks := opts.MaxTasks
 	if maxTasks <= 0 {
 		maxTasks = len(gaps)
 	}
-	out := []store.FarmingRecommendation{}
+	fresh := []store.FarmingRecommendation{}
 	usedStamina := 0
 	for _, g := range gaps {
-		if len(out) >= maxTasks {
+		if len(fresh) >= maxTasks {
 			break
 		}
 		rec := s.recommendForGap(goal, character.GameID, g)
-		if opts.DailyStamina > 0 && rec.EstimatedStamina > 0 && usedStamina+rec.EstimatedStamina > opts.DailyStamina && len(out) > 0 {
+		if opts.DailyStamina > 0 && rec.EstimatedStamina > 0 && usedStamina+rec.EstimatedStamina > opts.DailyStamina && len(fresh) > 0 {
 			continue
 		}
 		usedStamina += rec.EstimatedStamina
-		saved, err := s.store.CreateFarmingRecommendation(rec)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, saved)
+		fresh = append(fresh, rec)
 	}
-	return out, nil
+	return s.store.ReplaceOpenRecommendations(goal.ID, fresh)
 }
 
 func (s *Service) recommendForGap(goal store.CharacterGoal, gameID string, g gap) store.FarmingRecommendation {

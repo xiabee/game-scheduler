@@ -387,8 +387,11 @@ func (s *Server) createPlanFromRecommendation(w http.ResponseWriter, r *http.Req
 	}
 	plan, err := s.store.CreatePlan(store.Plan{Name: req.Name, TaskID: taskID, CronExpr: req.CronExpr, Enabled: enabled})
 	if err == nil {
-		rec, _ = s.store.SetFarmingRecommendationStatus(id, "planned")
-		_ = rec
+		if _, statusErr := s.store.SetFarmingRecommendationStatus(id, "planned"); statusErr != nil {
+			// The plan exists now; a stale recommendation status would invite
+			// the operator to click "create plan" again and duplicate it.
+			s.log.Warn("recommendation status update failed", "rec_id", id, "status", "planned", "err", statusErr)
+		}
 		_ = s.sched.Reload()
 		s.bus.Notify()
 	}

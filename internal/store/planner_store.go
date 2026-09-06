@@ -437,6 +437,13 @@ type FarmingRecommendationFilter struct {
 }
 
 func (s *Store) CreateFarmingRecommendation(r FarmingRecommendation) (FarmingRecommendation, error) {
+	if err := insertFarmingRecommendation(s.db, &r); err != nil {
+		return FarmingRecommendation{}, err
+	}
+	return r, nil
+}
+
+func insertFarmingRecommendation(q dbtx, r *FarmingRecommendation) error {
 	now := time.Now().UTC()
 	r.CreatedAt, r.UpdatedAt = now, now
 	if r.Status == "" {
@@ -445,14 +452,14 @@ func (s *Store) CreateFarmingRecommendation(r FarmingRecommendation) (FarmingRec
 	if r.RecommendationType == "" {
 		r.RecommendationType = "manual"
 	}
-	res, err := s.db.Exec(`INSERT INTO farming_recommendations (goal_id,game_id,material_id,route_id,task_id,recommendation_type,title,reason,priority,estimated_runs,estimated_stamina,status,created_at,updated_at)
+	res, err := q.Exec(`INSERT INTO farming_recommendations (goal_id,game_id,material_id,route_id,task_id,recommendation_type,title,reason,priority,estimated_runs,estimated_stamina,status,created_at,updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.GoalID, r.GameID, r.MaterialID, r.RouteID, r.TaskID, r.RecommendationType, r.Title, r.Reason, r.Priority, r.EstimatedRuns, r.EstimatedStamina, r.Status, r.CreatedAt, r.UpdatedAt)
 	if err != nil {
-		return FarmingRecommendation{}, err
+		return err
 	}
 	r.ID, _ = res.LastInsertId()
-	return r, nil
+	return nil
 }
 
 func (s *Store) GetFarmingRecommendation(id int64) (FarmingRecommendation, error) {
@@ -528,6 +535,33 @@ func (s *Store) ListFarmingRecommendations(f FarmingRecommendationFilter) ([]Far
 func (s *Store) ClearFarmingRecommendations(goalID int64) error {
 	_, err := s.db.Exec(`DELETE FROM farming_recommendations WHERE goal_id=? AND status='open' AND task_id IS NULL`, goalID)
 	return err
+}
+
+// ReplaceOpenRecommendations deletes the goal's stale open recommendations and
+// inserts the fresh list in a single transaction: a failure part-way through
+// leaves the previous recommendations intact instead of a half-regenerated
+// set.
+func (s *Store) ReplaceOpenRecommendations(goalID int64, recs []FarmingRecommendation) ([]FarmingRecommendation, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`DELETE FROM farming_recommendations WHERE goal_id=? AND status='open' AND task_id IS NULL`, goalID); err != nil {
+		return nil, err
+	}
+	out := make([]FarmingRecommendation, 0, len(recs))
+	for i := range recs {
+		r := recs[i]
+		if err := insertFarmingRecommendation(tx, &r); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Store) SetFarmingRecommendationStatus(id int64, status string) (FarmingRecommendation, error) {

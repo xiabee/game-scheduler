@@ -138,6 +138,12 @@ func (c *Client) prime(ctx context.Context) error {
 	}
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	resp.Body.Close()
+	// Only latch primed on a clean response: if the homepage request was
+	// rejected (rate-limited / 5xx) no buvid cookie was planted, and latching
+	// here would keep every later search cookieless until process restart.
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bilibili: priming request returned %s", resp.Status)
+	}
 	c.mu.Lock()
 	c.primed = true
 	c.mu.Unlock()
