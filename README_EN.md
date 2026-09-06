@@ -486,6 +486,7 @@ ctl -server $S -data '{"game_id":"genshin","name":"Jueyun Chili","category":"col
 ctl -server $S -data '{"goal_id":1,"material_id":1,"required_count":168,"owned_count":42,"priority":8}' requirements add
 ctl -server $S -data '{"goal_id":1,"daily_stamina":160,"max_tasks":3}' planner recommend
 ctl -server $S -goal 1 planner recommendations
+ctl -server $S -route 3 planner attach-route <recommendation-id>   # bind a route to a manual recommendation
 ctl -server $S planner create-task <recommendation-id>
 ctl -server $S -data '{"cron_expr":"0 9 * * *"}' planner create-plan <recommendation-id>
 ```

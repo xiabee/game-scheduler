@@ -378,6 +378,7 @@ ctl -server $S -goal 1 requirements list
 
 ctl -server $S -data '{"goal_id":1,"daily_stamina":160,"max_tasks":3}' planner recommend
 ctl -server $S -goal 1 planner recommendations
+ctl -server $S -route 3 planner attach-route <推荐id>   # 手动建议绑定已有路线
 ctl -server $S planner create-task <推荐id>
 ctl -server $S -data '{"cron_expr":"0 9 * * *"}' planner create-plan <推荐id>
 ```

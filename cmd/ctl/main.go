@@ -13,6 +13,7 @@
 //	goals   list [-character id] [-game id] [-status s] | get <id> | add | update <id> | delete <id>
 //	materials list [-game id] [-category c] | get <id> | add | update <id> | delete <id>
 //	requirements list [-goal id] | get <id> | add | update <id> | delete <id>
+//	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | attach-route <id> -route <routeId>
 //	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | create-plan <id>
 //	        | export -game <id> | import -data '<json>'|@file.json|-
 //	plans   list | get <id> | add | update <id> | delete <id>
@@ -33,6 +34,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +56,7 @@ func main() {
 	characterID := flag.String("character", "", "filter by character id (goals list)")
 	goalID := flag.String("goal", "", "filter by goal id (requirements/recommendations list)")
 	category := flag.String("category", "", "filter by category (materials list)")
+	routeID := flag.String("route", "", "route id for 'planner attach-route'")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -199,6 +202,13 @@ func main() {
 			err = c.do("GET", p, nil)
 		case "create-task":
 			err = c.do("POST", "/api/planner/recommendations/"+id+"/create-task", nil)
+		case "attach-route":
+			rid, e := strconv.ParseInt(strings.TrimSpace(*routeID), 10, 64)
+			if e != nil {
+				err = fmt.Errorf("planner attach-route requires -route <route id>")
+				break
+			}
+			err = c.do("POST", "/api/planner/recommendations/"+id+"/attach-route", []byte(`{"route_id":`+strconv.FormatInt(rid, 10)+`}`))
 		case "create-plan":
 			body := []byte("{}")
 			if *data != "" {
