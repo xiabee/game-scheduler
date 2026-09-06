@@ -72,6 +72,20 @@ CREATE INDEX IF NOT EXISTS idx_routes_type ON routes(route_type);
 CREATE INDEX IF NOT EXISTS idx_routes_updated ON routes(updated_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_route ON tasks(route_id);
 `)
+	if err != nil {
+		return err
+	}
+	// The route scan dedupes on (game_id, file_path), but historically the
+	// index was missing: two concurrent scans could each insert a row for the
+	// same file. Collapse any duplicates (keep the newest) and enforce the
+	// constraint from here on. Routes with an empty file_path (manual
+	// placeholders) are exempt from both the cleanup and the index.
+	_, err = s.db.Exec(`
+DELETE FROM routes WHERE file_path<>'' AND id NOT IN (
+  SELECT MAX(id) FROM routes WHERE file_path<>'' GROUP BY game_id, file_path
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_routes_game_file ON routes(game_id, file_path) WHERE file_path<>'';
+`)
 	return err
 }
 
@@ -564,14 +578,36 @@ func (s *Store) UpsertRouteByFile(r Route) (Route, bool, error) {
 	err := s.db.QueryRow(`SELECT id FROM routes WHERE game_id=? AND file_path=?`, r.GameID, r.FilePath).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		out, err := s.CreateRoute(r)
+		if err != nil {
+			// A concurrent scan may have inserted the same file after our
+			// lookup missed; fall back to the update path instead of failing.
+			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+				out, upErr := s.updateRouteByFile(r)
+				return out, false, upErr
+			}
+			return Route{}, true, err
+		}
 		return out, true, err
 	}
 	if err != nil {
 		return Route{}, false, err
 	}
+	out, err := s.updateRouteByFileID(id, r)
+	return out, false, err
+}
+
+func (s *Store) updateRouteByFile(r Route) (Route, error) {
+	var id int64
+	if err := s.db.QueryRow(`SELECT id FROM routes WHERE game_id=? AND file_path=?`, r.GameID, r.FilePath).Scan(&id); err != nil {
+		return Route{}, err
+	}
+	return s.updateRouteByFileID(id, r)
+}
+
+func (s *Store) updateRouteByFileID(id int64, r Route) (Route, error) {
 	existing, err := s.GetRoute(id)
 	if err != nil {
-		return Route{}, false, err
+		return Route{}, err
 	}
 	existing.Adapter = r.Adapter
 	existing.RouteType = r.RouteType
@@ -581,8 +617,7 @@ func (s *Store) UpsertRouteByFile(r Route) (Route, bool, error) {
 	if existing.Description == "" {
 		existing.Description = r.Description
 	}
-	out, err := s.UpdateRoute(existing)
-	return out, false, err
+	return s.UpdateRoute(existing)
 }
 
 // RecordRouteRun updates aggregate stats after a task associated with a route

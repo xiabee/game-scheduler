@@ -874,7 +874,7 @@ func TestGameIDAndSourceURLValidation(t *testing.T) {
 	if code := post("/api/routes", bad); code != http.StatusBadRequest {
 		t.Fatalf("javascript: source_url accepted (status=%d)", code)
 	}
-	good := `{"game_id":"genshin-2_x","name":"ok","file_path":"D:/x.json","source_url":"https://example.com/v"}`
+	good := `{"game_id":"genshin-2_x","name":"ok","file_path":"D:/y.json","source_url":"https://example.com/v"}`
 	if code := post("/api/routes", good); code != http.StatusCreated {
 		t.Fatalf("https source_url rejected (status=%d)", code)
 	}

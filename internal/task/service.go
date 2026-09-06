@@ -171,6 +171,29 @@ func (s *Service) Cancel(execID int64) error {
 	return nil
 }
 
+// CancelTaskExecs cancels every active execution (queued or running) of the
+// given task. It is best-effort and does not wait for the runs to finish;
+// callers use it so a tool's process tree is killed before its rows disappear
+// (deleting a task cascades its execution rows away, leaving the process
+// running with nothing to write its result back to).
+func (s *Service) CancelTaskExecs(taskID int64) int {
+	s.mu.Lock()
+	execIDs := make([]int64, 0, len(s.running))
+	for execID := range s.running {
+		execIDs = append(execIDs, execID)
+	}
+	s.mu.Unlock()
+	n := 0
+	for _, execID := range execIDs {
+		if exec, err := s.store.GetExecution(execID); err == nil && exec.TaskID == taskID {
+			if err := s.Cancel(execID); err == nil {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // Shutdown rejects new enqueues, cancels every in-flight/queued execution, and
 // waits for their workers to finish (bounded by ctx). Workers do their final
 // store write before returning, so once Shutdown returns the store has no

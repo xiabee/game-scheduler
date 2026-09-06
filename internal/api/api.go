@@ -278,7 +278,16 @@ func (s *Server) updateGame(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteGame(w http.ResponseWriter, r *http.Request) {
-	err := s.store.DeleteGame(r.PathValue("id"))
+	id := r.PathValue("id")
+	// Kill the tools' process trees before the cascade removes their rows, or
+	// a running tool would keep controlling the game with nothing left to
+	// record its result.
+	if tasks, err := s.store.ListTasks(id); err == nil {
+		for _, t := range tasks {
+			s.svc.CancelTaskExecs(t.ID)
+		}
+	}
+	err := s.store.DeleteGame(id)
 	respondNoContent(w, s.changed(err))
 }
 
@@ -350,6 +359,8 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Same as deleteGame: stop any live run before its rows are cascaded away.
+	s.svc.CancelTaskExecs(id)
 	respondNoContent(w, s.changed(s.store.DeleteTask(id)))
 }
 
@@ -399,6 +410,10 @@ func (s *Server) createRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	s.prepareRoute(&rt)
 	out, err := s.store.CreateRoute(rt)
+	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		writeErr(w, http.StatusConflict, errors.New("a route with this game_id and file_path already exists"))
+		return
+	}
 	respondCreated(w, out, s.changed(err))
 }
 

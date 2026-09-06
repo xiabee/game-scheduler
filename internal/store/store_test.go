@@ -446,3 +446,35 @@ func TestPruneExecutions(t *testing.T) {
 		t.Fatalf("running row was pruned: %v", err)
 	}
 }
+
+// Concurrent scans must not duplicate a route: the (game_id,file_path) pair is
+// unique (older duplicates are collapsed by the migration), and the upsert
+// falls back to an update when its insert loses the race.
+func TestUpsertRouteByFileNoDuplicates(t *testing.T) {
+	s := newTestStore(t)
+	mkGame(t, s, "genshin")
+	r := Route{GameID: "genshin", Adapter: "genshin", Name: "route", RouteType: "collect", FilePath: "D:/routes/a.json"}
+
+	first, created, err := s.UpsertRouteByFile(r)
+	if err != nil || !created {
+		t.Fatalf("first: created=%v err=%v", created, err)
+	}
+	second, created, err := s.UpsertRouteByFile(r)
+	if err != nil || created {
+		t.Fatalf("second: created=%v err=%v", created, err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("same file produced two routes: %d and %d", first.ID, second.ID)
+	}
+	if routes, _ := s.ListRoutes("genshin"); len(routes) != 1 {
+		t.Fatalf("routes=%d want 1", len(routes))
+	}
+
+	// empty file_path routes are exempt from the uniqueness rule
+	if _, err := s.CreateRoute(Route{GameID: "genshin", Name: "manual-1", FilePath: ""}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateRoute(Route{GameID: "genshin", Name: "manual-2", FilePath: ""}); err != nil {
+		t.Fatalf("second empty-path route should be allowed: %v", err)
+	}
+}
