@@ -86,7 +86,8 @@ type plannerImportResult struct {
 // (game_id,name), materials on (game_id,name), goals on (character,name),
 // requirements on (goal,material). Old ids from the file are used only to
 // resolve references between rows of the same file, then remapped to real ids.
-// Body size is already capped by decode()'s MaxBytesReader.
+// The whole import runs in one transaction: either every write commits or
+// nothing changes. Body size is already capped by decode()'s MaxBytesReader.
 func (s *Server) plannerImport(w http.ResponseWriter, r *http.Request) {
 	var req plannerImportRequest
 	if !decode(w, r, &req) {
@@ -115,21 +116,39 @@ func (s *Server) plannerImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.runPlannerImport(req)
+	res, err := s.store.ImportPlannerData(d.GameID, store.PlannerDataset{
+		Characters:   d.Characters,
+		Goals:        d.Goals,
+		Materials:    d.Materials,
+		Requirements: d.Requirements,
+	}, req.DryRun, req.Upsert)
 	if err != nil {
-		writeStoreErr(w, err)
+		// The store rolls back on error, so a failed import leaves no partial
+		// data behind; surface the row context to the operator.
+		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if !req.DryRun && (res.Created > 0 || res.Updated > 0) {
+	out := plannerImportResult{
+		DryRun:  req.DryRun,
+		GameID:  d.GameID,
+		Created: res.Created,
+		Updated: res.Updated,
+		Skipped: res.Skipped,
+		Errors:  []string{},
+	}
+	if !req.DryRun && (out.Created > 0 || out.Updated > 0) {
 		s.bus.Notify()
 	}
-	writeJSON(w, http.StatusOK, res)
+	writeJSON(w, http.StatusOK, out)
 }
 
 // validatePlannerImport checks referential integrity inside the file itself so
-// errors are reported before anything is written.
+// errors are reported before anything is written. It also rejects duplicate
+// file ids and duplicate dedupe keys, which would otherwise silently collapse
+// or duplicate rows.
 func validatePlannerImport(d *PlannerExport) string {
 	chIDs := map[int64]bool{}
+	chNames := map[string]bool{}
 	for i, c := range d.Characters {
 		if strings.TrimSpace(c.Name) == "" {
 			return fmt.Sprintf("characters[%d]: name is required", i)
@@ -138,10 +157,19 @@ func validatePlannerImport(d *PlannerExport) string {
 			return fmt.Sprintf("characters[%d] (%s): game_id %q does not match data.game_id %q", i, c.Name, c.GameID, d.GameID)
 		}
 		if c.ID != 0 {
+			if chIDs[c.ID] {
+				return fmt.Sprintf("characters[%d] (%s): duplicate file id %d", i, c.Name, c.ID)
+			}
 			chIDs[c.ID] = true
 		}
+		key := strings.ToLower(strings.TrimSpace(c.Name))
+		if chNames[key] {
+			return fmt.Sprintf("characters[%d]: duplicate name %q in file", i, c.Name)
+		}
+		chNames[key] = true
 	}
 	goalIDs := map[int64]bool{}
+	goalKeys := map[string]bool{}
 	for i, g := range d.Goals {
 		if strings.TrimSpace(g.Name) == "" {
 			return fmt.Sprintf("character_goals[%d]: name is required", i)
@@ -150,10 +178,19 @@ func validatePlannerImport(d *PlannerExport) string {
 			return fmt.Sprintf("character_goals[%d] (%s): character_id %d not found among characters in this file", i, g.Name, g.CharacterID)
 		}
 		if g.ID != 0 {
+			if goalIDs[g.ID] {
+				return fmt.Sprintf("character_goals[%d] (%s): duplicate file id %d", i, g.Name, g.ID)
+			}
 			goalIDs[g.ID] = true
 		}
+		key := fmt.Sprintf("%d/%s", g.CharacterID, strings.ToLower(strings.TrimSpace(g.Name)))
+		if goalKeys[key] {
+			return fmt.Sprintf("character_goals[%d]: duplicate name %q for the same character in file", i, g.Name)
+		}
+		goalKeys[key] = true
 	}
 	matIDs := map[int64]bool{}
+	matNames := map[string]bool{}
 	for i, m := range d.Materials {
 		if strings.TrimSpace(m.Name) == "" {
 			return fmt.Sprintf("material_items[%d]: name is required", i)
@@ -162,9 +199,18 @@ func validatePlannerImport(d *PlannerExport) string {
 			return fmt.Sprintf("material_items[%d] (%s): game_id %q does not match data.game_id %q", i, m.Name, m.GameID, d.GameID)
 		}
 		if m.ID != 0 {
+			if matIDs[m.ID] {
+				return fmt.Sprintf("material_items[%d] (%s): duplicate file id %d", i, m.Name, m.ID)
+			}
 			matIDs[m.ID] = true
 		}
+		key := strings.ToLower(strings.TrimSpace(m.Name))
+		if matNames[key] {
+			return fmt.Sprintf("material_items[%d]: duplicate name %q in file", i, m.Name)
+		}
+		matNames[key] = true
 	}
+	reqKeys := map[string]bool{}
 	for i, r := range d.Requirements {
 		if r.GoalID == 0 || !goalIDs[r.GoalID] {
 			return fmt.Sprintf("material_requirements[%d]: goal_id %d not found among character_goals in this file", i, r.GoalID)
@@ -172,235 +218,11 @@ func validatePlannerImport(d *PlannerExport) string {
 		if r.MaterialID == 0 || !matIDs[r.MaterialID] {
 			return fmt.Sprintf("material_requirements[%d]: material_id %d not found among material_items in this file", i, r.MaterialID)
 		}
+		key := fmt.Sprintf("%d/%d", r.GoalID, r.MaterialID)
+		if reqKeys[key] {
+			return fmt.Sprintf("material_requirements[%d]: duplicate goal_id %d + material_id %d in file", i, r.GoalID, r.MaterialID)
+		}
+		reqKeys[key] = true
 	}
 	return ""
-}
-
-// runPlannerImport performs the (possibly simulated) import. Dry-run uses the
-// same code path but skips every write; remapped ids for would-be-created rows
-// are simulated with negative placeholders so downstream references still
-// resolve.
-func (s *Server) runPlannerImport(req plannerImportRequest) (plannerImportResult, error) {
-	d := &req.Data
-	res := plannerImportResult{DryRun: req.DryRun, GameID: d.GameID, Errors: []string{}}
-
-	existingChars, err := s.store.ListCharacters(store.CharacterFilter{GameID: d.GameID})
-	if err != nil {
-		return res, err
-	}
-	charByName := map[string]store.Character{}
-	for _, c := range existingChars {
-		charByName[strings.ToLower(strings.TrimSpace(c.Name))] = c
-	}
-	existingMats, err := s.store.ListMaterialItems(store.MaterialFilter{GameID: d.GameID})
-	if err != nil {
-		return res, err
-	}
-	matByName := map[string]store.MaterialItem{}
-	for _, m := range existingMats {
-		matByName[strings.ToLower(strings.TrimSpace(m.Name))] = m
-	}
-
-	placeholder := int64(-1)
-	nextPlaceholder := func() int64 { placeholder--; return placeholder }
-
-	// characters: dedupe by (game_id, name)
-	charIDMap := map[int64]int64{} // old file id -> real (or placeholder) id
-	for _, c := range d.Characters {
-		key := strings.ToLower(strings.TrimSpace(c.Name))
-		oldID := c.ID
-		if ex, ok := charByName[key]; ok {
-			if req.Upsert {
-				upd := ex
-				upd.RoleType, upd.Element, upd.Weapon, upd.Rarity, upd.Tags, upd.Notes =
-					c.RoleType, c.Element, c.Weapon, c.Rarity, c.Tags, c.Notes
-				if !req.DryRun {
-					if _, err := s.store.UpdateCharacter(upd); err != nil {
-						res.Errors = append(res.Errors, fmt.Sprintf("character %q: %v", c.Name, err))
-						continue
-					}
-				}
-				res.Updated++
-			} else {
-				res.Skipped++
-			}
-			if oldID != 0 {
-				charIDMap[oldID] = ex.ID
-			}
-			continue
-		}
-		c.ID = 0
-		c.GameID = d.GameID
-		newID := nextPlaceholder()
-		if !req.DryRun {
-			created, err := s.store.CreateCharacter(c)
-			if err != nil {
-				res.Errors = append(res.Errors, fmt.Sprintf("character %q: %v", c.Name, err))
-				continue
-			}
-			newID = created.ID
-		}
-		res.Created++
-		if oldID != 0 {
-			charIDMap[oldID] = newID
-		}
-	}
-
-	// materials: dedupe by (game_id, name)
-	matIDMap := map[int64]int64{}
-	for _, m := range d.Materials {
-		key := strings.ToLower(strings.TrimSpace(m.Name))
-		oldID := m.ID
-		if ex, ok := matByName[key]; ok {
-			if req.Upsert {
-				upd := ex
-				upd.Category, upd.SourceHint, upd.RouteTypeHint, upd.Notes =
-					m.Category, m.SourceHint, m.RouteTypeHint, m.Notes
-				if !req.DryRun {
-					if _, err := s.store.UpdateMaterialItem(upd); err != nil {
-						res.Errors = append(res.Errors, fmt.Sprintf("material %q: %v", m.Name, err))
-						continue
-					}
-				}
-				res.Updated++
-			} else {
-				res.Skipped++
-			}
-			if oldID != 0 {
-				matIDMap[oldID] = ex.ID
-			}
-			continue
-		}
-		m.ID = 0
-		m.GameID = d.GameID
-		newID := nextPlaceholder()
-		if !req.DryRun {
-			created, err := s.store.CreateMaterialItem(m)
-			if err != nil {
-				res.Errors = append(res.Errors, fmt.Sprintf("material %q: %v", m.Name, err))
-				continue
-			}
-			newID = created.ID
-		}
-		res.Created++
-		if oldID != 0 {
-			matIDMap[oldID] = newID
-		}
-	}
-
-	// goals: dedupe by (character, name); remap character_id
-	goalIDMap := map[int64]int64{}
-	for _, g := range d.Goals {
-		oldID := g.ID
-		realChar, ok := charIDMap[g.CharacterID]
-		if !ok {
-			res.Errors = append(res.Errors, fmt.Sprintf("goal %q: character_id %d unresolved", g.Name, g.CharacterID))
-			continue
-		}
-		var existing *store.CharacterGoal
-		if realChar > 0 {
-			goals, err := s.store.ListCharacterGoals(store.CharacterGoalFilter{CharacterID: realChar})
-			if err != nil {
-				return res, err
-			}
-			for i := range goals {
-				if strings.EqualFold(strings.TrimSpace(goals[i].Name), strings.TrimSpace(g.Name)) {
-					existing = &goals[i]
-					break
-				}
-			}
-		}
-		if existing != nil {
-			if req.Upsert {
-				upd := *existing
-				upd.TargetLevel, upd.TargetSkill, upd.TargetEquipment = g.TargetLevel, g.TargetSkill, g.TargetEquipment
-				upd.Priority, upd.Notes = g.Priority, g.Notes
-				if g.Status != "" {
-					upd.Status = g.Status
-				}
-				if !req.DryRun {
-					if _, err := s.store.UpdateCharacterGoal(upd); err != nil {
-						res.Errors = append(res.Errors, fmt.Sprintf("goal %q: %v", g.Name, err))
-						continue
-					}
-				}
-				res.Updated++
-			} else {
-				res.Skipped++
-			}
-			if oldID != 0 {
-				goalIDMap[oldID] = existing.ID
-			}
-			continue
-		}
-		g.ID = 0
-		g.CharacterID = realChar
-		newID := nextPlaceholder()
-		if !req.DryRun {
-			created, err := s.store.CreateCharacterGoal(g)
-			if err != nil {
-				res.Errors = append(res.Errors, fmt.Sprintf("goal %q: %v", g.Name, err))
-				continue
-			}
-			newID = created.ID
-		}
-		res.Created++
-		if oldID != 0 {
-			goalIDMap[oldID] = newID
-		}
-	}
-
-	// requirements: dedupe by (goal, material); remap both ids
-	for i, r := range d.Requirements {
-		realGoal, ok := goalIDMap[r.GoalID]
-		if !ok {
-			res.Errors = append(res.Errors, fmt.Sprintf("requirement[%d]: goal_id %d unresolved", i, r.GoalID))
-			continue
-		}
-		realMat, ok := matIDMap[r.MaterialID]
-		if !ok {
-			res.Errors = append(res.Errors, fmt.Sprintf("requirement[%d]: material_id %d unresolved", i, r.MaterialID))
-			continue
-		}
-		var existing *store.MaterialRequirement
-		if realGoal > 0 {
-			reqs, err := s.store.ListMaterialRequirements(store.MaterialRequirementFilter{GoalID: realGoal})
-			if err != nil {
-				return res, err
-			}
-			for j := range reqs {
-				if reqs[j].MaterialID == realMat {
-					existing = &reqs[j]
-					break
-				}
-			}
-		}
-		if existing != nil {
-			if req.Upsert {
-				upd := *existing
-				upd.RequiredCount, upd.OwnedCount, upd.Priority, upd.Notes = r.RequiredCount, r.OwnedCount, r.Priority, r.Notes
-				if !req.DryRun {
-					if _, err := s.store.UpdateMaterialRequirement(upd); err != nil {
-						res.Errors = append(res.Errors, fmt.Sprintf("requirement[%d]: %v", i, err))
-						continue
-					}
-				}
-				res.Updated++
-			} else {
-				res.Skipped++
-			}
-			continue
-		}
-		r.ID = 0
-		r.GoalID = realGoal
-		r.MaterialID = realMat
-		if !req.DryRun {
-			if _, err := s.store.CreateMaterialRequirement(r); err != nil {
-				res.Errors = append(res.Errors, fmt.Sprintf("requirement[%d]: %v", i, err))
-				continue
-			}
-		}
-		res.Created++
-	}
-	return res, nil
 }

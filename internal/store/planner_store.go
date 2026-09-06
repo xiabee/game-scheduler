@@ -7,32 +7,51 @@ import (
 	"time"
 )
 
+// dbtx is the subset of *sql.DB and *sql.Tx used by the planner write helpers,
+// so planner imports can run every write inside one transaction.
+type dbtx interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // CharacterFilter narrows ListCharacters.
 type CharacterFilter struct {
 	GameID string
 }
 
 func (s *Store) CreateCharacter(c Character) (Character, error) {
+	if err := insertCharacter(s.db, &c); err != nil {
+		return Character{}, err
+	}
+	return c, nil
+}
+
+func insertCharacter(q dbtx, c *Character) error {
 	now := time.Now().UTC()
 	c.CreatedAt, c.UpdatedAt = now, now
 	tags, err := encodeTags(c.Tags)
 	if err != nil {
-		return Character{}, err
+		return err
 	}
-	res, err := s.db.Exec(`INSERT INTO characters (game_id,name,role_type,element,weapon,rarity,tags,notes,created_at,updated_at)
+	res, err := q.Exec(`INSERT INTO characters (game_id,name,role_type,element,weapon,rarity,tags,notes,created_at,updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?)`,
 		c.GameID, c.Name, c.RoleType, c.Element, c.Weapon, c.Rarity, tags, c.Notes, c.CreatedAt, c.UpdatedAt)
 	if err != nil {
-		return Character{}, err
+		return err
 	}
 	c.ID, _ = res.LastInsertId()
-	return c, nil
+	return nil
 }
 
 func (s *Store) GetCharacter(id int64) (Character, error) {
+	return getCharacter(s.db, id)
+}
+
+func getCharacter(q dbtx, id int64) (Character, error) {
 	var c Character
 	var tags string
-	err := s.db.QueryRow(`SELECT id,game_id,name,role_type,element,weapon,rarity,tags,notes,created_at,updated_at FROM characters WHERE id=?`, id).
+	err := q.QueryRow(`SELECT id,game_id,name,role_type,element,weapon,rarity,tags,notes,created_at,updated_at FROM characters WHERE id=?`, id).
 		Scan(&c.ID, &c.GameID, &c.Name, &c.RoleType, &c.Element, &c.Weapon, &c.Rarity, &tags, &c.Notes, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Character{}, ErrNotFound
@@ -45,20 +64,27 @@ func (s *Store) GetCharacter(id int64) (Character, error) {
 }
 
 func (s *Store) UpdateCharacter(c Character) (Character, error) {
+	if err := updateCharacter(s.db, &c); err != nil {
+		return Character{}, err
+	}
+	return s.GetCharacter(c.ID)
+}
+
+func updateCharacter(q dbtx, c *Character) error {
 	c.UpdatedAt = time.Now().UTC()
 	tags, err := encodeTags(c.Tags)
 	if err != nil {
-		return Character{}, err
+		return err
 	}
-	res, err := s.db.Exec(`UPDATE characters SET game_id=?,name=?,role_type=?,element=?,weapon=?,rarity=?,tags=?,notes=?,updated_at=? WHERE id=?`,
+	res, err := q.Exec(`UPDATE characters SET game_id=?,name=?,role_type=?,element=?,weapon=?,rarity=?,tags=?,notes=?,updated_at=? WHERE id=?`,
 		c.GameID, c.Name, c.RoleType, c.Element, c.Weapon, c.Rarity, tags, c.Notes, c.UpdatedAt, c.ID)
 	if err != nil {
-		return Character{}, err
+		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return Character{}, ErrNotFound
+		return ErrNotFound
 	}
-	return s.GetCharacter(c.ID)
+	return nil
 }
 
 func (s *Store) DeleteCharacter(id int64) error {
@@ -107,24 +133,35 @@ type CharacterGoalFilter struct {
 }
 
 func (s *Store) CreateCharacterGoal(g CharacterGoal) (CharacterGoal, error) {
+	if err := insertCharacterGoal(s.db, &g); err != nil {
+		return CharacterGoal{}, err
+	}
+	return g, nil
+}
+
+func insertCharacterGoal(q dbtx, g *CharacterGoal) error {
 	now := time.Now().UTC()
 	g.CreatedAt, g.UpdatedAt = now, now
 	if g.Status == "" {
 		g.Status = "open"
 	}
-	res, err := s.db.Exec(`INSERT INTO character_goals (character_id,name,target_level,target_skill,target_equipment,priority,status,notes,created_at,updated_at)
+	res, err := q.Exec(`INSERT INTO character_goals (character_id,name,target_level,target_skill,target_equipment,priority,status,notes,created_at,updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?)`,
 		g.CharacterID, g.Name, g.TargetLevel, g.TargetSkill, g.TargetEquipment, g.Priority, g.Status, g.Notes, g.CreatedAt, g.UpdatedAt)
 	if err != nil {
-		return CharacterGoal{}, err
+		return err
 	}
 	g.ID, _ = res.LastInsertId()
-	return g, nil
+	return nil
 }
 
 func (s *Store) GetCharacterGoal(id int64) (CharacterGoal, error) {
+	return getCharacterGoal(s.db, id)
+}
+
+func getCharacterGoal(q dbtx, id int64) (CharacterGoal, error) {
 	var g CharacterGoal
-	err := s.db.QueryRow(`SELECT id,character_id,name,target_level,target_skill,target_equipment,priority,status,notes,created_at,updated_at FROM character_goals WHERE id=?`, id).
+	err := q.QueryRow(`SELECT id,character_id,name,target_level,target_skill,target_equipment,priority,status,notes,created_at,updated_at FROM character_goals WHERE id=?`, id).
 		Scan(&g.ID, &g.CharacterID, &g.Name, &g.TargetLevel, &g.TargetSkill, &g.TargetEquipment, &g.Priority, &g.Status, &g.Notes, &g.CreatedAt, &g.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CharacterGoal{}, ErrNotFound
@@ -133,19 +170,26 @@ func (s *Store) GetCharacterGoal(id int64) (CharacterGoal, error) {
 }
 
 func (s *Store) UpdateCharacterGoal(g CharacterGoal) (CharacterGoal, error) {
+	if err := updateCharacterGoal(s.db, &g); err != nil {
+		return CharacterGoal{}, err
+	}
+	return s.GetCharacterGoal(g.ID)
+}
+
+func updateCharacterGoal(q dbtx, g *CharacterGoal) error {
 	g.UpdatedAt = time.Now().UTC()
 	if g.Status == "" {
 		g.Status = "open"
 	}
-	res, err := s.db.Exec(`UPDATE character_goals SET character_id=?,name=?,target_level=?,target_skill=?,target_equipment=?,priority=?,status=?,notes=?,updated_at=? WHERE id=?`,
+	res, err := q.Exec(`UPDATE character_goals SET character_id=?,name=?,target_level=?,target_skill=?,target_equipment=?,priority=?,status=?,notes=?,updated_at=? WHERE id=?`,
 		g.CharacterID, g.Name, g.TargetLevel, g.TargetSkill, g.TargetEquipment, g.Priority, g.Status, g.Notes, g.UpdatedAt, g.ID)
 	if err != nil {
-		return CharacterGoal{}, err
+		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return CharacterGoal{}, ErrNotFound
+		return ErrNotFound
 	}
-	return s.GetCharacterGoal(g.ID)
+	return nil
 }
 
 func (s *Store) DeleteCharacterGoal(id int64) error {
@@ -202,21 +246,32 @@ type MaterialFilter struct {
 }
 
 func (s *Store) CreateMaterialItem(m MaterialItem) (MaterialItem, error) {
-	now := time.Now().UTC()
-	m.CreatedAt, m.UpdatedAt = now, now
-	res, err := s.db.Exec(`INSERT INTO material_items (game_id,name,category,source_hint,route_type_hint,notes,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?)`,
-		m.GameID, m.Name, m.Category, m.SourceHint, m.RouteTypeHint, m.Notes, m.CreatedAt, m.UpdatedAt)
-	if err != nil {
+	if err := insertMaterialItem(s.db, &m); err != nil {
 		return MaterialItem{}, err
 	}
-	m.ID, _ = res.LastInsertId()
 	return m, nil
 }
 
+func insertMaterialItem(q dbtx, m *MaterialItem) error {
+	now := time.Now().UTC()
+	m.CreatedAt, m.UpdatedAt = now, now
+	res, err := q.Exec(`INSERT INTO material_items (game_id,name,category,source_hint,route_type_hint,notes,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?)`,
+		m.GameID, m.Name, m.Category, m.SourceHint, m.RouteTypeHint, m.Notes, m.CreatedAt, m.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	m.ID, _ = res.LastInsertId()
+	return nil
+}
+
 func (s *Store) GetMaterialItem(id int64) (MaterialItem, error) {
+	return getMaterialItem(s.db, id)
+}
+
+func getMaterialItem(q dbtx, id int64) (MaterialItem, error) {
 	var m MaterialItem
-	err := s.db.QueryRow(`SELECT id,game_id,name,category,source_hint,route_type_hint,notes,created_at,updated_at FROM material_items WHERE id=?`, id).
+	err := q.QueryRow(`SELECT id,game_id,name,category,source_hint,route_type_hint,notes,created_at,updated_at FROM material_items WHERE id=?`, id).
 		Scan(&m.ID, &m.GameID, &m.Name, &m.Category, &m.SourceHint, &m.RouteTypeHint, &m.Notes, &m.CreatedAt, &m.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return MaterialItem{}, ErrNotFound
@@ -225,16 +280,23 @@ func (s *Store) GetMaterialItem(id int64) (MaterialItem, error) {
 }
 
 func (s *Store) UpdateMaterialItem(m MaterialItem) (MaterialItem, error) {
-	m.UpdatedAt = time.Now().UTC()
-	res, err := s.db.Exec(`UPDATE material_items SET game_id=?,name=?,category=?,source_hint=?,route_type_hint=?,notes=?,updated_at=? WHERE id=?`,
-		m.GameID, m.Name, m.Category, m.SourceHint, m.RouteTypeHint, m.Notes, m.UpdatedAt, m.ID)
-	if err != nil {
+	if err := updateMaterialItem(s.db, &m); err != nil {
 		return MaterialItem{}, err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return MaterialItem{}, ErrNotFound
-	}
 	return s.GetMaterialItem(m.ID)
+}
+
+func updateMaterialItem(q dbtx, m *MaterialItem) error {
+	m.UpdatedAt = time.Now().UTC()
+	res, err := q.Exec(`UPDATE material_items SET game_id=?,name=?,category=?,source_hint=?,route_type_hint=?,notes=?,updated_at=? WHERE id=?`,
+		m.GameID, m.Name, m.Category, m.SourceHint, m.RouteTypeHint, m.Notes, m.UpdatedAt, m.ID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeleteMaterialItem(id int64) error {
@@ -282,16 +344,23 @@ type MaterialRequirementFilter struct {
 }
 
 func (s *Store) CreateMaterialRequirement(r MaterialRequirement) (MaterialRequirement, error) {
+	if err := insertMaterialRequirement(s.db, &r); err != nil {
+		return MaterialRequirement{}, err
+	}
+	return r, nil
+}
+
+func insertMaterialRequirement(q dbtx, r *MaterialRequirement) error {
 	now := time.Now().UTC()
 	r.CreatedAt, r.UpdatedAt = now, now
-	res, err := s.db.Exec(`INSERT INTO material_requirements (goal_id,material_id,required_count,owned_count,priority,notes,created_at,updated_at)
+	res, err := q.Exec(`INSERT INTO material_requirements (goal_id,material_id,required_count,owned_count,priority,notes,created_at,updated_at)
 		VALUES (?,?,?,?,?,?,?,?)`,
 		r.GoalID, r.MaterialID, r.RequiredCount, r.OwnedCount, r.Priority, r.Notes, r.CreatedAt, r.UpdatedAt)
 	if err != nil {
-		return MaterialRequirement{}, err
+		return err
 	}
 	r.ID, _ = res.LastInsertId()
-	return r, nil
+	return nil
 }
 
 func (s *Store) GetMaterialRequirement(id int64) (MaterialRequirement, error) {
@@ -305,16 +374,23 @@ func (s *Store) GetMaterialRequirement(id int64) (MaterialRequirement, error) {
 }
 
 func (s *Store) UpdateMaterialRequirement(r MaterialRequirement) (MaterialRequirement, error) {
-	r.UpdatedAt = time.Now().UTC()
-	res, err := s.db.Exec(`UPDATE material_requirements SET goal_id=?,material_id=?,required_count=?,owned_count=?,priority=?,notes=?,updated_at=? WHERE id=?`,
-		r.GoalID, r.MaterialID, r.RequiredCount, r.OwnedCount, r.Priority, r.Notes, r.UpdatedAt, r.ID)
-	if err != nil {
+	if err := updateMaterialRequirement(s.db, &r); err != nil {
 		return MaterialRequirement{}, err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return MaterialRequirement{}, ErrNotFound
-	}
 	return s.GetMaterialRequirement(r.ID)
+}
+
+func updateMaterialRequirement(q dbtx, r *MaterialRequirement) error {
+	r.UpdatedAt = time.Now().UTC()
+	res, err := q.Exec(`UPDATE material_requirements SET goal_id=?,material_id=?,required_count=?,owned_count=?,priority=?,notes=?,updated_at=? WHERE id=?`,
+		r.GoalID, r.MaterialID, r.RequiredCount, r.OwnedCount, r.Priority, r.Notes, r.UpdatedAt, r.ID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeleteMaterialRequirement(id int64) error {

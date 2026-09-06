@@ -451,6 +451,10 @@ create tasks/plans or mark recommendations completed/dismissed.
     **always remapped** to fresh database ids — never trusted;
   - `data.game_id` must reference an existing game; broken references, missing
     names, malformed JSON and unknown versions return a descriptive 400;
+  - **atomicity**: the whole import runs in one SQLite transaction — any failed
+    row write rolls back everything, so the database is never left half-
+    imported. Duplicate ids or duplicate names (per dedupe key) inside one
+    file are rejected up front;
   - the body shares the global 1 MiB request cap.
 
 ```powershell

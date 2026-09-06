@@ -596,6 +596,11 @@ func TestPlannerExportImport(t *testing.T) {
 		{"character missing name", `{"data":{"version":1,"game_id":"genshin","characters":[{"id":1}]}}`},
 		{"future version", `{"data":{"version":99,"game_id":"genshin"}}`},
 		{"malformed json", `{"data":{`},
+		{"duplicate character name in file", `{"data":{"version":1,"game_id":"genshin","characters":[{"id":1,"name":"a"},{"id":2,"name":" A"}]}}`},
+		{"duplicate character file id", `{"data":{"version":1,"game_id":"genshin","characters":[{"id":1,"name":"a"},{"id":1,"name":"b"}]}}`},
+		{"duplicate material name in file", `{"data":{"version":1,"game_id":"genshin","characters":[{"id":1,"name":"a"}],"material_items":[{"id":5,"name":"m"},{"id":6,"name":"m"}]}}`},
+		{"duplicate goal for character in file", `{"data":{"version":1,"game_id":"genshin","characters":[{"id":1,"name":"a"}],"character_goals":[{"id":2,"character_id":1,"name":"g"},{"id":3,"character_id":1,"name":"G"}]}}`},
+		{"duplicate requirement in file", `{"data":{"version":1,"game_id":"genshin","characters":[{"id":1,"name":"a"}],"character_goals":[{"id":2,"character_id":1,"name":"g"}],"material_items":[{"id":5,"name":"m"}],"material_requirements":[{"goal_id":2,"material_id":5},{"goal_id":2,"material_id":5}]}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
