@@ -944,10 +944,9 @@ func TestReferentialValidationReturns400(t *testing.T) {
 
 // TestHelperProcess is re-executed as a child process by
 // TestDeleteTaskCancelsRunningExecution: a cross-platform controllable child.
+// The child is selected with -test.run=TestHelperProcess and told to sleep via
+// the args after "--" (task params cannot pass env vars, so no sentinel env).
 func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GS_WANT_HELPER") != "1" {
-		return
-	}
 	args := os.Args
 	for i, a := range args {
 		if a == "--" {
@@ -955,11 +954,12 @@ func TestHelperProcess(t *testing.T) {
 			break
 		}
 	}
-	if len(args) > 0 && args[0] == "sleep" {
+	if len(args) >= 2 && args[0] == "sleep" {
 		d, _ := time.ParseDuration(args[1])
 		time.Sleep(d)
+		os.Exit(0)
 	}
-	os.Exit(0)
+	// In the parent test binary there are no "--" args: not a helper run.
 }
 
 // Deleting a task whose run is still active must return promptly (the service
@@ -985,19 +985,21 @@ func TestDeleteTaskCancelsRunningExecution(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// wait until the execution actually starts
-	var status string
+	// wait until the execution actually starts; finishing early means the
+	// helper child exited instead of sleeping, which is itself a failure
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		e, err := st.GetExecution(1)
 		if err == nil {
-			status = e.Status
-			if status == store.StatusRunning {
+			if e.Status == store.StatusRunning {
 				break
+			}
+			if e.Status != store.StatusPending {
+				t.Fatalf("child finished before delete (status=%s) - helper did not sleep", e.Status)
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("execution never started (status=%s)", status)
+			t.Fatalf("execution never started")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
