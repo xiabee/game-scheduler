@@ -675,7 +675,7 @@ async function renderRecommendations(){
   for(const rec of plannerState.recommendations){
     const routeCell = rec.route_id
       ? esc(await routeName(rec.route_id))
-      : `<span class="meta">手动建议</span> <button type="button" onclick="openAttachRoute(${rec.id},'${esc(rec.game_id||'')}')">绑定路线</button>`;
+      : `<span class="meta">手动建议</span> <button type="button" onclick="openAttachRoute(${rec.id},'${encodeURIComponent(rec.game_id||'')}')">绑定路线</button>`;
     rows.push(`<tr>
       <td><strong>${esc(rec.title)}</strong><div class="hint">${esc(rec.reason)}</div></td>
       <td>${routeCell}</td>
@@ -803,6 +803,7 @@ async function plannerImport(dryOnly){
 
 // ---- planner: attach an existing route to a recommendation ----
 function openAttachRoute(recId, gameId){
+  gameId = decodeURIComponent(gameId||""); // encoded at the call site so legacy ids cannot break the JS string
   openModal("为推荐 #"+recId+" 绑定路线", `<div class="form">
     <div class="three">
       <label>关键词<input id="ar-q" placeholder="路线名 / 路径 / 标签 / 来源"></label>
