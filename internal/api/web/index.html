@@ -138,6 +138,7 @@
 <header>
   <h1>🎮 Game Scheduler</h1>
   <span class="badge">控制看板</span>
+  <span class="badge adapter" id="ver" title="服务端版本">—</span>
   <span class="spacer"></span>
   <span id="err"></span>
   <span class="meta" id="updated">—</span>
@@ -221,6 +222,7 @@ function gameCard(g){
   const tasks = (g.task_list||[]).map(t=>`
       <div class="task"><span class="tn">${esc(t.name)} <span class="tt">${esc(t.type)}</span></span>
       <span style="display:flex;align-items:center;gap:6px"><button onclick="runTask(${t.id},this)">运行</button>
+      <button onclick="preflightTask(${t.id})" title="运行前检查：可执行文件 / 工作目录 / 入口">检查</button>
       <span class="icon-e" title="编辑任务" onclick="editTask(${t.id})">✎</span>
       <span class="icon-x" title="删除任务" onclick="delTask(${t.id},'${esc(t.name)}')">✕</span></span></div>`).join("")
       || `<div class="meta">未配置任务</div>`;
@@ -330,6 +332,27 @@ async function load(){
     const r=await api("/api/dashboard"); if(!r.ok) throw new Error("HTTP "+r.status);
     render(await r.json());
   }catch(e){ if(String(e).indexOf("unauthorized")<0) $("#err").textContent="加载失败: "+e; }
+  ensureMeta().then(m=>{ $("#ver").textContent=m.version||"dev"; }).catch(()=>{});
+}
+
+// task preflight: show what the task would run and whether the environment is ready
+async function preflightTask(id){
+  openModal("任务 #"+id+" 预检", '<div class="empty">加载中…</div>');
+  try{
+    const r=await api("/api/tasks/"+id+"/preflight"); if(!r.ok) throw new Error("HTTP "+r.status);
+    const pf=await r.json();
+    const rows=(pf.checks||[]).map(c=>`<tr><td>${esc(c.key)}</td><td>${esc(c.kind)}</td><td style="max-width:320px;word-break:break-all">${esc(c.path)}</td><td>${c.exists?'<span class="pill ok">✓</span>':'<span class="pill err">✗</span>'}</td></tr>`).join("");
+    const missing=(pf.missing||[]).map(m=>`<li>${esc(m)}</li>`).join("");
+    openModal(`任务预检 #${id} — ${pf.ready?'✅ 就绪':'❌ 未就绪'}`, `<div class="form">
+      <div class="row"><span class="k">任务</span><span class="val">${esc(pf.task_name)}</span></div>
+      <div class="row"><span class="k">游戏 / 适配器</span><span class="val">${esc(pf.game_id)} / ${esc(pf.adapter)}</span></div>
+      <div class="row"><span class="k">命令</span><span class="val" style="word-break:break-all">${esc(pf.command||'—')}</span></div>
+      ${pf.validation_error?`<div class="row"><span class="k">校验错误</span><span class="val" style="color:var(--err);word-break:break-all">${esc(pf.validation_error)}</span></div>`:""}
+      ${pf.build_error?`<div class="row"><span class="k">构建错误</span><span class="val" style="color:var(--err);word-break:break-all">${esc(pf.build_error)}</span></div>`:""}
+      ${(pf.checks||[]).length?`<table><thead><tr><th>检查项</th><th>类型</th><th>路径</th><th>存在</th></tr></thead><tbody>${rows}</tbody></table>`:""}
+      ${missing?`<div class="hint" style="color:var(--err)">缺失项：<ul style="margin:4px 0 0 18px">${missing}</ul></div>`:'<div class="hint">所有前置检查通过，可以运行。</div>'}
+    </div>`);
+  }catch(e){ if(String(e).indexOf("unauthorized")<0) $("#err").textContent="预检失败: "+String(e); }
 }
 
 // ---- actions ----
