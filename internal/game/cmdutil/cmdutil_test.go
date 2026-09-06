@@ -80,10 +80,13 @@ func TestTimeout(t *testing.T) {
 // The exe-folder default: no working_dir configured + absolute executable
 // path => working dir becomes the executable's folder (BetterGI 553 fix).
 func TestBaseSpecDefaultsWorkingDirToExeFolder(t *testing.T) {
-	g := store.Game{ToolPath: "C:/tools/BetterGI.exe"}
+	// t.TempDir() is absolute on every OS, so filepath.IsAbs holds on both
+	// Windows and Linux (the CI matrix).
+	exe := filepath.Join(t.TempDir(), "BetterGI.exe")
+	g := store.Game{ToolPath: exe}
 	spec := BaseSpec(g, store.Task{}, map[string]any{}, []string{"--x"})
-	if spec.Dir != `C:\tools` && spec.Dir != "C:/tools" {
-		t.Fatalf("dir=%q want the exe folder", spec.Dir)
+	if want := filepath.Dir(exe); spec.Dir != want {
+		t.Fatalf("dir=%q want %q", spec.Dir, want)
 	}
 	// explicit overrides still win
 	spec = BaseSpec(g, store.Task{TimeoutSec: 5}, map[string]any{"working_dir": "D:/wd", "exe": "E:/e.exe"}, nil)
