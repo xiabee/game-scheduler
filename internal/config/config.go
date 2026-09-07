@@ -5,6 +5,7 @@ package config
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -111,31 +112,47 @@ func Load(path string) (Config, error) {
 	if v := os.Getenv("GS_MAX_CONCURRENT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.MaxConcurrent = n
+		} else {
+			slog.Warn("ignoring invalid env override", "var", "GS_MAX_CONCURRENT", "value", v, "err", err)
 		}
 	}
 	if v := os.Getenv("GS_AUTH_TOKEN"); v != "" {
 		cfg.AuthToken = v
 	}
 	if v := os.Getenv("GS_MONITOR_ENABLED"); v != "" {
-		cfg.MonitorEnabled, _ = strconv.ParseBool(v)
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.MonitorEnabled = b
+		} else {
+			slog.Warn("ignoring invalid env override", "var", "GS_MONITOR_ENABLED", "value", v, "err", err)
+		}
 	}
 	if v := os.Getenv("GS_CPU_THRESHOLD"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			cfg.CPUThreshold = f
+		} else {
+			slog.Warn("ignoring invalid env override", "var", "GS_CPU_THRESHOLD", "value", v, "err", err)
 		}
 	}
 	if v := os.Getenv("GS_MEM_THRESHOLD"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			cfg.MemThreshold = f
+		} else {
+			slog.Warn("ignoring invalid env override", "var", "GS_MEM_THRESHOLD", "value", v, "err", err)
 		}
 	}
 	if v := os.Getenv("GS_MONITOR_INTERVAL_SEC"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.MonitorIntervalSec = n
+		} else {
+			slog.Warn("ignoring invalid env override", "var", "GS_MONITOR_INTERVAL_SEC", "value", v, "err", err)
 		}
 	}
 	if v := os.Getenv("GS_OVERLOAD_POLICY"); v != "" {
-		cfg.OverloadPolicy = v
+		if v == "alert" || v == "pause" {
+			cfg.OverloadPolicy = v
+		} else {
+			slog.Warn("ignoring invalid env override", "var", "GS_OVERLOAD_POLICY", "value", v, "want", "alert|pause")
+		}
 	}
 	if v := os.Getenv("GS_NOTIFY_CMD"); v != "" {
 		cfg.NotifyCmd = v
@@ -143,6 +160,8 @@ func Load(path string) (Config, error) {
 	if v := os.Getenv("GS_EXECUTION_RETENTION_DAYS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.ExecutionRetentionDays = n
+		} else {
+			slog.Warn("ignoring invalid env override", "var", "GS_EXECUTION_RETENTION_DAYS", "value", v, "err", err)
 		}
 	}
 	if cfg.MaxConcurrent < 1 {

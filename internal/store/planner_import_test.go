@@ -270,9 +270,9 @@ func TestImportPlannerUpsertPartialFileKeepsStoredFields(t *testing.T) {
 
 	// Same names, but every optional field is empty/zero.
 	partial := PlannerDataset{
-		Characters:  []Character{{ID: 7, Name: "香菱"}},
-		Goals:       []CharacterGoal{{ID: 70, CharacterID: 7, Name: "突破90"}},
-		Materials:   []MaterialItem{{ID: 700, Name: "绝云椒椒"}},
+		Characters:   []Character{{ID: 7, Name: "香菱"}},
+		Goals:        []CharacterGoal{{ID: 70, CharacterID: 7, Name: "突破90"}},
+		Materials:    []MaterialItem{{ID: 700, Name: "绝云椒椒"}},
 		Requirements: []MaterialRequirement{{GoalID: 70, MaterialID: 700, RequiredCount: 10}},
 	}
 	res, err := s.ImportPlannerData("genshin", partial, false, true)

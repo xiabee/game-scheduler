@@ -206,6 +206,11 @@ func keyFromURL(u string) string {
 
 var emTag = regexp.MustCompile(`</?em[^>]*>`)
 
+// bvidPattern is the official Bilibili video id format. BVIDs surface in the
+// dashboard's onclick JS strings, so anything outside this charset is dropped
+// and cannot smuggle quotes through.
+var bvidPattern = regexp.MustCompile(`^BV[0-9A-Za-z]{10}$`)
+
 // searchResponse mirrors the fields we need from the search API.
 type searchResponse struct {
 	Code    int    `json:"code"`
@@ -237,7 +242,7 @@ func parseSearch(body []byte, limit int) ([]Video, error) {
 	}
 	out := make([]Video, 0, limit)
 	for _, r := range sr.Data.Result {
-		if r.BVID == "" {
+		if !bvidPattern.MatchString(r.BVID) {
 			continue
 		}
 		out = append(out, Video{

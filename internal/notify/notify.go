@@ -64,6 +64,9 @@ func (n *Notifier) shellRun(line string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 	defer cancel()
 	cmd := shellcmd.CommandContext(ctx, line)
+	// If the timeout kills the platform shell while a grandchild still holds
+	// the pipes, abandon them instead of waiting on the orphan.
+	cmd.WaitDelay = 2 * time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -77,12 +80,14 @@ func (n *Notifier) shellRun(line string) error {
 
 // sanitize removes characters that could let a value break out of the shell
 // command line. Alerts are short human-readable strings, so dropping shell
-// metacharacters is harmless.
+// metacharacters is harmless. The single quote is stripped too: the Windows
+// build runs cmd.exe where it is inert, but the sh -c fallback treats it as a
+// quoting metacharacter.
 func sanitize(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch r {
-		case '"', '`', '$', '&', '|', '<', '>', '^', '%', '\\', ';', '\r', '\n', '(', ')', '{', '}', '!':
+		case '"', '\'', '`', '$', '&', '|', '<', '>', '^', '%', '\\', ';', '\r', '\n', '(', ')', '{', '}', '!':
 			b.WriteRune(' ')
 		default:
 			b.WriteRune(r)

@@ -57,3 +57,14 @@ func TestSanitize(t *testing.T) {
 		t.Errorf("unexpected: %q", out)
 	}
 }
+
+func TestSanitizeStripsSingleQuotes(t *testing.T) {
+	// sh -c builds treat ' as a quoting metacharacter; it must not survive.
+	out := sanitize("it's a `test` $(x)")
+	if strings.ContainsRune(out, '\'') {
+		t.Errorf("single quote survived sanitize: %q", out)
+	}
+	if strings.Contains(out, "`") || strings.Contains(out, "$") {
+		t.Errorf("metacharacters survived sanitize: %q", out)
+	}
+}

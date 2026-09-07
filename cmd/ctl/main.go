@@ -50,6 +50,7 @@ func main() {
 	status := flag.String("status", "", "filter by status (execs list)")
 	limit := flag.String("limit", "", "limit (execs list)")
 	paths := flag.String("paths", "", "scan paths for 'discover', separated by ; or ,")
+	depth := flag.Int("depth", 0, "max scan depth for 'discover' (default 4)")
 	query := flag.String("q", "", "search keyword for 'guides'")
 	routeType := flag.String("type", "", "route type filter (routes search/list)")
 	tag := flag.String("tag", "", "route tag filter (routes search/list)")
@@ -130,9 +131,15 @@ func main() {
 		}
 	case "discover":
 		body := []byte("{}")
+		opts := map[string]any{}
 		if *paths != "" {
-			parts := strings.FieldsFunc(*paths, func(r rune) bool { return r == ';' || r == ',' })
-			b, _ := json.Marshal(map[string][]string{"paths": parts})
+			opts["paths"] = strings.FieldsFunc(*paths, func(r rune) bool { return r == ';' || r == ',' })
+		}
+		if *depth > 0 {
+			opts["max_depth"] = *depth
+		}
+		if len(opts) > 0 {
+			b, _ := json.Marshal(opts)
 			body = b
 		}
 		err = c.do("POST", "/api/discover", body)
