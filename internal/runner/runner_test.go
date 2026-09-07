@@ -2,7 +2,10 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -37,6 +40,24 @@ func TestHelperProcess(t *testing.T) {
 	case "sleep":
 		d, _ := time.ParseDuration(args[1])
 		time.Sleep(d)
+	case "spawn_exit", "spawn_hold":
+		// Spawn a long-lived grandchild, report its PID on stdout, then either
+		// exit right away (leaving the grandchild orphaned: the dead-root case
+		// for killProcessTree) or hold so the tree stays alive.
+		var gc *exec.Cmd
+		if runtime.GOOS == "windows" {
+			gc = exec.Command("cmd", "/C", "ping", "-n", "15", "127.0.0.1")
+		} else {
+			gc = exec.Command("sh", "-c", "sleep 15")
+		}
+		if err := gc.Start(); err != nil {
+			os.Exit(3)
+		}
+		fmt.Fprintf(os.Stdout, "GCPID=%d\n", gc.Process.Pid)
+		if mode == "spawn_exit" {
+			os.Exit(0)
+		}
+		time.Sleep(60 * time.Second)
 	}
 	os.Exit(0)
 }
