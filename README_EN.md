@@ -186,6 +186,12 @@ must present it; the dashboard page (`/`) and `/healthz` stay open.
 It is still recommended to terminate TLS and authenticate at a reverse proxy for
 anything beyond a trusted LAN — the token is a single shared secret.
 
+Without a token the server rejects **cross-origin** non-GET requests that carry
+an `Origin` header (403), closing the last gap against a rogue web page firing
+simple POSTs at localhost. With a token configured the auth layer already
+rejects those, and reverse-proxy setups are unaffected. All responses carry
+`X-Content-Type-Options` / `X-Frame-Options` / a baseline CSP.
+
 ## Dashboard (控制看板)
 
 Open the server's address in a browser — **http://127.0.0.1:8080/** — for a
@@ -291,14 +297,14 @@ tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> 
 routes  list/search [-game id] [-q text] [-type t] [-tag tag] | add | update <id> | delete <id> | scan [-game id] | create-task <id>
 plans   list | get <id> | add | update <id> | delete <id>
 execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
-discover [-paths "F:/Games;D:/Tools"]    scan disk for tool executables
+discover [-paths "F:/Games;D:/Tools"] [-depth N]    scan disk for tools (depth default 4)
 guides   -q "<keyword>" [-game id]        Bilibili guide search + local routes
 characters list [-game id] | get <id> | add | update <id> | delete <id>
 goals    list [-character id] [-game id] [-status s] | get <id> | add | update <id> | delete <id>
 materials list [-game id] [-category c] | get <id> | add | update <id> | delete <id>
 requirements list [-goal id] | get <id> | add | update <id> | delete <id>
 planner  recommend | recommendations [-goal id] [-game id] [-status s] [-limit n]
-         | create-task <id> | create-plan <id> | dismiss <id> | complete <id>
+         | create-task <id> | create-plan <id> | dismiss <id> | complete <id> | delete <id>
          | export -game <id> | import -data '<json>'|@file.json|-
 health
 ```
@@ -311,8 +317,8 @@ health
 | Method & path | Purpose |
 |---|---|
 | `GET /healthz` | liveness + registered adapters |
-| `GET/POST /api/games`, `GET/PUT/DELETE /api/games/{id}` | games CRUD |
-| `GET/POST /api/tasks`, `GET/PUT/DELETE /api/tasks/{id}` | tasks CRUD (`?game_id=`) |
+| `GET/POST /api/games`, `GET/PUT/DELETE /api/games/{id}` | games CRUD (POST defaults `enabled` to `true`) |
+| `GET/POST /api/tasks`, `GET/PUT/DELETE /api/tasks/{id}` | tasks CRUD (`?game_id=`); `type` is validated against the adapter on create/update, `enabled` defaults to `true` |
 | `POST /api/tasks/{id}/run` | **manual trigger** (returns the pending execution) |
 | `GET /api/tasks/{id}/preflight` | build the command & check the tool exists, **without running** |
 | `GET /api/dashboard` | aggregated board snapshot (per-game health, plans, recent execs) |
@@ -471,7 +477,13 @@ Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -C
 > The route must belong to the same game as the recommendation, otherwise a
 > 400 is returned. In the dashboard's character planner, unmatched
 > recommendations show a "绑定路线" (attach route) button with keyword/type
-> search; once attached, create-task/create-plan work as usual.
+> search; once attached, create-task/create-plan work as usual. Completed or
+> dismissed recommendations cannot be reused — attach-route / create-task /
+> create-plan answer 400 so a dismissed suggestion cannot be resurrected by
+> accident; remove unwanted ones with `DELETE /api/planner/recommendations/{id}`
+> (the dashboard's 删除 button or `ctl planner delete <id>`). Material
+> requirements are validated to stay within one game (goal's character game vs
+> material game), otherwise 400.
 
 CLI examples:
 
@@ -505,18 +517,23 @@ create tasks/plans or mark recommendations completed/dismissed.
   `{"dry_run":bool,"upsert":bool,"data":<export>}`:
   - `dry_run: true` validates and counts (`created/updated/skipped`) **without
     writing**;
-  - `upsert: true` updates existing rows, `false` skips them;
+  - `upsert: true` updates existing rows, `false` skips them. On update an
+    **empty field keeps the stored value** — a partial file never wipes data;
+    clear a field through the CRUD API instead;
   - dedupe keys: characters & materials on `(game_id,name)`, goals on
     `(character,name)`, requirements on `(goal,material)`;
   - ids inside the file are only used to wire its own rows together and are
     **always remapped** to fresh database ids — never trusted;
   - `data.game_id` must reference an existing game; broken references, missing
-    names, malformed JSON and unknown versions return a descriptive 400;
+    names, malformed JSON and unknown versions return a descriptive 400 that
+    lists **all** problems in one pass (up to 10 shown);
   - **atomicity**: the whole import runs in one SQLite transaction — any failed
     row write rolls back everything, so the database is never left half-
     imported. Duplicate ids or duplicate names (per dedupe key) inside one
     file are rejected up front;
-  - the body shares the global 1 MiB request cap.
+  - the body shares the global 1 MiB request cap; over the cap you get a 413
+    with a clear message.
+  - returns `{"dry_run":bool,"game_id":"...","created":N,"updated":N,"skipped":N}`.
 
 ```powershell
 ctl -server $S -game genshin planner export > planner_backup.json

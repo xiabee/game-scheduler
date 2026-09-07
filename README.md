@@ -197,6 +197,8 @@ go build -ldflags "-X github.com/xiabee/game-scheduler/internal/version.Version=
 - **浏览器**:看板首次遇到 401 会弹框输入令牌并存入 `localStorage`;🔑 按钮可随时设置/修改。实时流通过 `?token=` 鉴权(浏览器的 EventSource 无法发自定义头)。
 
 > 令牌只是**单一共享密钥**,适合可信局域网。对外网/多用户,建议在前面再挂一个做 TLS + 真实认证的反向代理。
+>
+> 无令牌模式下,服务器会拒绝带 `Origin` 头的**跨源**写请求(非 GET 返回 403),防止恶意网页在你不注意时向 localhost 发起简单 POST(浏览器同源策略之外的最后一道闸);带令牌时该检查交由鉴权层,反向代理场景不受影响。所有响应都带 `X-Content-Type-Options` / `X-Frame-Options` / CSP 基线头。
 
 ---
 
@@ -362,7 +364,7 @@ Invoke-RestMethod "$S/api/planner/recommendations/1/create-task" -Method POST
 Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -ContentType application/json -Body '{"cron_expr":"0 9 * * *"}'
 ```
 
-> 💡 **手动绑定路线**:推荐没有匹配到路线时(`recommendation_type=manual`),可以用 `POST /api/planner/recommendations/{id}/attach-route` + `{"route_id":N}` 手动绑定已有路线;路线的游戏必须与推荐一致,否则返回 400。看板「培养计划 → 推荐」中对手动建议直接点「绑定路线」即可按关键词 / 类型搜索并绑定,绑定后即可创建任务 / 计划。
+> 💡 **手动绑定路线**:推荐没有匹配到路线时(`recommendation_type=manual`),可以用 `POST /api/planner/recommendations/{id}/attach-route` + `{"route_id":N}` 手动绑定已有路线;路线的游戏必须与推荐一致,否则返回 400。看板「培养计划 → 推荐」中对手动建议直接点「绑定路线」即可按关键词 / 类型搜索并绑定,绑定后即可创建任务 / 计划。已完成(`completed`)或已忽略(`dismissed`)的推荐**不可复用**——attach-route / create-task / create-plan 会返回 400,防误触复活;不需要的推荐可用 `DELETE /api/planner/recommendations/{id}`(看板「删除」按钮或 `ctl planner delete <id>`)彻底移除。材料需求会校验**同游戏**:目标所属角色与材料必须属于同一游戏,否则 400。
 
 ### CLI 示例
 
@@ -393,13 +395,13 @@ ctl -server $S -data '{"cron_expr":"0 9 * * *"}' planner create-plan <推荐id>
 - **导出** `GET /api/planner/export?game_id=<id>`:返回该游戏的 `characters` / `character_goals` / `material_items` / `material_requirements`(**默认不含** `farming_recommendations`,避免导入过期推荐;推荐重新生成即可)。
 - **导入** `POST /api/planner/import`:请求体为 `{"dry_run":bool,"upsert":bool,"data":<导出结构>}`。
   - `dry_run: true`:**只校验、只统计,不写库**——先看 created/updated/skipped 再实导。
-  - `upsert: true`:已存在的同名数据按导入内容**更新**;`false` 则**跳过**(计入 skipped)。
+  - `upsert: true`:已存在的同名数据按导入内容**更新**;`false` 则**跳过**(计入 skipped)。更新时**空字段 = 保留原值**——半空的文件不会抹掉库里已有数据;要清空字段请走对应 CRUD 接口。
   - 去重键:角色与材料按 `(game_id, name)`,目标按 `(角色, name)`,需求按 `(目标, 材料)`。
   - 文件里的旧 `id` **只用于文件内部连线**(目标→角色、需求→材料),导入时一律**重映射为新 id**,绝不直接写入。
-  - `data.game_id` 必须是已存在的游戏;跨表引用、缺名字、版本过高、JSON 损坏都会返回带原因的 400。
+  - `data.game_id` 必须是已存在的游戏;跨表引用、缺名字、版本过高、JSON 损坏都会返回带原因的 400,且校验**一次列出全部问题**(最多列 10 条),不用改一行试一次。
   - **原子性**:整个导入在单个 SQLite 事务中执行,任何一行写入失败都会整体回滚——要么完整成功,要么数据库分毫不变,不会留下"导入了一半"的数据。文件内部出现**重复 id 或重复名称**(按去重键)也会被直接拒绝。
-  - 请求体沿用全局 1 MiB 上限,防止超大 JSON 占用内存。
-  - 返回:`{"created":N,"updated":N,"skipped":N,"errors":[...]}`。
+  - 请求体沿用全局 1 MiB 上限,防止超大 JSON 占用内存;超限返回 413 与明确提示。
+  - 返回:`{"dry_run":bool,"game_id":"...","created":N,"updated":N,"skipped":N}`。
 
 ```powershell
 # 导出备份
@@ -522,14 +524,14 @@ tasks   list [-game id] | get <id> | add | update <id> | delete <id> | run <id> 
 routes  list/search [-game id] [-q text] [-type t] [-tag tag] | add | update <id> | delete <id> | scan [-game id] | create-task <id>
 plans   list | get <id> | add | update <id> | delete <id>
 execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
-discover [-paths "F:/Games;D:/Tools"]    扫描磁盘查找工具
+discover [-paths "F:/Games;D:/Tools"] [-depth N]    扫描磁盘查找工具(默认深度 4)
 guides   -q "<关键词>" [-game id]         B站攻略搜索 + 本地路线匹配
 characters list [-game id] | get <id> | add | update <id> | delete <id>
 goals    list [-character id] [-game id] [-status s] | get <id> | add | update <id> | delete <id>
 materials list [-game id] [-category c] | get <id> | add | update <id> | delete <id>
 requirements list [-goal id] | get <id> | add | update <id> | delete <id>
 planner  recommend | recommendations [-goal id] [-game id] [-status s] [-limit n]
-         | create-task <id> | create-plan <id> | dismiss <id> | complete <id>
+         | create-task <id> | create-plan <id> | dismiss <id> | complete <id> | delete <id>
          | export -game <id> | import -data '<json>'|@file.json|-
 health
 ```
@@ -543,8 +545,8 @@ health
 | 方法与路径 | 用途 |
 |---|---|
 | `GET /healthz` | 存活探针 + 已注册适配器 |
-| `GET/POST /api/games`、`GET/PUT/DELETE /api/games/{id}` | 游戏增删改查 |
-| `GET/POST /api/tasks`、`GET/PUT/DELETE /api/tasks/{id}` | 任务增删改查(`?game_id=`) |
+| `GET/POST /api/games`、`GET/PUT/DELETE /api/games/{id}` | 游戏增删改查(POST 缺省 `enabled` 视为 `true`) |
+| `GET/POST /api/tasks`、`GET/PUT/DELETE /api/tasks/{id}` | 任务增删改查(`?game_id=`);创建/更新时校验 `type` 是否被适配器支持,缺省 `enabled` 视为 `true` |
 | `POST /api/tasks/{id}/run` | **手动触发**(返回 pending 执行) |
 | `GET /api/tasks/{id}/preflight` | 拼命令并检查可执行文件/目录/Python 入口,返回 `checks` 与 `missing`,**不运行** |
 | `GET/POST /api/routes`、`PUT/DELETE /api/routes/{id}` | 路线资产(`?game_id=&q=&type=&tag=`) |

@@ -229,6 +229,8 @@ func main() {
 			err = c.do("POST", "/api/planner/recommendations/"+id+"/create-plan", body)
 		case "dismiss", "complete":
 			err = c.do("POST", "/api/planner/recommendations/"+id+"/"+action, nil)
+		case "delete":
+			err = c.do("DELETE", "/api/planner/recommendations/"+id, nil)
 		case "export":
 			if *gameID == "" {
 				err = fmt.Errorf("planner export requires -game <id>")
