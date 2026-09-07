@@ -1467,3 +1467,100 @@ func TestDecodeBodyTooLargeIs413(t *testing.T) {
 		t.Fatalf("status=%d want 413", resp.StatusCode)
 	}
 }
+
+// Every connected dashboard gets the broadcast snapshot: the hub builds once
+// per change and fans the bytes out to all clients.
+func TestStreamHubBroadcastsToAllClients(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	bus := events.New()
+	reg := game.NewRegistry(genshin.New())
+	cfg := config.Config{DataDir: t.TempDir(), MaxConcurrent: 1}
+	svc := task.NewService(st, reg, cfg, bus, nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		svc.Shutdown(ctx)
+	})
+	s := New(st, svc, scheduler.New(st, svc, nil), reg, bus, nil, cfg, nil)
+
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	connect := func() (*http.Response, string) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/stream", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line, err := bufio.NewReader(resp.Body).ReadString('\n')
+		if err != nil || !strings.HasPrefix(line, "data: ") {
+			t.Fatalf("initial event %q err=%v", line, err)
+		}
+		return resp, line
+	}
+	a, firstA := connect()
+	defer a.Body.Close()
+	b, _ := connect()
+	defer b.Body.Close()
+
+	// generated_at stamps make raw bytes differ; compare the payload.
+	games := func(ev string) int {
+		var d struct {
+			Totals struct {
+				Games int `json:"games"`
+			} `json:"totals"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(ev, "data: ")), &d); err != nil {
+			t.Fatalf("snapshot %q: %v", ev, err)
+		}
+		return d.Totals.Games
+	}
+	if n := games(firstA); n != 0 {
+		t.Fatalf("initial snapshot already has %d games", n)
+	}
+
+	// One change signal must reach both clients.
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "g", Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	bus.Notify()
+
+	readLine := func(resp *http.Response) string {
+		t.Helper()
+		ch := make(chan string, 1)
+		go func() {
+			sc := bufio.NewScanner(resp.Body)
+			for sc.Scan() {
+				if strings.HasPrefix(sc.Text(), "data: ") {
+					ch <- sc.Text()
+					return
+				}
+			}
+			ch <- ""
+		}()
+		select {
+		case v := <-ch:
+			return v
+		case <-time.After(5 * time.Second):
+			t.Fatal("no broadcast within 5s")
+			return ""
+		}
+	}
+	lineA := readLine(a)
+	lineB := readLine(b)
+	if games(lineA) != 1 {
+		t.Fatal("client A did not receive the updated snapshot")
+	}
+	if games(lineB) != 1 {
+		t.Fatal("client B did not receive the updated snapshot")
+	}
+}

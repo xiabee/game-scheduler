@@ -45,6 +45,9 @@ type Server struct {
 
 	streamsClosing   sync.Once
 	streamsClosingCh chan struct{} // closed by ShutdownStreams
+
+	hub      *streamHub // shared SSE snapshot broadcaster
+	hubStart sync.Once
 }
 
 // SetGuideSearcher overrides the Bilibili search client (tests inject a stub).
@@ -72,6 +75,7 @@ func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *gam
 		screenshotDir:    cfg.ScreenshotDir(),
 		authToken:        cfg.AuthToken,
 		streamsClosingCh: make(chan struct{}),
+		hub:              newStreamHub(),
 	}
 }
 
