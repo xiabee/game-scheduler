@@ -42,6 +42,29 @@ func (s *Store) ImportPlannerData(gameID string, d PlannerDataset, dryRun, upser
 	placeholder := int64(-1)
 	nextPlaceholder := func() int64 { placeholder--; return placeholder }
 
+	// In upsert mode an empty incoming field keeps the stored value: a partial
+	// file must not wipe data it simply did not carry (export/import roundtrips
+	// always carry every field, so clearing a field is not expressible via
+	// import — delete it through the CRUD API instead).
+	overrideStr := func(cur, in string) string {
+		if in == "" {
+			return cur
+		}
+		return in
+	}
+	overrideInt := func(cur, in int) int {
+		if in == 0 {
+			return cur
+		}
+		return in
+	}
+	overrideTags := func(cur, in []string) []string {
+		if len(in) == 0 {
+			return cur
+		}
+		return in
+	}
+
 	// characters: dedupe by (game_id, name)
 	chByName := map[string]int64{}
 	if err := scanIDName(tx, `SELECT id,name FROM characters WHERE game_id=?`, gameID, norm, chByName); err != nil {
@@ -57,8 +80,12 @@ func (s *Store) ImportPlannerData(gameID string, d PlannerDataset, dryRun, upser
 				if err != nil {
 					return res, fmt.Errorf("character %q: %w", c.Name, err)
 				}
-				full.RoleType, full.Element, full.Weapon, full.Rarity, full.Tags, full.Notes =
-					c.RoleType, c.Element, c.Weapon, c.Rarity, c.Tags, c.Notes
+				full.RoleType = overrideStr(full.RoleType, c.RoleType)
+				full.Element = overrideStr(full.Element, c.Element)
+				full.Weapon = overrideStr(full.Weapon, c.Weapon)
+				full.Rarity = overrideInt(full.Rarity, c.Rarity)
+				full.Tags = overrideTags(full.Tags, c.Tags)
+				full.Notes = overrideStr(full.Notes, c.Notes)
 				if !dryRun {
 					if err := updateCharacter(tx, &full); err != nil {
 						return res, fmt.Errorf("character %q: %w", c.Name, err)
@@ -102,8 +129,10 @@ func (s *Store) ImportPlannerData(gameID string, d PlannerDataset, dryRun, upser
 				if err != nil {
 					return res, fmt.Errorf("material %q: %w", m.Name, err)
 				}
-				full.Category, full.SourceHint, full.RouteTypeHint, full.Notes =
-					m.Category, m.SourceHint, m.RouteTypeHint, m.Notes
+				full.Category = overrideStr(full.Category, m.Category)
+				full.SourceHint = overrideStr(full.SourceHint, m.SourceHint)
+				full.RouteTypeHint = overrideStr(full.RouteTypeHint, m.RouteTypeHint)
+				full.Notes = overrideStr(full.Notes, m.Notes)
 				if !dryRun {
 					if err := updateMaterialItem(tx, &full); err != nil {
 						return res, fmt.Errorf("material %q: %w", m.Name, err)
@@ -155,11 +184,12 @@ func (s *Store) ImportPlannerData(gameID string, d PlannerDataset, dryRun, upser
 				if err != nil {
 					return res, fmt.Errorf("goal %q: %w", g.Name, err)
 				}
-				full.TargetLevel, full.TargetSkill, full.TargetEquipment = g.TargetLevel, g.TargetSkill, g.TargetEquipment
-				full.Priority, full.Notes = g.Priority, g.Notes
-				if g.Status != "" {
-					full.Status = g.Status
-				}
+				full.TargetLevel = overrideStr(full.TargetLevel, g.TargetLevel)
+				full.TargetSkill = overrideStr(full.TargetSkill, g.TargetSkill)
+				full.TargetEquipment = overrideStr(full.TargetEquipment, g.TargetEquipment)
+				full.Priority = overrideInt(full.Priority, g.Priority)
+				full.Notes = overrideStr(full.Notes, g.Notes)
+				full.Status = overrideStr(full.Status, g.Status)
 				if !dryRun {
 					if err := updateCharacterGoal(tx, &full); err != nil {
 						return res, fmt.Errorf("goal %q: %w", g.Name, err)

@@ -1126,3 +1126,167 @@ func TestStreamReleasesOnShutdownStreams(t *testing.T) {
 		t.Fatal("SSE connection still open 3s after ShutdownStreams")
 	}
 }
+
+// Completed/dismissed recommendations cannot be resurrected: attach-route,
+// create-task and create-plan answer 400, DELETE removes the row outright.
+func TestRecommendationTerminalStateGuards(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "g", Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	c := srv.Client()
+	request := func(method, path, body string, out any) int {
+		t.Helper()
+		var rd io.Reader
+		if body != "" {
+			rd = strings.NewReader(body)
+		}
+		req, err := http.NewRequest(method, srv.URL+path, rd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			_ = json.NewDecoder(resp.Body).Decode(out)
+		}
+		return resp.StatusCode
+	}
+
+	ch, err := st.CreateCharacter(store.Character{GameID: "genshin", Name: "香菱"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal, err := st.CreateCharacterGoal(store.CharacterGoal{CharacterID: ch.ID, Name: "突破90"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mat, err := st.CreateMaterialItem(store.MaterialItem{GameID: "genshin", Name: "绝云椒椒", Category: "collect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateMaterialRequirement(store.MaterialRequirement{GoalID: goal.ID, MaterialID: mat.ID, RequiredCount: 10, OwnedCount: 2, Priority: 8}); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := st.CreateRoute(store.Route{GameID: "genshin", Adapter: "genshin", RouteType: "collect", Name: "路线", FilePath: "D:/routes/a.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var recs []store.FarmingRecommendation
+	if code := request("POST", "/api/planner/recommend", `{"goal_id":`+strconv.FormatInt(goal.ID, 10)+`}`, &recs); code != http.StatusCreated || len(recs) != 1 {
+		t.Fatalf("recommend status=%d recs=%+v", code, recs)
+	}
+	path := "/api/planner/recommendations/" + strconv.FormatInt(recs[0].ID, 10)
+
+	// An open recommendation still goes through the full happy path.
+	var rec store.FarmingRecommendation
+	if code := request("POST", path+"/attach-route", `{"route_id":`+strconv.FormatInt(rt.ID, 10)+`}`, &rec); code != http.StatusOK {
+		t.Fatalf("attach on open rec: status=%d", code)
+	}
+	var plan store.Plan
+	if code := request("POST", path+"/create-plan", `{}`, &plan); code != http.StatusCreated {
+		t.Fatalf("create-plan on open rec: status=%d", code)
+	}
+	if rec, _ = st.GetFarmingRecommendation(recs[0].ID); rec.Status != "planned" {
+		t.Fatalf("status after create-plan = %q, want planned", rec.Status)
+	}
+
+	// After complete(): the reuse endpoints all refuse.
+	if _, err := st.SetFarmingRecommendationStatus(recs[0].ID, "completed"); err != nil {
+		t.Fatal(err)
+	}
+	if code := request("POST", path+"/attach-route", `{"route_id":`+strconv.FormatInt(rt.ID, 10)+`}`, nil); code != http.StatusBadRequest {
+		t.Fatalf("attach on completed rec: status=%d", code)
+	}
+	if code := request("POST", path+"/create-task", `{}`, nil); code != http.StatusBadRequest {
+		t.Fatalf("create-task on completed rec: status=%d", code)
+	}
+	if code := request("POST", path+"/create-plan", `{}`, nil); code != http.StatusBadRequest {
+		t.Fatalf("create-plan on completed rec: status=%d", code)
+	}
+
+	// DELETE removes the recommendation.
+	req2, _ := http.NewRequest(http.MethodDelete, srv.URL+path, nil)
+	resp, err := c.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status=%d", resp.StatusCode)
+	}
+	if code := request("DELETE", path, "", nil); code != http.StatusNotFound {
+		t.Fatalf("delete already-deleted rec: status=%d", code)
+	}
+
+	// Dismissed recs are protected too.
+	rec2, err := st.CreateFarmingRecommendation(store.FarmingRecommendation{
+		GoalID: goal.ID, GameID: "genshin", MaterialID: mat.ID,
+		RecommendationType: "manual", Title: "t", Priority: 1, Status: "dismissed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path2 := "/api/planner/recommendations/" + strconv.FormatInt(rec2.ID, 10)
+	if code := request("POST", path2+"/create-plan", `{}`, nil); code != http.StatusBadRequest {
+		t.Fatalf("create-plan on dismissed rec: status=%d", code)
+	}
+}
+
+// A requirement pairing a goal with a material of another game is rejected:
+// it would later match routes of the wrong game.
+func TestMaterialRequirementCrossGameRejected(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	for _, gid := range []string{"genshin", "hsr"} {
+		if _, err := st.CreateGame(store.Game{ID: gid, Name: gid, Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := srv.Client()
+	post := func(path, body string, out any) int {
+		t.Helper()
+		resp, err := c.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			_ = json.NewDecoder(resp.Body).Decode(out)
+		}
+		return resp.StatusCode
+	}
+
+	chG, err := st.CreateCharacter(store.Character{GameID: "genshin", Name: "香菱"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalG, err := st.CreateCharacterGoal(store.CharacterGoal{CharacterID: chG.ID, Name: "突破90"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	matG, err := st.CreateMaterialItem(store.MaterialItem{GameID: "genshin", Name: "绝云椒椒"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	matH, err := st.CreateMaterialItem(store.MaterialItem{GameID: "hsr", Name: "燃烧刃"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var e struct {
+		Error string `json:"error"`
+	}
+	body := `{"goal_id":` + strconv.FormatInt(goalG.ID, 10) + `,"material_id":` + strconv.FormatInt(matH.ID, 10) + `,"required_count":1}`
+	if code := post("/api/material-requirements", body, &e); code != http.StatusBadRequest || e.Error == "" {
+		t.Fatalf("cross-game requirement: status=%d err=%q", code, e.Error)
+	}
+	bodyOK := `{"goal_id":` + strconv.FormatInt(goalG.ID, 10) + `,"material_id":` + strconv.FormatInt(matG.ID, 10) + `,"required_count":1}`
+	var out store.MaterialRequirement
+	if code := post("/api/material-requirements", bodyOK, &out); code != http.StatusCreated {
+		t.Fatalf("same-game requirement: status=%d", code)
+	}
+}

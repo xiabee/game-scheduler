@@ -13,6 +13,15 @@ import (
 
 var errRecommendationNoRoute = errors.New("recommendation has no route_id; create or attach a route before creating a task")
 
+// errRecommendationClosed guards the actions that would resurrect an
+// explicitly completed or dismissed suggestion.
+var errRecommendationClosed = errors.New("recommendation is completed or dismissed and cannot be reused")
+
+// recOpen reports whether a recommendation can still be acted on.
+func recOpen(rec store.FarmingRecommendation) bool {
+	return rec.Status != "completed" && rec.Status != "dismissed"
+}
+
 // attachRouteRequest is the POST .../attach-route body.
 type attachRouteRequest struct {
 	RouteID int64 `json:"route_id"`
@@ -37,6 +46,10 @@ func (s *Server) attachRecommendationRoute(w http.ResponseWriter, r *http.Reques
 	rec, err := s.store.GetFarmingRecommendation(id)
 	if err != nil {
 		writeStoreErr(w, err)
+		return
+	}
+	if !recOpen(rec) {
+		writeErr(w, http.StatusBadRequest, errRecommendationClosed)
 		return
 	}
 	rt, err := s.store.GetRoute(req.RouteID)
@@ -234,9 +247,12 @@ func (s *Server) listMaterialRequirements(w http.ResponseWriter, r *http.Request
 	respond(w, out, err)
 }
 
-// requireRequirementRefs validates both halves of a material requirement.
+// requireRequirementRefs validates both halves of a material requirement,
+// including that they belong to the same game: a requirement pairing a goal
+// with a material of another game would later match routes of the wrong game.
 func (s *Server) requireRequirementRefs(w http.ResponseWriter, goalID, materialID int64) bool {
-	if _, err := s.store.GetCharacterGoal(goalID); err != nil {
+	goal, err := s.store.GetCharacterGoal(goalID)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeErr(w, http.StatusBadRequest, fmt.Errorf("goal %d does not exist", goalID))
 			return false
@@ -244,12 +260,22 @@ func (s *Server) requireRequirementRefs(w http.ResponseWriter, goalID, materialI
 		writeStoreErr(w, err)
 		return false
 	}
-	if _, err := s.store.GetMaterialItem(materialID); err != nil {
+	mat, err := s.store.GetMaterialItem(materialID)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeErr(w, http.StatusBadRequest, fmt.Errorf("material %d does not exist", materialID))
 			return false
 		}
 		writeStoreErr(w, err)
+		return false
+	}
+	char, err := s.store.GetCharacter(goal.CharacterID)
+	if err != nil {
+		writeStoreErr(w, err)
+		return false
+	}
+	if mat.GameID != char.GameID {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("material %q belongs to game %q, but the goal's character is in game %q", mat.Name, mat.GameID, char.GameID))
 		return false
 	}
 	return true
@@ -327,7 +353,7 @@ func (s *Server) createTaskFromRecommendation(w http.ResponseWriter, r *http.Req
 	}
 	task, err := s.ensureRecommendationTask(id)
 	if err != nil {
-		if errors.Is(err, errRecommendationNoRoute) {
+		if errors.Is(err, errRecommendationNoRoute) || errors.Is(err, errRecommendationClosed) {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
@@ -361,6 +387,10 @@ func (s *Server) createPlanFromRecommendation(w http.ResponseWriter, r *http.Req
 	rec, err := s.store.GetFarmingRecommendation(id)
 	if err != nil {
 		writeStoreErr(w, err)
+		return
+	}
+	if !recOpen(rec) {
+		writeErr(w, http.StatusBadRequest, errRecommendationClosed)
 		return
 	}
 	var taskID int64
@@ -407,6 +437,14 @@ func (s *Server) dismissRecommendation(w http.ResponseWriter, r *http.Request) {
 	respond(w, out, s.changed(err))
 }
 
+func (s *Server) deleteRecommendation(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	respondNoContent(w, s.changed(s.store.DeleteFarmingRecommendation(id)))
+}
+
 func (s *Server) completeRecommendation(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -420,6 +458,9 @@ func (s *Server) ensureRecommendationTask(id int64) (store.Task, error) {
 	rec, err := s.store.GetFarmingRecommendation(id)
 	if err != nil {
 		return store.Task{}, err
+	}
+	if !recOpen(rec) {
+		return store.Task{}, errRecommendationClosed
 	}
 	if rec.TaskID != nil {
 		return s.store.GetTask(*rec.TaskID)

@@ -243,3 +243,71 @@ func TestExportPlannerDataSnapshot(t *testing.T) {
 		t.Fatalf("unknown game returned rows: %+v", d2)
 	}
 }
+
+// A partial file in upsert mode must not wipe stored fields the file did not
+// carry; a full-file roundtrip still overwrites everything.
+func TestImportPlannerUpsertPartialFileKeepsStoredFields(t *testing.T) {
+	s := newTestStore(t)
+	mkGame(t, s, "genshin")
+
+	full := PlannerDataset{
+		Characters: []Character{
+			{ID: 7, Name: "香菱", RoleType: "dps", Element: "pyro", Weapon: "polearm", Rarity: 4, Tags: []string{"national"}, Notes: "old note"},
+		},
+		Goals: []CharacterGoal{
+			{ID: 70, CharacterID: 7, Name: "突破90", TargetLevel: "90", Priority: 5, Status: "in_progress", Notes: "goal note"},
+		},
+		Materials: []MaterialItem{
+			{ID: 700, Name: "绝云椒椒", Category: "collect", SourceHint: "绝云间", RouteTypeHint: "collect", Notes: "mat note"},
+		},
+		Requirements: []MaterialRequirement{
+			{GoalID: 70, MaterialID: 700, RequiredCount: 10, OwnedCount: 2, Priority: 3, Notes: "req note"},
+		},
+	}
+	if _, err := s.ImportPlannerData("genshin", full, false, false); err != nil {
+		t.Fatalf("full import: %v", err)
+	}
+
+	// Same names, but every optional field is empty/zero.
+	partial := PlannerDataset{
+		Characters:  []Character{{ID: 7, Name: "香菱"}},
+		Goals:       []CharacterGoal{{ID: 70, CharacterID: 7, Name: "突破90"}},
+		Materials:   []MaterialItem{{ID: 700, Name: "绝云椒椒"}},
+		Requirements: []MaterialRequirement{{GoalID: 70, MaterialID: 700, RequiredCount: 10}},
+	}
+	res, err := s.ImportPlannerData("genshin", partial, false, true)
+	if err != nil {
+		t.Fatalf("partial upsert: %v", err)
+	}
+	if res.Updated != 4 || res.Created != 0 {
+		t.Fatalf("partial upsert counts=%+v", res)
+	}
+
+	chars, _ := s.ListCharacters(CharacterFilter{GameID: "genshin"})
+	c := chars[0]
+	if c.RoleType != "dps" || c.Element != "pyro" || c.Weapon != "polearm" || c.Rarity != 4 || len(c.Tags) != 1 || c.Notes != "old note" {
+		t.Fatalf("character fields wiped by partial upsert: %+v", c)
+	}
+	goals, _ := s.ListCharacterGoals(CharacterGoalFilter{GameID: "genshin"})
+	g := goals[0]
+	if g.TargetLevel != "90" || g.Priority != 5 || g.Status != "in_progress" || g.Notes != "goal note" {
+		t.Fatalf("goal fields wiped by partial upsert: %+v", g)
+	}
+	mats, _ := s.ListMaterialItems(MaterialFilter{GameID: "genshin"})
+	m := mats[0]
+	if m.Category != "collect" || m.SourceHint != "绝云间" || m.RouteTypeHint != "collect" || m.Notes != "mat note" {
+		t.Fatalf("material fields wiped by partial upsert: %+v", m)
+	}
+
+	// A full file still overwrites every field.
+	full.Characters[0].Notes = "new note"
+	full.Goals[0].Status = "done"
+	if _, err := s.ImportPlannerData("genshin", full, false, true); err != nil {
+		t.Fatalf("full upsert: %v", err)
+	}
+	chars, _ = s.ListCharacters(CharacterFilter{GameID: "genshin"})
+	goals, _ = s.ListCharacterGoals(CharacterGoalFilter{GameID: "genshin"})
+	if chars[0].Notes != "new note" || goals[0].Status != "done" {
+		t.Fatalf("full upsert did not overwrite: %+v %+v", chars[0], goals[0])
+	}
+}
