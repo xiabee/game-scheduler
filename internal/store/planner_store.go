@@ -584,3 +584,41 @@ func (s *Store) SetFarmingRecommendationTask(id, taskID int64) (FarmingRecommend
 	}
 	return s.UpdateFarmingRecommendation(rec)
 }
+
+// CreateTaskForRecommendation creates the recommendation's task and links it
+// back in one transaction. Doing the two writes separately could leave an
+// orphan task behind when the link failed, and retrying would then create a
+// duplicate task. A nil recID row is ErrNotFound (and creates nothing).
+func (s *Store) CreateTaskForRecommendation(recID int64, t Task) (Task, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Task{}, err
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
+
+	now := time.Now().UTC()
+	t.CreatedAt, t.UpdatedAt = now, now
+	res, err := tx.Exec(`INSERT INTO tasks (game_id,route_id,name,type,params,max_retries,retry_delay_sec,timeout_sec,enabled,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		t.GameID, t.RouteID, t.Name, t.Type, t.Params, t.MaxRetries, t.RetryDelaySec, t.TimeoutSec, b2i(t.Enabled), t.CreatedAt, t.UpdatedAt)
+	if err != nil {
+		return Task{}, err
+	}
+	t.ID, _ = res.LastInsertId()
+
+	// Same status semantics as SetFarmingRecommendationTask: only a still-open
+	// recommendation moves to task_created.
+	res2, err := tx.Exec(`UPDATE farming_recommendations
+		SET task_id=?, status=CASE WHEN status='open' THEN 'task_created' ELSE status END, updated_at=?
+		WHERE id=?`, t.ID, now, recID)
+	if err != nil {
+		return Task{}, err
+	}
+	if n, _ := res2.RowsAffected(); n == 0 {
+		return Task{}, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return Task{}, err
+	}
+	return t, nil
+}

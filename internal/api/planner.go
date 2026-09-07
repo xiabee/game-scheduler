@@ -483,11 +483,10 @@ func (s *Server) ensureRecommendationTask(id int64) (store.Task, error) {
 	if rec.Title != "" {
 		task.Name = rec.Title
 	}
-	out, err := s.store.CreateTask(task)
+	// One transaction: the task row and the recommendation link appear
+	// together, so a failure cannot orphan a task (and a retry duplicate it).
+	out, err := s.store.CreateTaskForRecommendation(id, task)
 	if err != nil {
-		return store.Task{}, err
-	}
-	if _, err := s.store.SetFarmingRecommendationTask(id, out.ID); err != nil {
 		return store.Task{}, err
 	}
 	s.bus.Notify()

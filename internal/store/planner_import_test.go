@@ -311,3 +311,51 @@ func TestImportPlannerUpsertPartialFileKeepsStoredFields(t *testing.T) {
 		t.Fatalf("full upsert did not overwrite: %+v %+v", chars[0], goals[0])
 	}
 }
+
+// CreateTaskForRecommendation links atomically: when the recommendation row is
+// gone the task is not created either (no orphans, no retry duplicates).
+func TestCreateTaskForRecommendationRollsBackWithoutRec(t *testing.T) {
+	s := newTestStore(t)
+	mkGame(t, s, "genshin")
+
+	if _, err := s.CreateTaskForRecommendation(424242, Task{
+		GameID: "genshin", Name: "t", Type: "raw", Params: "{}", Enabled: true,
+	}); err != ErrNotFound {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+	if tasks, _ := s.ListTasks("genshin"); len(tasks) != 0 {
+		t.Fatalf("orphan task left behind: %+v", tasks)
+	}
+}
+
+func TestCreateTaskForRecommendationLinksAndFlipsStatus(t *testing.T) {
+	s := newTestStore(t)
+	mkGame(t, s, "genshin")
+	ch, _ := s.CreateCharacter(Character{GameID: "genshin", Name: "香菱"})
+	goal, _ := s.CreateCharacterGoal(CharacterGoal{CharacterID: ch.ID, Name: "突破90"})
+	mat, _ := s.CreateMaterialItem(MaterialItem{GameID: "genshin", Name: "绝云椒椒"})
+	rec, err := s.CreateFarmingRecommendation(FarmingRecommendation{
+		GoalID: goal.ID, GameID: "genshin", MaterialID: mat.ID,
+		RecommendationType: "manual", Title: "测试", Priority: 1, Status: "open",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tk, err := s.CreateTaskForRecommendation(rec.ID, Task{
+		GameID: "genshin", Name: "t", Type: "raw", Params: "{}", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFarmingRecommendation(rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TaskID == nil || *got.TaskID != tk.ID {
+		t.Fatalf("rec not linked to task: %+v (task %d)", got, tk.ID)
+	}
+	if got.Status != "task_created" {
+		t.Fatalf("status=%q, want task_created", got.Status)
+	}
+}
