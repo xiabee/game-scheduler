@@ -96,6 +96,12 @@ func Run(ctx context.Context, spec Spec) Result {
 	err := cmd.Start()
 	if err == nil {
 		res.Started = true
+		// From this point the child (and its whole future tree) lives in a
+		// kill-on-close job, so a scheduler hard-exit cannot orphan it. The
+		// close after Wait also finishes off anything still dying.
+		if release, jerr := assignJob(cmd.Process); jerr == nil {
+			defer release()
+		}
 		err = cmd.Wait()
 	}
 	res.EndTime = time.Now()

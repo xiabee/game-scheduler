@@ -6,9 +6,48 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 
 	"github.com/shirou/gopsutil/v4/process"
 )
+
+// assignJob puts the (just started) child process into a fresh kill-on-close
+// job and returns the release function, which Run must call once the child is
+// done: on a natural exit the job is empty and the close is a no-op; if
+// processes are still dying the KILL_ON_JOB_CLOSE flag finishes them. One job
+// per child (concurrent runs each get their own). It is best-effort: on
+// failure the runner still works, only the hard-exit safety net is missing.
+// Nested jobs are supported since Windows 8, so assigning a child whose
+// parent is already in a job is fine.
+func assignJob(p *os.Process) (release func(), err error) {
+	h, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return func() {}, err
+	}
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+		},
+	}
+	if _, err := windows.SetInformationJobObject(h, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+		_ = windows.CloseHandle(h)
+		return func() {}, err
+	}
+	ph, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(p.Pid))
+	if err != nil {
+		_ = windows.CloseHandle(h)
+		return func() {}, err
+	}
+	defer windows.CloseHandle(ph)
+	if err := windows.AssignProcessToJobObject(h, ph); err != nil {
+		_ = windows.CloseHandle(h)
+		return func() {}, err
+	}
+	return func() { _ = windows.CloseHandle(h) }, nil
+}
 
 // killProcessTree terminates the process and all of its descendants. Go's
 // default cancel only kills the direct child; the automation tools fork helper

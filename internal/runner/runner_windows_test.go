@@ -95,3 +95,25 @@ func TestKillProcessTreeKillsLiveTree(t *testing.T) {
 	waitPid(t, helper.Process.Pid, false, 10*time.Second)
 	waitPid(t, gcPID, false, 10*time.Second)
 }
+
+// Closing the child's job must terminate it: this is the safety net that saves
+// the tool tree when the scheduler itself is hard-killed (its job handles are
+// closed by the OS, KILL_ON_JOB_CLOSE fires).
+func TestJobCloseKillsChild(t *testing.T) {
+	helper := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--", "spawn_hold", "60s")
+	helper.Env = append(os.Environ(), "GS_WANT_HELPER=1")
+	if err := helper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = helper.Process.Kill(); _ = helper.Wait() }()
+
+	release, err := assignJob(helper.Process)
+	if err != nil {
+		t.Fatalf("assignJob: %v", err)
+	}
+	waitPid(t, helper.Process.Pid, true, 5*time.Second)
+
+	release() // close the job handle without touching the process
+
+	waitPid(t, helper.Process.Pid, false, 10*time.Second)
+}
