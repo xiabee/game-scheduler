@@ -50,7 +50,7 @@ func TestTaskHelper(t *testing.T) {
 type stubAdapter struct{}
 
 func (stubAdapter) Key() string               { return "stub" }
-func (stubAdapter) TaskTypes() []string       { return []string{"ok", "fail", "sleep"} }
+func (stubAdapter) TaskTypes() []string       { return []string{"ok", "fail", "sleep", "missing"} }
 func (stubAdapter) Validate(store.Game) error { return nil }
 func (stubAdapter) BuildCommand(g store.Game, t store.Task) (runner.Spec, error) {
 	base := []string{"-test.run=TestTaskHelper", "--"}
@@ -62,6 +62,12 @@ func (stubAdapter) BuildCommand(g store.Game, t store.Task) (runner.Spec, error)
 		rest = []string{"exit", "5"}
 	case "sleep":
 		rest = []string{"sleep", "600ms"}
+	case "missing":
+		// path comes from task params so the test can point at a file it
+		// created and deleted (guaranteed absent)
+		pm, _ := t.ParamsMap()
+		path, _ := pm["path"].(string)
+		return runner.Spec{Path: path}, nil
 	}
 	to := time.Duration(0)
 	if t.TimeoutSec > 0 {
@@ -464,5 +470,53 @@ func TestCaptureScreenshotRuns(t *testing.T) {
 	path := svc.captureScreenshot(7)
 	if path == "" {
 		t.Error("expected screenshot path")
+	}
+}
+
+// A process that never launches (missing executable) must not burn its
+// retries: every attempt would fail identically.
+func TestRunDoesNotRetryUnlaunchedProcess(t *testing.T) {
+	svc, st := newSvc(t, 1)
+
+	missing := filepath.Join(t.TempDir(), "gone.exe")
+	if err := os.WriteFile(missing, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(missing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetGame("stub"); err != nil {
+		if _, err := st.CreateGame(store.Game{ID: "stub", Name: "stub", Adapter: "stub", ToolPath: os.Args[0], Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tk, err := st.CreateTask(store.Task{
+		GameID: "stub", Name: "missing", Type: "missing",
+		Params:     mustJSON(t, map[string]string{"path": missing}),
+		MaxRetries: 3, TimeoutSec: 10, Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	exec, _, err := svc.Enqueue(tk.ID, store.TriggerManual, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, st, exec.ID, store.StatusFailed, 10*time.Second)
+
+	got, err := st.GetExecution(exec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RetryCount != 0 {
+		t.Errorf("retry_count=%d, want 0 (unlaunched process must not retry)", got.RetryCount)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("unlaunched task took %v, retries were not skipped", time.Since(start))
+	}
+	if !strings.Contains(got.ErrorMsg, "failed to start") {
+		t.Errorf("error_msg=%q, want failed-to-start cause", got.ErrorMsg)
 	}
 }

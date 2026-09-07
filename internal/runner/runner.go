@@ -42,7 +42,8 @@ type Result struct {
 	Command   string
 	Stdout    string
 	Stderr    string
-	ExitCode  int // -1 if the process never started or was killed by signal
+	ExitCode  int  // -1 if the process never started or was killed by signal
+	Started   bool // true once the child process actually launched
 	Err       error
 	StartTime time.Time
 	EndTime   time.Time
@@ -92,7 +93,11 @@ func Run(ctx context.Context, spec Spec) Result {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		res.Started = true
+		err = cmd.Wait()
+	}
 	res.EndTime = time.Now()
 	res.Stdout = stdout.String()
 	res.Stderr = stderr.String()

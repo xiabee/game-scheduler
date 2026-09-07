@@ -485,6 +485,12 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 		if ctx.Err() == context.Canceled {
 			break
 		}
+		// Don't retry a process that never launched: a missing executable or
+		// bad working directory fails identically every attempt, so retries
+		// would only burn MaxRetries full timeouts.
+		if !res.Started {
+			break
+		}
 	}
 
 	end := res.EndTime.UTC()
