@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -161,7 +162,42 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/executions/{id}", s.getExecution)
 	mux.HandleFunc("POST /api/executions/{id}/cancel", s.cancelExecution)
 
-	return s.authMW(logging(s.log, mux))
+	return s.authMW(securityHeaders(s.guardOrigin(logging(s.log, mux))))
+}
+
+// securityHeaders sets baseline browser protections. The dashboard is a
+// self-contained same-origin page (no external assets), so the CSP locks out
+// any injected third-party content; inline script/style stay allowed because
+// the whole UI lives in one HTML file.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy",
+			"default-src 'self'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "+
+				"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// guardOrigin rejects cross-origin state-changing requests when the server
+// runs without a token: a malicious web page could otherwise fire simple
+// POSTs (no preflight, no credentials needed) at localhost and start tasks.
+// With a token configured the auth layer already rejects those requests, so
+// the guard stays out of the way of reverse-proxy setups.
+func (s *Server) guardOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.authToken == "" && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if origin := r.Header.Get("Origin"); origin != "" {
+				if u, err := url.Parse(origin); err != nil || u.Host == "" || u.Host != r.Host {
+					writeErr(w, http.StatusForbidden, errors.New("cross-origin request rejected"))
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // authMW protects /api/* and /screenshots/* with the configured token (if any).
@@ -249,9 +285,13 @@ func urlSchemeOK(raw string) bool {
 }
 
 func (s *Server) createGame(w http.ResponseWriter, r *http.Request) {
-	var g store.Game
-	if !decode(w, r, &g) {
+	req := createGameRequest{Game: store.Game{Enabled: true}}
+	if !decode(w, r, &req) {
 		return
+	}
+	g := req.Game
+	if req.Enabled != nil {
+		g.Enabled = *req.Enabled
 	}
 	if !validGameID(g.ID) {
 		writeErr(w, http.StatusBadRequest, errors.New("game id must be 1-128 characters of [A-Za-z0-9_-]"))
@@ -310,18 +350,60 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
-	var t store.Task
-	if !decode(w, r, &t) {
+	req := createTaskRequest{Task: store.Task{Enabled: true}}
+	if !decode(w, r, &req) {
 		return
+	}
+	t := req.Task
+	if req.Enabled != nil {
+		t.Enabled = *req.Enabled
 	}
 	if !validTaskFields(w, t) {
 		return
 	}
-	if !s.requireGame(w, t.GameID) {
+	if !s.validTaskType(w, t) {
 		return
 	}
 	out, err := s.store.CreateTask(t)
 	respondCreated(w, out, s.changed(err))
+}
+
+// createGameRequest shadows Enabled with a pointer so a missing field can be
+// told apart from an explicit false: creating without `enabled` must produce
+// an enabled row (matching the DB column default), not a silent no-op.
+type createGameRequest struct {
+	store.Game
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+type createTaskRequest struct {
+	store.Task
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// validTaskType checks the game's adapter actually accepts the task type, so
+// a typo fails at creation instead of at fire time (or never, for a task only
+// a plan would have run).
+func (s *Server) validTaskType(w http.ResponseWriter, t store.Task) bool {
+	g, err := s.store.GetGame(t.GameID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("game %q does not exist; create it first", t.GameID))
+			return false
+		}
+		writeStoreErr(w, err)
+		return false
+	}
+	ad, err := s.reg.Get(g.Adapter)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return false
+	}
+	if !slices.Contains(ad.TaskTypes(), t.Type) {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("adapter %q does not support task type %q (supported: %v)", g.Adapter, t.Type, ad.TaskTypes()))
+		return false
+	}
+	return true
 }
 
 // validTaskFields rejects negative retry/timeout settings: a negative
@@ -357,7 +439,9 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	if !validTaskFields(w, t) {
 		return
 	}
-	if !s.requireGame(w, t.GameID) {
+	// validTaskType also verifies the game exists (a task cannot outlive its
+	// game anyway), so no separate requireGame pass is needed here.
+	if !s.validTaskType(w, t) {
 		return
 	}
 	t.ID = id

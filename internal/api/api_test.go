@@ -1290,3 +1290,136 @@ func TestMaterialRequirementCrossGameRejected(t *testing.T) {
 		t.Fatalf("same-game requirement: status=%d", code)
 	}
 }
+
+// Creating without `enabled` must produce an enabled row (the DB column
+// default), not a silently disabled one; an explicit false is still honored.
+func TestCreateDefaultsEnabledTrue(t *testing.T) {
+	srv, _, _ := newTestServer(t, "")
+	c := srv.Client()
+	post := func(path, body string, out any) int {
+		t.Helper()
+		resp, err := c.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			_ = json.NewDecoder(resp.Body).Decode(out)
+		}
+		return resp.StatusCode
+	}
+
+	var g store.Game
+	if code := post("/api/games", `{"id":"genshin","name":"g","adapter":"genshin","tool_path":"x"}`, &g); code != http.StatusCreated {
+		t.Fatalf("game create status=%d", code)
+	}
+	if !g.Enabled {
+		t.Error("game without explicit enabled should default to true")
+	}
+
+	var tk store.Task
+	if code := post("/api/tasks", `{"game_id":"genshin","name":"t","type":"raw","params":"{}"}`, &tk); code != http.StatusCreated {
+		t.Fatalf("task create status=%d", code)
+	}
+	if !tk.Enabled {
+		t.Error("task without explicit enabled should default to true")
+	}
+
+	// explicit false still wins (the test registry only has genshin)
+	var off store.Game
+	if code := post("/api/games", `{"id":"genshin2","name":"g2","adapter":"genshin","tool_path":"x","enabled":false}`, &off); code != http.StatusCreated {
+		t.Fatalf("game create status=%d", code)
+	}
+	if off.Enabled {
+		t.Error("explicit enabled=false was overridden")
+	}
+}
+
+// A task type the game's adapter does not support is rejected at creation.
+func TestCreateTaskRejectsUnknownType(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	g, err := st.CreateGame(store.Game{ID: "genshin", Name: "g", Adapter: "genshin", ToolPath: "x", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = g
+	c := srv.Client()
+	var e struct {
+		Error string `json:"error"`
+	}
+	resp, err := c.Post(srv.URL+"/api/tasks", "application/json",
+		strings.NewReader(`{"game_id":"genshin","name":"t","type":"march7th_daily","params":"{}"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&e)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || e.Error == "" {
+		t.Fatalf("unknown type: status=%d err=%q", resp.StatusCode, e.Error)
+	}
+}
+
+// Without a token, cross-origin state-changing requests are rejected; the
+// same request without an Origin header (curl, scripts) still works.
+func TestGuardOriginRejectsCrossSitePost(t *testing.T) {
+	srv, _, _ := newTestServer(t, "")
+	c := srv.Client()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/games", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-origin POST: status=%d want 403", resp.StatusCode)
+	}
+
+	// same-origin origin header passes
+	req2, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/games", strings.NewReader(`{}`))
+	req2.Header.Set("Origin", srv.URL)
+	resp2, err := c.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode == http.StatusForbidden {
+		t.Fatal("same-origin POST was rejected")
+	}
+
+	// GET requests are never blocked (SSE, page load)
+	req3, _ := http.NewRequest(http.MethodGet, srv.URL+"/healthz", nil)
+	req3.Header.Set("Origin", "https://evil.example")
+	resp3, err := c.Do(req3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("GET with foreign Origin: status=%d", resp3.StatusCode)
+	}
+}
+
+// Baseline security headers are set on responses.
+func TestSecurityHeaders(t *testing.T) {
+	srv, _, _ := newTestServer(t, "")
+	resp, err := srv.Client().Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("missing X-Content-Type-Options")
+	}
+	if resp.Header.Get("X-Frame-Options") != "DENY" {
+		t.Error("missing X-Frame-Options")
+	}
+	if resp.Header.Get("Content-Security-Policy") == "" {
+		t.Error("missing Content-Security-Policy")
+	}
+}
