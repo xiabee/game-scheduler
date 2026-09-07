@@ -675,7 +675,12 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			writeErr(w, http.StatusRequestEntityTooLarge, fmt.Errorf("request body exceeds %d bytes", mbe.Limit))
+		} else {
+			writeErr(w, http.StatusBadRequest, err)
+		}
 		return false
 	}
 	return true

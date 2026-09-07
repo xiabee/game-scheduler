@@ -661,7 +661,7 @@ func TestPlannerExportImport(t *testing.T) {
 	if code := postJSON("/api/planner/import", strings.Replace(importBody, "%v", "true", 1), &dry); code != http.StatusOK {
 		t.Fatalf("dry_run status=%d", code)
 	}
-	if !dry.DryRun || dry.Created != 4 || dry.Updated != 0 || len(dry.Errors) != 0 {
+	if !dry.DryRun || dry.Created != 4 || dry.Updated != 0 {
 		t.Fatalf("dry_run result=%+v", dry)
 	}
 	if chars, _ := st.ListCharacters(store.CharacterFilter{GameID: "genshin"}); len(chars) != 0 {
@@ -673,7 +673,7 @@ func TestPlannerExportImport(t *testing.T) {
 	if code := postJSON("/api/planner/import", strings.Replace(importBody, "%v", "false", 1), &imp); code != http.StatusOK {
 		t.Fatalf("import status=%d", code)
 	}
-	if imp.Created != 4 || len(imp.Errors) != 0 {
+	if imp.Created != 4 {
 		t.Fatalf("import result=%+v", imp)
 	}
 	chars, _ := st.ListCharacters(store.CharacterFilter{GameID: "genshin"})
@@ -1421,5 +1421,49 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 	if resp.Header.Get("Content-Security-Policy") == "" {
 		t.Error("missing Content-Security-Policy")
+	}
+}
+
+// Import validation reports every problem in one pass, not just the first.
+func TestImportValidationListsAllProblems(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "g", Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	c := srv.Client()
+	body := `{"dry_run":true,"upsert":false,"data":{"version":1,"game_id":"genshin",
+		"characters":[{"id":1,"name":""},{"id":1,"name":"a"},{"id":1,"name":"a"}],
+		"character_goals":[{"id":9,"character_id":1,"name":"g1"},{"id":9,"character_id":1,"name":"g2"}]}}`
+	var e struct {
+		Error string `json:"error"`
+	}
+	resp, err := c.Post(srv.URL+"/api/planner/import", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&e)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	for _, want := range []string{"name is required", "duplicate file id", "duplicate name", "duplicate file id 9"} {
+		if !strings.Contains(e.Error, want) {
+			t.Errorf("error %q missing %q", e.Error, want)
+		}
+	}
+}
+
+// Bodies over the 1 MiB cap answer 413 with a clear message.
+func TestDecodeBodyTooLargeIs413(t *testing.T) {
+	srv, _, _ := newTestServer(t, "")
+	big := strings.Repeat("a", 2<<20) // 2 MiB, over the 1 MiB cap
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/games", strings.NewReader(`{"name":"`+big+`"}`))
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d want 413", resp.StatusCode)
 	}
 }

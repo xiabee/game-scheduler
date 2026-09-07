@@ -65,13 +65,14 @@ type plannerImportRequest struct {
 }
 
 // plannerImportResult reports what the import did (or would do, with dry_run).
+// Validation problems are reported as a 400 error listing every problem, not
+// here: a result is only ever returned for a file that validated cleanly.
 type plannerImportResult struct {
-	DryRun  bool     `json:"dry_run"`
-	GameID  string   `json:"game_id"`
-	Created int      `json:"created"`
-	Updated int      `json:"updated"`
-	Skipped int      `json:"skipped"`
-	Errors  []string `json:"errors"`
+	DryRun  bool   `json:"dry_run"`
+	GameID  string `json:"game_id"`
+	Created int    `json:"created"`
+	Updated int    `json:"updated"`
+	Skipped int    `json:"skipped"`
 }
 
 // plannerImport handles POST /api/planner/import. Characters dedupe on
@@ -103,8 +104,8 @@ func (s *Server) plannerImport(w http.ResponseWriter, r *http.Request) {
 		writeStoreErr(w, err)
 		return
 	}
-	if msg := validatePlannerImport(d); msg != "" {
-		writeErr(w, http.StatusBadRequest, errors.New(msg))
+	if problems := validatePlannerImport(d); len(problems) > 0 {
+		writeErr(w, http.StatusBadRequest, errors.New(strings.Join(problems, "; ")))
 		return
 	}
 
@@ -126,7 +127,6 @@ func (s *Server) plannerImport(w http.ResponseWriter, r *http.Request) {
 		Created: res.Created,
 		Updated: res.Updated,
 		Skipped: res.Skipped,
-		Errors:  []string{},
 	}
 	if !req.DryRun && (out.Created > 0 || out.Updated > 0) {
 		s.bus.Notify()
@@ -134,29 +134,41 @@ func (s *Server) plannerImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// maxReportedImportProblems bounds how many problems one 400 lists; a wild
+// file can have hundreds and the operator only needs the pattern.
+const maxReportedImportProblems = 10
+
 // validatePlannerImport checks referential integrity inside the file itself so
 // errors are reported before anything is written. It also rejects duplicate
 // file ids and duplicate dedupe keys, which would otherwise silently collapse
-// or duplicate rows.
-func validatePlannerImport(d *PlannerExport) string {
+// or duplicate rows. All problems are collected, not just the first, so a
+// hand-edited file can be fixed in one pass.
+func validatePlannerImport(d *PlannerExport) []string {
+	var problems []string
+	add := func(format string, args ...any) {
+		if len(problems) < maxReportedImportProblems {
+			problems = append(problems, fmt.Sprintf(format, args...))
+		}
+	}
 	chIDs := map[int64]bool{}
 	chNames := map[string]bool{}
 	for i, c := range d.Characters {
 		if strings.TrimSpace(c.Name) == "" {
-			return fmt.Sprintf("characters[%d]: name is required", i)
+			add("characters[%d]: name is required", i)
+			continue
 		}
 		if c.GameID != "" && c.GameID != d.GameID {
-			return fmt.Sprintf("characters[%d] (%s): game_id %q does not match data.game_id %q", i, c.Name, c.GameID, d.GameID)
+			add("characters[%d] (%s): game_id %q does not match data.game_id %q", i, c.Name, c.GameID, d.GameID)
 		}
 		if c.ID != 0 {
 			if chIDs[c.ID] {
-				return fmt.Sprintf("characters[%d] (%s): duplicate file id %d", i, c.Name, c.ID)
+				add("characters[%d] (%s): duplicate file id %d", i, c.Name, c.ID)
 			}
 			chIDs[c.ID] = true
 		}
 		key := strings.ToLower(strings.TrimSpace(c.Name))
 		if chNames[key] {
-			return fmt.Sprintf("characters[%d]: duplicate name %q in file", i, c.Name)
+			add("characters[%d]: duplicate name %q in file", i, c.Name)
 		}
 		chNames[key] = true
 	}
@@ -164,20 +176,21 @@ func validatePlannerImport(d *PlannerExport) string {
 	goalKeys := map[string]bool{}
 	for i, g := range d.Goals {
 		if strings.TrimSpace(g.Name) == "" {
-			return fmt.Sprintf("character_goals[%d]: name is required", i)
+			add("character_goals[%d]: name is required", i)
+			continue
 		}
 		if g.CharacterID == 0 || !chIDs[g.CharacterID] {
-			return fmt.Sprintf("character_goals[%d] (%s): character_id %d not found among characters in this file", i, g.Name, g.CharacterID)
+			add("character_goals[%d] (%s): character_id %d not found among characters in this file", i, g.Name, g.CharacterID)
 		}
 		if g.ID != 0 {
 			if goalIDs[g.ID] {
-				return fmt.Sprintf("character_goals[%d] (%s): duplicate file id %d", i, g.Name, g.ID)
+				add("character_goals[%d] (%s): duplicate file id %d", i, g.Name, g.ID)
 			}
 			goalIDs[g.ID] = true
 		}
 		key := fmt.Sprintf("%d/%s", g.CharacterID, strings.ToLower(strings.TrimSpace(g.Name)))
 		if goalKeys[key] {
-			return fmt.Sprintf("character_goals[%d]: duplicate name %q for the same character in file", i, g.Name)
+			add("character_goals[%d]: duplicate name %q for the same character in file", i, g.Name)
 		}
 		goalKeys[key] = true
 	}
@@ -185,36 +198,40 @@ func validatePlannerImport(d *PlannerExport) string {
 	matNames := map[string]bool{}
 	for i, m := range d.Materials {
 		if strings.TrimSpace(m.Name) == "" {
-			return fmt.Sprintf("material_items[%d]: name is required", i)
+			add("material_items[%d]: name is required", i)
+			continue
 		}
 		if m.GameID != "" && m.GameID != d.GameID {
-			return fmt.Sprintf("material_items[%d] (%s): game_id %q does not match data.game_id %q", i, m.Name, m.GameID, d.GameID)
+			add("material_items[%d] (%s): game_id %q does not match data.game_id %q", i, m.Name, m.GameID, d.GameID)
 		}
 		if m.ID != 0 {
 			if matIDs[m.ID] {
-				return fmt.Sprintf("material_items[%d] (%s): duplicate file id %d", i, m.Name, m.ID)
+				add("material_items[%d] (%s): duplicate file id %d", i, m.Name, m.ID)
 			}
 			matIDs[m.ID] = true
 		}
 		key := strings.ToLower(strings.TrimSpace(m.Name))
 		if matNames[key] {
-			return fmt.Sprintf("material_items[%d]: duplicate name %q in file", i, m.Name)
+			add("material_items[%d]: duplicate name %q in file", i, m.Name)
 		}
 		matNames[key] = true
 	}
 	reqKeys := map[string]bool{}
 	for i, r := range d.Requirements {
 		if r.GoalID == 0 || !goalIDs[r.GoalID] {
-			return fmt.Sprintf("material_requirements[%d]: goal_id %d not found among character_goals in this file", i, r.GoalID)
+			add("material_requirements[%d]: goal_id %d not found among character_goals in this file", i, r.GoalID)
 		}
 		if r.MaterialID == 0 || !matIDs[r.MaterialID] {
-			return fmt.Sprintf("material_requirements[%d]: material_id %d not found among material_items in this file", i, r.MaterialID)
+			add("material_requirements[%d]: material_id %d not found among material_items in this file", i, r.MaterialID)
 		}
 		key := fmt.Sprintf("%d/%d", r.GoalID, r.MaterialID)
 		if reqKeys[key] {
-			return fmt.Sprintf("material_requirements[%d]: duplicate goal_id %d + material_id %d in file", i, r.GoalID, r.MaterialID)
+			add("material_requirements[%d]: duplicate goal_id %d + material_id %d in file", i, r.GoalID, r.MaterialID)
 		}
 		reqKeys[key] = true
 	}
-	return ""
+	if len(d.Characters)+len(d.Goals)+len(d.Materials)+len(d.Requirements) > 0 && len(problems) == maxReportedImportProblems {
+		problems = append(problems, "...more problems not listed")
+	}
+	return problems
 }
