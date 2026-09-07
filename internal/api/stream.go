@@ -76,6 +76,10 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.streamsClosingCh:
+			// Server shutdown: release the connection right away so
+			// http.Server.Shutdown is not held up by idle event streams.
+			return
 		case <-ping.C:
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
 				return

@@ -1067,3 +1067,62 @@ func TestListExecutionsMetaMode(t *testing.T) {
 		t.Fatal("default mode lost stdout")
 	}
 }
+
+// An SSE client must be released when the server shuts down: otherwise
+// http.Server.Shutdown waits out its entire timeout on idle event streams.
+func TestStreamReleasesOnShutdownStreams(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	bus := events.New()
+	reg := game.NewRegistry(genshin.New())
+	cfg := config.Config{DataDir: t.TempDir(), MaxConcurrent: 1}
+	svc := task.NewService(st, reg, cfg, bus, nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		svc.Shutdown(ctx)
+	})
+	s := New(st, svc, scheduler.New(st, svc, nil), reg, bus, nil, cfg, nil)
+
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	// Connected: the initial dashboard snapshot must arrive.
+	first, err := bufio.NewReader(resp.Body).ReadString('\n')
+	if err != nil || !strings.HasPrefix(first, "data: ") {
+		t.Fatalf("first stream event = %q, %v", first, err)
+	}
+
+	s.ShutdownStreams()
+
+	// The stream must close promptly (EOF), not stay open until ctx timeout.
+	errCh := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 1)
+		_, e := resp.Body.Read(buf)
+		errCh <- e
+	}()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("stream read after shutdown: want EOF, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("SSE connection still open 3s after ShutdownStreams")
+	}
+}

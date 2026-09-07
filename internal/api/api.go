@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
@@ -40,10 +41,18 @@ type Server struct {
 	log           *slog.Logger
 	screenshotDir string
 	authToken     string
+
+	streamsClosing   sync.Once
+	streamsClosingCh chan struct{} // closed by ShutdownStreams
 }
 
 // SetGuideSearcher overrides the Bilibili search client (tests inject a stub).
 func (s *Server) SetGuideSearcher(g guide.Searcher) { s.guides = g }
+
+// ShutdownStreams releases all SSE clients so http.Server.Shutdown does not
+// wait out its whole timeout on long-lived event streams. Wire it via
+// http.Server.RegisterOnShutdown.
+func (s *Server) ShutdownStreams() { s.streamsClosing.Do(func() { close(s.streamsClosingCh) }) }
 
 // New builds an API server. mon may be nil (no resource panel).
 func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *game.Registry, bus *events.Bus, mon *monitor.Monitor, cfg config.Config, log *slog.Logger) *Server {
@@ -51,16 +60,17 @@ func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *gam
 		log = slog.Default()
 	}
 	return &Server{
-		store:         s,
-		svc:           svc,
-		sched:         sched,
-		reg:           reg,
-		bus:           bus,
-		mon:           mon,
-		guides:        guide.NewClient(),
-		log:           log,
-		screenshotDir: cfg.ScreenshotDir(),
-		authToken:     cfg.AuthToken,
+		store:            s,
+		svc:              svc,
+		sched:            sched,
+		reg:              reg,
+		bus:              bus,
+		mon:              mon,
+		guides:           guide.NewClient(),
+		log:              log,
+		screenshotDir:    cfg.ScreenshotDir(),
+		authToken:        cfg.AuthToken,
+		streamsClosingCh: make(chan struct{}),
 	}
 }
 

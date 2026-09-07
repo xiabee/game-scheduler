@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -28,6 +30,12 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+// run keeps every cleanup in defers: a plain os.Exit from deep inside would
+// skip them and leave running tool processes orphaned and the store open.
+func run() int {
 	cfgPath := flag.String("config", "", "path to JSON config file (optional)")
 	addr := flag.String("addr", "", "HTTP listen address override")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -35,7 +43,7 @@ func main() {
 
 	if *showVersion {
 		println("game-scheduler server " + version.Version)
-		return
+		return 0
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -44,14 +52,14 @@ func main() {
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		log.Error("load config", "err", err)
-		os.Exit(1)
+		return 1
 	}
 	if *addr != "" {
 		cfg.Addr = *addr
 	}
 	if err := cfg.EnsureDirs(); err != nil {
 		log.Error("ensure dirs", "err", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Many supported tools (e.g. BetterGI) must run with administrator rights to
@@ -65,7 +73,7 @@ func main() {
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
 		log.Error("open store", "err", err)
-		os.Exit(1)
+		return 1
 	}
 	defer st.Close()
 
@@ -109,7 +117,7 @@ func main() {
 	sched.SetPauseGate(mon.ShouldPause)
 	if err := sched.Start(); err != nil {
 		log.Error("start scheduler", "err", err)
-		os.Exit(1)
+		return 1
 	}
 	defer sched.Stop()
 
@@ -140,23 +148,34 @@ func main() {
 		}()
 	}
 
+	apiSrv := api.New(st, svc, sched, reg, bus, mon, cfg, log)
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           api.New(st, svc, sched, reg, bus, mon, cfg, log).Handler(),
+		Handler:           apiSrv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Release SSE clients on shutdown: without this, Shutdown waits out its
+	// whole timeout on every open dashboard event stream.
+	srv.RegisterOnShutdown(apiSrv.ShutdownStreams)
 
+	serverErr := make(chan error, 1)
 	go func() {
 		log.Info("server listening", "addr", cfg.Addr, "db", cfg.DBPath, "adapters", reg.Keys(), "version", version.Version)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("http server", "err", err)
-			os.Exit(1)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- fmt.Errorf("listen on %s: %w", cfg.Addr, err)
 		}
 	}()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	select {
+	case err := <-serverErr:
+		// Return (not os.Exit) so the defers above still drain workers and
+		// close the store cleanly.
+		log.Error("http server", "err", err)
+		return 1
+	case <-stop:
+	}
 	log.Info("shutting down")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -164,4 +183,5 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error("shutdown", "err", err)
 	}
+	return 0
 }
