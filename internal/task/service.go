@@ -38,6 +38,15 @@ type NotifyFunc func(event, title, message string)
 // errShuttingDown is returned by Enqueue once Shutdown has begun.
 var errShuttingDown = fmt.Errorf("task: service is shutting down")
 
+// screenshotTimeout bounds a failure-screenshot hook: it runs synchronously on
+// the execution path, so a hung command must not stall the worker (same bound
+// as notify commands). A var so tests can shorten it.
+var screenshotTimeout = 15 * time.Second
+
+// waitDelayAfterKill abandons the capture command's pipes shortly after the
+// timeout kills the platform shell, in case a grandchild still holds them.
+const waitDelayAfterKill = 2 * time.Second
+
 // Service runs tasks and records executions.
 type Service struct {
 	store *store.Store
@@ -557,13 +566,23 @@ func (s *Service) captureScreenshot(execID int64) string {
 		s.log.Warn("screenshot template", "err", err)
 		return path
 	}
-	// The configured command is a full shell command line; shellcmd.Command runs
-	// it via the platform shell with correct quoting.
-	cmd := shellcmd.Command(rendered)
+	// The configured command is a full shell command line; shellcmd runs it via
+	// the platform shell with correct quoting. Like notify commands, capture
+	// runs synchronously on the execution path, so a hung hook must not stall
+	// the worker: bound it and abandon the pipes if the shell dies leaving a
+	// grandchild holding them.
+	ctx, cancel := context.WithTimeout(context.Background(), screenshotTimeout)
+	defer cancel()
+	cmd := shellcmd.CommandContext(ctx, rendered)
+	cmd.WaitDelay = waitDelayAfterKill
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		s.log.Warn("screenshot capture failed", "exec_id", execID, "err", err, "stderr", stderr.String())
+		if ctx.Err() == context.DeadlineExceeded {
+			s.log.Warn("screenshot capture timed out", "exec_id", execID, "timeout", screenshotTimeout)
+		} else {
+			s.log.Warn("screenshot capture failed", "exec_id", execID, "err", err, "stderr", stderr.String())
+		}
 	}
 	return path
 }

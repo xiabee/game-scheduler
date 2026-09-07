@@ -714,9 +714,12 @@ func (s *Store) UpdatePlan(p Plan) (Plan, error) {
 	return s.GetPlan(p.ID)
 }
 
-// SetPlanRunTimes records the last/next fire times for a plan.
+// SetPlanRunTimes records the last/next fire times for a plan. A nil next
+// keeps the stored next_run_at: fire() can race a Reload (or the plan has just
+// been deleted), leaving it no cron entry to read the next fire from — writing
+// NULL then would lose the schedule until the next reload.
 func (s *Store) SetPlanRunTimes(id int64, last, next *time.Time) error {
-	_, err := s.db.Exec(`UPDATE plans SET last_run_at=?,next_run_at=? WHERE id=?`, last, next, id)
+	_, err := s.db.Exec(`UPDATE plans SET last_run_at=?, next_run_at=COALESCE(?, next_run_at) WHERE id=?`, last, next, id)
 	return err
 }
 

@@ -3,6 +3,7 @@ package scheduler
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
@@ -136,5 +137,37 @@ func TestReloadRecordsNextRun(t *testing.T) {
 	}
 	if plans[0].NextRunAt == nil {
 		t.Fatal("Reload did not record next run time")
+	}
+}
+
+// fire() without a cron entry (e.g. it raced a Reload) must record last run
+// but keep the stored next_run_at instead of nulling it.
+func TestFireKeepsNextRunWhenEntryMissing(t *testing.T) {
+	st, sched := newFixture(t)
+
+	taskRow, err := st.CreateTask(store.Task{GameID: "genshin", Name: "t", Type: "onedragon", Params: "{}", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := st.CreatePlan(store.Plan{Name: "p", TaskID: taskRow.ID, CronExpr: "0 9 * * *", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := time.Now().UTC().Add(time.Hour)
+	if err := st.SetPlanRunTimes(plan.ID, nil, &stored); err != nil {
+		t.Fatal(err)
+	}
+
+	sched.fire(plan)
+
+	got, err := st.GetPlan(plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastRunAt == nil {
+		t.Error("fire did not record last_run_at")
+	}
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(stored) {
+		t.Errorf("next_run_at = %v, want preserved %v", got.NextRunAt, stored)
 	}
 }

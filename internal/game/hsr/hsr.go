@@ -112,7 +112,13 @@ func (a *Adapter) BuildCommand(g store.Game, t store.Task) (runner.Spec, error) 
 	if d := cmdutil.Str(params, "working_dir"); d != "" {
 		dir = d
 	}
-	args := append([]string{filepath.Join(dir, entry)}, extra...)
+	// An absolute entry (e.g. a wrapper script living outside the project dir)
+	// must not be joined onto dir; preflight checks the entry the same way.
+	entryPath := entry
+	if !filepath.IsAbs(entryPath) {
+		entryPath = filepath.Join(dir, entryPath)
+	}
+	args := append([]string{entryPath}, extra...)
 	return runner.Spec{Path: exe, Args: args, Dir: dir, Timeout: cmdutil.Timeout(t)}, nil
 }
 

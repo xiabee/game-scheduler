@@ -478,3 +478,43 @@ func TestUpsertRouteByFileNoDuplicates(t *testing.T) {
 		t.Fatalf("second empty-path route should be allowed: %v", err)
 	}
 }
+
+// A nil next must not clobber the stored next_run_at: fire() can race a Reload
+// or outlive its plan, and losing next_run_at hides the schedule until the
+// next reload.
+func TestSetPlanRunTimesNilNextKeepsStoredValue(t *testing.T) {
+	s := newTestStore(t)
+	mkGame(t, s, "g")
+	tk, _ := s.CreateTask(Task{GameID: "g", Name: "t", Type: "raw"})
+	p, _ := s.CreatePlan(Plan{Name: "p", TaskID: tk.ID, CronExpr: "0 6 * * *", Enabled: true})
+
+	stored := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	if err := s.SetPlanRunTimes(p.ID, nil, &stored); err != nil {
+		t.Fatal(err)
+	}
+
+	// fire() with a missing entry: last_run_at updated, next_run_at preserved.
+	fired := time.Now().UTC()
+	if err := s.SetPlanRunTimes(p.ID, &fired, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetPlan(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastRunAt == nil || !got.LastRunAt.Equal(fired) {
+		t.Errorf("last_run_at = %v, want %v", got.LastRunAt, fired)
+	}
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(stored) {
+		t.Errorf("next_run_at clobbered: got %v, want %v", got.NextRunAt, stored)
+	}
+
+	// An explicit next still overwrites.
+	later := stored.Add(time.Hour)
+	if err := s.SetPlanRunTimes(p.ID, &fired, &later); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetPlan(p.ID); got.NextRunAt == nil || !got.NextRunAt.Equal(later) {
+		t.Errorf("explicit next not persisted: %v", got.NextRunAt)
+	}
+}

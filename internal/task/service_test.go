@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -425,4 +426,43 @@ func containsCheck(checks []PreflightCheck, key, path string, exists bool) bool 
 		}
 	}
 	return false
+}
+
+// A hung screenshot command must not stall the worker: capture runs on the
+// execution path (the only concurrency slot by default), so it is bounded the
+// same way notify commands are.
+func TestCaptureScreenshotTimeout(t *testing.T) {
+	svc, _ := newSvc(t, 1)
+
+	hang := "ping -n 30 127.0.0.1 > nul"
+	if runtime.GOOS != "windows" {
+		hang = "sleep 30"
+	}
+	svc.cfg.ScreenshotCmd = hang
+
+	old := screenshotTimeout
+	screenshotTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { screenshotTimeout = old })
+
+	start := time.Now()
+	path := svc.captureScreenshot(42)
+	elapsed := time.Since(start)
+
+	if path == "" {
+		t.Error("screenshot path must be recorded even when capture fails")
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("capture not bounded by timeout: took %v", elapsed)
+	}
+}
+
+// A quick screenshot command still succeeds within the bound.
+func TestCaptureScreenshotRuns(t *testing.T) {
+	svc, _ := newSvc(t, 1)
+	svc.cfg.ScreenshotCmd = "echo ok"
+
+	path := svc.captureScreenshot(7)
+	if path == "" {
+		t.Error("expected screenshot path")
+	}
 }

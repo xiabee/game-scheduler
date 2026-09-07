@@ -147,6 +147,11 @@ func (s *Scheduler) fire(p store.Plan) {
 		}
 	}
 	s.mu.Unlock()
+	if next == nil {
+		// Entry gone (plan reloaded or deleted mid-flight): SetPlanRunTimes
+		// keeps the stored next_run_at instead of clobbering it with NULL.
+		s.log.Debug("plan entry gone; keeping stored next_run_at", "plan_id", p.ID)
+	}
 	if err := s.store.SetPlanRunTimes(p.ID, &now, next); err != nil {
 		s.log.Warn("update plan run times", "plan_id", p.ID, "err", err)
 	}
