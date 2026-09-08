@@ -16,6 +16,7 @@ pub mod pipeline;
 pub mod protocol;
 pub mod safety;
 pub mod state;
+pub mod template;
 pub mod transform;
 pub mod vision;
 pub mod window;
