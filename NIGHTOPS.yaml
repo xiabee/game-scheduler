@@ -1,0 +1,29 @@
+version: 1
+
+enabled: true
+
+agent: zcode
+
+goal:
+  description: |
+    多游戏资源收集与路线调度器：调度引擎与终端交互。
+
+priority: 74
+
+progress_file: docs/NIGHTLY_PROGRESS.md
+
+prompt:
+  strategy: generated
+
+  instructions: |
+    近期工作：终端 rec 防护、非覆盖式 upsert、origin guard。
+    涉及游戏账号的配置夜间只读。
+
+ci:
+  timeout_minutes: 120
+
+constraints:
+  no_production_deploy: true
+  no_force_push: true
+  extra:
+    - 不使用真实游戏账号执行写入型操作
