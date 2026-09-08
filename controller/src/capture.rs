@@ -202,6 +202,7 @@ mod wgc {
     pub struct WgcCapture {
         item: GraphicsCaptureItem,
         pool: Direct3D11CaptureFramePool,
+        session: windows::Graphics::Capture::GraphicsCaptureSession,
         device: ID3D11Device,
         context: ID3D11DeviceContext,
         staging: ID3D11Texture2D,
@@ -305,6 +306,7 @@ mod wgc {
             Ok(WgcCapture {
                 item,
                 pool,
+                session,
                 device,
                 context,
                 staging,
@@ -401,6 +403,7 @@ mod wgc {
             Ok(WgcCapture {
                 item,
                 pool,
+                session,
                 device,
                 context,
                 staging,
