@@ -9,7 +9,10 @@ use crate::{ControllerError, Result};
 use std::sync::OnceLock;
 use windows::core::{BOOL, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, POINT, RECT};
-use windows::Win32::Graphics::Gdi::ClientToScreen;
+use windows::Win32::Graphics::Gdi::{
+    BeginPaint, ClientToScreen, CreateSolidBrush, DeleteObject, EndPaint, FillRect, InvalidateRect,
+    UpdateWindow, PAINTSTRUCT,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -333,6 +336,16 @@ impl OwnedTestWindow {
         }
         .map_err(ControllerError::Win)
     }
+
+    /// Invalidate + synchronously repaint so window-capture backends that
+    /// only deliver frames on content change (WGC dirty tracking) get a
+    /// new frame. Purely affects this process's own probe window.
+    pub fn nudge(&self) {
+        unsafe {
+            let _ = InvalidateRect(Some(self.hwnd), None, true);
+            let _ = UpdateWindow(self.hwnd);
+        }
+    }
 }
 
 impl Drop for OwnedTestWindow {
@@ -389,12 +402,35 @@ fn register_probe_class() -> u16 {
     })
 }
 
+/// Paint counter so every repaint changes actual pixels — window-capture
+/// backends (WGC) only deliver frames when composed content changes.
+static PAINT_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 unsafe extern "system" fn probe_wnd_proc(
     hwnd: HWND,
     msg: u32,
     wparam: windows::Win32::Foundation::WPARAM,
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
+    use std::sync::atomic::Ordering;
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_PAINT {
+        let seq = PAINT_SEQ.fetch_add(1, Ordering::Relaxed);
+        let mut ps = PAINTSTRUCT::default();
+        let hdc = unsafe { BeginPaint(hwnd, &mut ps) };
+        // color drifts with the paint counter: visible, always-changing
+        let r = (seq * 37 % 200 + 40) as u32;
+        let g = (seq * 89 % 200 + 40) as u32;
+        let b = (seq * 151 % 200 + 40) as u32;
+        let brush = unsafe {
+            CreateSolidBrush(windows::Win32::Foundation::COLORREF(
+                (r << 16) | (g << 8) | b,
+            ))
+        };
+        unsafe { FillRect(hdc, &ps.rcPaint, brush) };
+        let _ = unsafe { DeleteObject(brush.into()) };
+        unsafe { EndPaint(hwnd, &ps) };
+        return windows::Win32::Foundation::LRESULT(0);
+    }
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 

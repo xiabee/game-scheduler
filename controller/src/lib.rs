@@ -30,6 +30,9 @@ pub enum ControllerError {
     WindowGone,
     /// A value violated a documented invariant (e.g. non-positive size).
     InvalidInput(String),
+    /// A named pipeline stage failed; wraps the underlying error so
+    /// operators can see WHICH init step broke (e.g. WGC bring-up).
+    Stage(&'static str, Box<ControllerError>),
 }
 
 impl std::fmt::Display for ControllerError {
@@ -39,6 +42,7 @@ impl std::fmt::Display for ControllerError {
             ControllerError::WindowNotFound(what) => write!(f, "window not found: {what}"),
             ControllerError::WindowGone => write!(f, "window is gone"),
             ControllerError::InvalidInput(what) => write!(f, "invalid input: {what}"),
+            ControllerError::Stage(stage, e) => write!(f, "{stage}: {e}"),
         }
     }
 }

@@ -8,13 +8,238 @@ fn main() {
     if args.iter().any(|a| a == "--self-probe") {
         std::process::exit(run_self_probe());
     }
+    if args.iter().any(|a| a == "--capture-probe") {
+        std::process::exit(run_capture_probe());
+    }
+    if args.iter().any(|a| a == "--capture-monitor") {
+        std::process::exit(run_monitor_probe());
+    }
+    if args.iter().any(|a| a == "--capture-gdi") {
+        std::process::exit(run_gdi_probe());
+    }
+    if let Some(pos) = args.iter().position(|a| a == "--capture-foreign") {
+        let needle = args.get(pos + 1).cloned().unwrap_or_default();
+        std::process::exit(run_foreign_probe(&needle));
+    }
     if args.iter().any(|a| a == "--dry-run") {
         // NC0 M5 will wire: window -> capture -> resize -> mock detection ->
         // inverse transform -> debug overlay. Today: explicit not-implemented.
         eprintln!("--dry-run is delivered in NC0 M5; not wired yet");
         std::process::exit(2);
     }
-    println!("native-controller (NC0): use --self-probe | --dry-run");
+    println!("native-controller (NC0): use --self-probe | --capture-probe | --dry-run");
+}
+
+/// Real-capture smoke: create a probe window, capture it through Windows
+/// Graphics Capture, and verify the frame is a live image (non-uniform
+/// content, plausible size). Exits 0 on success.
+fn run_monitor_probe() -> i32 {
+    use controller::capture::CaptureBackend;
+    use controller::window::ensure_dpi_awareness;
+    ensure_dpi_awareness();
+    let mut cap = match controller::capture::WgcCapture::for_primary_monitor() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("monitor-probe: start failed: {e}");
+            return 1;
+        }
+    };
+    for i in 0..3 {
+        match cap.capture() {
+            Ok(f) => println!("monitor-probe: frame {i}: {}x{}", f.width, f.height),
+            Err(e) => {
+                eprintln!(
+                    "monitor-probe: frame {i} failed: {e} (arrived={})",
+                    cap.frames_arrived()
+                );
+                return 1;
+            }
+        }
+    }
+    println!("monitor-probe: OK (arrived={})", cap.frames_arrived());
+    0
+}
+
+/// Capture a window belonging to ANOTHER process (by title substring) —
+/// isolates window-ownership issues from session-level WGC failures.
+fn run_foreign_probe(needle: &str) -> i32 {
+    use controller::capture::{CaptureBackend, WgcCapture};
+    use controller::window::{ensure_dpi_awareness, GameWindow};
+    ensure_dpi_awareness();
+    let found = match GameWindow::find(Some(needle), None) {
+        Ok(Some(w)) => w,
+        Ok(None) => {
+            eprintln!("foreign-probe: no window matching {needle:?}");
+            return 1;
+        }
+        Err(e) => {
+            eprintln!("foreign-probe: find failed: {e}");
+            return 1;
+        }
+    };
+    println!(
+        "foreign-probe: target {:?} pid={}",
+        found.title(),
+        found.pid()
+    );
+    let layout = match found.layout() {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("foreign-probe: layout failed: {e}");
+            return 1;
+        }
+    };
+    let mut cap = match WgcCapture::new(found.hwnd(), layout) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("foreign-probe: start failed: {e}");
+            return 1;
+        }
+    };
+    for i in 0..3 {
+        match cap.capture() {
+            Ok(f) => println!("foreign-probe: frame {i}: {}x{}", f.width, f.height),
+            Err(e) => {
+                eprintln!(
+                    "foreign-probe: frame {i} failed: {e} (arrived={})",
+                    cap.frames_arrived()
+                );
+                return 1;
+            }
+        }
+    }
+    println!("foreign-probe: OK (arrived={})", cap.frames_arrived());
+    0
+}
+
+/// GDI(PrintWindow) capture smoke against our own probe window.
+fn run_gdi_probe() -> i32 {
+    use controller::capture::{CaptureBackend, GdiPrintWindowCapture};
+    use controller::window::{ensure_dpi_awareness, OwnedTestWindow};
+    ensure_dpi_awareness();
+    let title = format!("NFCTRL-GDI-PROBE-{}", std::process::id());
+    let win = match OwnedTestWindow::new(400, 300, &title) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("gdi-probe: create window failed: {e}");
+            return 1;
+        }
+    };
+    let layout = match controller::window::GameWindow::from_hwnd(win.hwnd) {
+        Ok(g) => match g.layout() {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("gdi-probe: layout failed: {e}");
+                return 1;
+            }
+        },
+        Err(e) => {
+            eprintln!("gdi-probe: wrap window failed: {e}");
+            return 1;
+        }
+    };
+    let mut cap = match GdiPrintWindowCapture::new(win.hwnd, layout) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("gdi-probe: backend init failed: {e}");
+            return 1;
+        }
+    };
+    win.nudge();
+    match cap.capture() {
+        Ok(f) => {
+            let nonzero = f.data.iter().filter(|&&b| b != 0).count();
+            let distinct = f
+                .data
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len();
+            println!(
+                "gdi-probe: frame {}x{} stride={} nonzero={nonzero} distinct_values={distinct}",
+                f.width, f.height, f.stride
+            );
+            if f.width == 0 || f.height == 0 || nonzero == 0 {
+                eprintln!("gdi-probe: frame is empty or all black");
+                return 1;
+            }
+            println!("gdi-probe: OK");
+            0
+        }
+        Err(e) => {
+            eprintln!("gdi-probe: capture failed: {e}");
+            1
+        }
+    }
+}
+
+fn run_capture_probe() -> i32 {
+    use controller::capture::{CaptureBackend, WgcCapture};
+    use controller::window::{ensure_dpi_awareness, GameWindow, OwnedTestWindow};
+
+    ensure_dpi_awareness();
+    let title = format!("NFCTRL-CAPTURE-PROBE-{}", std::process::id());
+    let win = match OwnedTestWindow::new(400, 300, &title) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("capture-probe: create window failed: {e}");
+            return 1;
+        }
+    };
+    let gw = match GameWindow::from_hwnd(win.hwnd) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("capture-probe: wrap window failed: {e}");
+            return 1;
+        }
+    };
+    let layout = match gw.layout() {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("capture-probe: layout failed: {e}");
+            return 1;
+        }
+    };
+    let mut cap = match WgcCapture::new(win.hwnd, layout) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("capture-probe: WGC start failed: {e}");
+            return 1;
+        }
+    };
+    // first frame may take a moment; nudge repaints our own probe window
+    // because WGC only delivers frames on content change
+    let mut frames = Vec::new();
+    for i in 0..2 {
+        win.nudge();
+        match cap.capture() {
+            Ok(f) => frames.push(f),
+            Err(e) => {
+                eprintln!("capture-probe: frame {i} failed: {e}");
+                return 1;
+            }
+        }
+    }
+    let f = &frames[1];
+    let nonzero = f.data.iter().filter(|&&b| b != 0).count();
+    let distinct = f
+        .data
+        .iter()
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    println!(
+        "capture-probe: frame {}x{} stride={} nonzero={nonzero} distinct_values={distinct} arrived={}",
+        f.width, f.height, f.stride, cap.frames_arrived()
+    );
+    if f.width == 0 || f.height == 0 {
+        eprintln!("capture-probe: empty frame");
+        return 1;
+    }
+    if nonzero == 0 {
+        eprintln!("capture-probe: frame is all black — capture produced no image");
+        return 1;
+    }
+    println!("capture-probe: OK");
+    0
 }
 
 /// Create a probe window, find it through GameWindow (the public path),
