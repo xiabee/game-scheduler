@@ -43,12 +43,14 @@
 | M18 | `.nightly/` 从本地 exclude 移入入库 .gitignore（其他克隆/win-devops 不再见到 scratch 噪音）；`--locked` 构建通过；`cargo test --release` 全绿；soak #2 带内存采样：45s 连续捕获工作集 +0.5MB 无泄漏 | PASS | 057e15e | 见左 |
 | M19 | 【复审发现】`window_process` 的 OpenProcess 句柄从不关闭——观察循环每周期泄漏一个句柄；已 CloseHandle + 句柄计数回归测试（50 次查找增量 ≤25 容差） | PASS | 76fdb1e | 61 测试绿 |
 | M20 | 【复审发现】WgcCapture 无 Drop——重标定丢弃后端时会话可能残留；补 session/pool Close（结构性验证；本机 WGC 静默无法实测帧） | PASS | 83d1a9b | 61 测试绿 + clippy 0 |
+| M21 | capture.rs 逐行复审：FrameArrived 注册补 stage 标签；GetMonitorInfoW 失败改用 GetLastError（替代硬编码错误码） | PASS | 5a4b478 | clippy 0 / 61 绿 |
+| M22 | build_backend 改返回 Result：重标定期后端构造失败降级 synthetic 并告警（原先 process::exit 会跳过 SUMMARY 硬退）；verdict_notes 封顶 50 条防长会话无界增长；三级回退链保持完整 | PASS | be465c3 | 61 测试绿 + auto 链实机复验（WGC 静默告警→GDI 正常） |
 
 - CI：`scripts/ci-local.ps1` Rust 门禁 = cargo fmt --check / **clippy** / test / build；**无 cargo 的节点诚实 SKIP 并公告**（win-devops 安装 Rust 前 remote acceptance 仅覆盖 Go 侧）
 | M14 | dry-run resize 重标定修复（check_geometry Pause 后循环曾永远对着旧快照报错；现自动更新 calibrated + 重建后端；`--resize-after` 驱动实测） | PASS | （见 git log） | 实机：resize 后 recalibrated、归一化位置跨重标定保持 0.703/0.703；same-point guard 实测触发 |
 | M15 | `ci-local.ps1 -Race` 补实现（MR 文档描述的能力实际缺失；便携 mingw64 提供 CGO）+ soak 218 周期/60s 干净退出 + README CI 门禁说明 | PASS | 11fbdf0 | `-Race` 全绿无 DATA RACE；soak SUMMARY=completed |
 
-- REMOTE CI：本地全绿后 `xnightops ci run game-scheduler --node win-devops` 共 10 轮 **PASS**（exit 0；节点无 Rust，Go 侧验收）
+- REMOTE CI：本地全绿后 `xnightops ci run game-scheduler --node win-devops` 共 13 轮 **PASS**（exit 0；节点无 Rust，Go 侧验收）
 - 已 push：2828d9a..057e15e 全部在远端（分两批推送，无 force）
 - 安全：全程零输入发送（input 模块仍为空 stub，NC4 前不存在）；无注入/无内存读取/无 hooks；WGC 与 PrintWindow 均为 OS 提供的捕获 API；无新增危险依赖（windows/png）
 - Remaining：NC1 起步（需 ONNX 模型/训练脚手架前置）、WGC 非 RDP 环境复验、win-devops 装 Rust 工具链
