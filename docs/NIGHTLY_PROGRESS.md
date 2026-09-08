@@ -34,10 +34,13 @@
 | M7 | NC0 实机 resize 验收自动化（探针窗口画归一化锚定图案；WM_PRINT 根因修复——PrintWindow(PW_CLIENTONLY) 走 WM_PRINT 路径取内容，缺处理器读到陈旧表面） | PASS | 3e71fc6 | 5/5 稳定运行（56 测试） |
 | M8 | clippy 门禁：controller 0 告警，ci-local 加 clippy 阶段 | PASS | （本表下方 commit） | clippy --all-targets 0 warning |
 | M9 | dry-run 瞬态错误有界退避重试（RetryTracker，100ms×2^n 封顶 2s，5 次）；WindowGone 保持终态；GDI 后端区分可重试 GetDIBits 失败；`now` 写法清理 | PASS | （本表下方 commit） | 58 测试全绿 + gdi 冒烟 |
-| M10 | ROADMAP NC0 状态 ✅ + §9 夜班记录 + 下一夜班起点 NC1；README 增 controller/NC0 章节 | PASS | （本表下方 commit） | 文档一致性核对 |
+| M10 | ROADMAP NC0 状态 ✅ + §9 夜班记录 + 下一夜班起点 NC1；README 增 controller/NC0 章节 | PASS | 8b93a24 | 文档一致性核对 |
+| M10b | `--list-windows`（find_all 重构）+ dry-run 参数校验（空 window/非法 backend/fps/model/confidence 一律 exit 2 明确报错） | PASS | （见 git log） | 实机：空 window 拒绝、bogus backend 拒绝、list-windows 列出真实窗口 |
+| M11 | README_EN 镜像 controller 章节 | PASS | f2d954c | — |
+| M12 | `--session-log` TSV 会话日志（每周期一行 + SUMMARY；字段净化；写失败仅告警一次不中断观察）；实测探针窗口检测点精确稳定在 normalized (0.7,0.7) | PASS | （见 git log） | 60 测试全绿 + 实机 TSV 校验；发现：PrintWindow 强制渲染 ~280ms/次(640×480)，FpsLimiter 只节流不保证吞吐 |
 
 - CI：`scripts/ci-local.ps1` Rust 门禁 = cargo fmt --check / **clippy** / test / build；**无 cargo 的节点诚实 SKIP 并公告**（win-devops 安装 Rust 前 remote acceptance 仅覆盖 Go 侧）
-- REMOTE CI：本地全绿后 `xnightops ci run game-scheduler --node win-devops` 共 3 轮 **PASS**（2m27s / 31s / 35s，exit 0；节点无 Rust，Go 侧验收）
+- REMOTE CI：本地全绿后 `xnightops ci run game-scheduler --node win-devops` 共 6 轮 **PASS**（exit 0；节点无 Rust，Go 侧验收）
 - 安全：全程零输入发送（input 模块仍为空 stub，NC4 前不存在）；无注入/无内存读取/无 hooks；WGC 与 PrintWindow 均为 OS 提供的捕获 API；无新增危险依赖（windows/png）
 - Remaining：NC1 起步（需 ONNX 模型/训练脚手架前置）、WGC 非 RDP 环境复验、win-devops 装 Rust 工具链
 - Next：NC1 Vision Runtime；若模型未就绪，次选 `tools/vision/` 训练脚手架或 controller 打包集成
