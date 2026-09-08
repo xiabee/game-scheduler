@@ -425,6 +425,7 @@ fn run_foreign_probe(needle: &str) -> i32 {
 /// GDI(PrintWindow) capture smoke against our own probe window.
 fn run_gdi_probe() -> i32 {
     use controller::capture::{CaptureBackend, GdiPrintWindowCapture};
+    use controller::vision::Detector;
     use controller::window::{ensure_dpi_awareness, OwnedTestWindow};
     ensure_dpi_awareness();
     let title = format!("NFCTRL-GDI-PROBE-{}", std::process::id());
@@ -468,9 +469,33 @@ fn run_gdi_probe() -> i32 {
                 "gdi-probe: frame {}x{} stride={} nonzero={nonzero} distinct_values={distinct}",
                 f.width, f.height, f.stride
             );
+            println!(
+                "gdi-probe: pixel(10,10)={:?} pixel(280,210)={:?} pixel(399,299)={:?}",
+                f.pixel(10, 10),
+                f.pixel(280, 210),
+                f.pixel(399, 299)
+            );
             if f.width == 0 || f.height == 0 || nonzero == 0 {
                 eprintln!("gdi-probe: frame is empty or all black");
                 return 1;
+            }
+            // perception sanity: the probe pattern must be detectable
+            let mut detector = controller::vision::MockDetector::synthetic_rect();
+            match controller::pipeline::letterbox_to_model(&f, 256, 256) {
+                Ok(model) => match detector.detect(&model).first() {
+                    Some(d) => println!(
+                        "gdi-probe: detect {} rect=({:.0},{:.0} {:.0}x{:.0}) conf={:.2}",
+                        d.label, d.rect.x, d.rect.y, d.rect.w, d.rect.h, d.confidence
+                    ),
+                    None => {
+                        eprintln!("gdi-probe: WARNING detector found nothing in probe pattern");
+                        return 1;
+                    }
+                },
+                Err(e) => {
+                    eprintln!("gdi-probe: letterbox failed: {e}");
+                    return 1;
+                }
             }
             println!("gdi-probe: OK");
             0

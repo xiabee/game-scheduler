@@ -10,8 +10,8 @@ use std::sync::OnceLock;
 use windows::core::{BOOL, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, ClientToScreen, CreateSolidBrush, DeleteObject, EndPaint, FillRect, InvalidateRect,
-    UpdateWindow, PAINTSTRUCT,
+    BeginPaint, ClientToScreen, CreateSolidBrush, DeleteObject, EndPaint, FillRect, RedrawWindow,
+    HDC, PAINTSTRUCT, RDW_ERASE, RDW_INVALIDATE, RDW_UPDATENOW,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{
@@ -337,13 +337,20 @@ impl OwnedTestWindow {
         .map_err(ControllerError::Win)
     }
 
-    /// Invalidate + synchronously repaint so window-capture backends that
-    /// only deliver frames on content change (WGC dirty tracking) get a
-    /// new frame. Purely affects this process's own probe window.
-    pub fn nudge(&self) {
+    /// Force a synchronous full repaint via RedrawWindow(RDW_UPDATENOW):
+    /// the window's surface must reflect the CURRENT client size and
+    /// pattern immediately, because capture backends (and the resize
+    /// stability test) read the surface right after geometry changes.
+    /// Purely affects this process's own probe window.
+    pub fn nudge(&self) -> bool {
         unsafe {
-            let _ = InvalidateRect(Some(self.hwnd), None, true);
-            let _ = UpdateWindow(self.hwnd);
+            RedrawWindow(
+                Some(self.hwnd),
+                None,
+                None,
+                RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW,
+            )
+            .as_bool()
         }
     }
 }
@@ -402,9 +409,26 @@ fn register_probe_class() -> u16 {
     })
 }
 
-/// Paint counter so every repaint changes actual pixels — window-capture
-/// backends (WGC) only deliver frames when composed content changes.
-static PAINT_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The probe window paints a DETERMINISTIC scene: dark background with a
+/// red rectangle (green border) anchored at normalized (0.6, 0.6)-(0.8,
+/// 0.8) of the client area. Because the anchor is normalized, the pattern
+/// keeps its position across window resizes — the property the dry-run's
+/// resolution-independence acceptance test checks.
+///
+/// PAINT_COUNT exposes how many WM_PAINTs actually executed (diagnostics
+/// for capture-timing questions: "did my forced repaint run at all?").
+static PAINT_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static PRINT_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// WM_PAINT executions across all probe windows in this process.
+pub fn probe_paint_count() -> u32 {
+    PAINT_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// WM_PRINT executions (PrintWindow path diagnostics).
+pub fn probe_print_count() -> u32 {
+    PRINT_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 unsafe extern "system" fn probe_wnd_proc(
     hwnd: HWND,
@@ -412,26 +436,55 @@ unsafe extern "system" fn probe_wnd_proc(
     wparam: windows::Win32::Foundation::WPARAM,
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
-    use std::sync::atomic::Ordering;
+    use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, WM_PRINT};
+    // PrintWindow(PW_CLIENTONLY) asks the window to render into a foreign
+    // DC via WM_PRINT; without an explicit handler the content falls back
+    // to a stale redirection surface. Draw the scene ourselves into
+    // wparam's HDC.
+    if msg == WM_PRINT {
+        PRINT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let hdc = HDC(wparam.0 as *mut core::ffi::c_void);
+        draw_probe_scene(hwnd, hdc);
+        return windows::Win32::Foundation::LRESULT(0);
+    }
     if msg == windows::Win32::UI::WindowsAndMessaging::WM_PAINT {
-        let seq = PAINT_SEQ.fetch_add(1, Ordering::Relaxed);
+        PAINT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut ps = PAINTSTRUCT::default();
         let hdc = unsafe { BeginPaint(hwnd, &mut ps) };
-        // color drifts with the paint counter: visible, always-changing
-        let r = (seq * 37 % 200 + 40) as u32;
-        let g = (seq * 89 % 200 + 40) as u32;
-        let b = (seq * 151 % 200 + 40) as u32;
-        let brush = unsafe {
-            CreateSolidBrush(windows::Win32::Foundation::COLORREF(
-                (r << 16) | (g << 8) | b,
-            ))
-        };
-        unsafe { FillRect(hdc, &ps.rcPaint, brush) };
-        let _ = unsafe { DeleteObject(brush.into()) };
+        draw_probe_scene(hwnd, hdc);
         let _ = unsafe { EndPaint(hwnd, &ps) };
         return windows::Win32::Foundation::LRESULT(0);
     }
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+/// Draw the deterministic probe scene (dark bg + red rect anchored at
+/// normalized (0.6,0.6)-(0.8,0.8)) into any HDC covering hwnd's client.
+unsafe fn draw_probe_scene(hwnd: HWND, hdc: HDC) {
+    let mut rc = RECT::default();
+    let _ = unsafe { GetClientRect(hwnd, &mut rc) };
+    let (cw, ch) = ((rc.right - rc.left).max(1), (rc.bottom - rc.top).max(1));
+
+    // background: dark gray
+    let bg = unsafe { CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x1C1C1C)) };
+    unsafe { FillRect(hdc, &rc, bg) };
+    let _ = unsafe { DeleteObject(bg.into()) };
+
+    // normalized (0.6,0.6)-(0.8,0.8) -> pixels; +1 keeps the rect
+    // non-empty on tiny clients
+    let x0 = (cw as f32 * 0.6).round() as i32;
+    let y0 = (ch as f32 * 0.6).round() as i32;
+    let x1 = (cw as f32 * 0.8).round() as i32;
+    let y1 = (ch as f32 * 0.8).round() as i32;
+    let rect = RECT {
+        left: x0,
+        top: y0,
+        right: x1.max(x0 + 1),
+        bottom: y1.max(y0 + 1),
+    };
+    let fill = unsafe { CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x001028C8)) }; // COLORREF 0x00bbggrr = r200 g40 b16
+    unsafe { FillRect(hdc, &rect, fill) };
+    let _ = unsafe { DeleteObject(fill.into()) };
 }
 
 // ---------------------------------------------------------------------------

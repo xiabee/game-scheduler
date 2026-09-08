@@ -183,3 +183,116 @@ fn emergency_latch_terminates_the_loop_midway() {
     }
     assert_eq!(ran, 2, "exactly two cycles ran before the emergency stop");
 }
+
+/// ROADMAP NC0 acceptance, automated: "把窗口从 1080p 拖到另一尺寸,dry-run
+/// 的 normalized 坐标保持稳定". The probe window paints a red rect anchored
+/// at normalized (0.6,0.6)-(0.8,0.8); after a resize the pipeline must —
+/// after governor-mandated recalibration — report the same normalized
+/// position. Uses the real GDI capture backend against a real window.
+#[test]
+fn window_resize_keeps_normalized_position_stable() {
+    use controller::capture::GdiPrintWindowCapture;
+    use controller::safety::SafetyGovernor;
+    use controller::window::{ensure_dpi_awareness, GameWindow, OwnedTestWindow};
+
+    ensure_dpi_awareness();
+    let title = format!("NFCTRL-RESIZE-STABILITY-{}", std::process::id());
+    let win = OwnedTestWindow::new(400, 300, &title).expect("create window");
+    let wrapped = GameWindow::from_hwnd(win.hwnd).expect("wrap");
+
+    let measure = |layout: &controller::window::WindowLayout| -> (f32, f32, String) {
+        let mut cap = GdiPrintWindowCapture::new(win.hwnd, layout.clone()).expect("cap");
+        let mut detector = MockDetector::synthetic_rect();
+        // freshly composed content can lag by a frame or two (and after a
+        // resize the surface still holds the old size for a while): skip
+        // frames whose dimensions don't match the calibrated layout — the
+        // same contract SafetyGovernor::check_geometry enforces live.
+        for attempt in 0..20 {
+            let paints_before = controller::window::probe_paint_count();
+            let prints_before = controller::window::probe_print_count();
+            win.nudge();
+            let paints_after = controller::window::probe_paint_count();
+            let _ = (paints_before, prints_before, paints_after);
+            let frame = cap.capture().expect("frame");
+
+            if frame.width != layout.client_size.0 as u32
+                || frame.height != layout.client_size.1 as u32
+            {
+                std::thread::sleep(Duration::from_millis(15 + attempt * 5));
+                continue;
+            }
+            let model = letterbox_to_model(&frame, 256, 256).expect("letterbox");
+            let dets = detector.detect(&model);
+            if let Some(det) = dets.first() {
+                let t = Transform::new(layout, 256, 256).expect("t");
+                let client = t.rect_model_to_client(det.rect).expect("inverse");
+                let c = client.center();
+                let n = t.client_to_normalized(c.0, c.1).expect("normalized");
+                let info = format!(
+                    "frame={}x{} client_rect=({:.0},{:.0} {:.0}x{:.0}) conf={:.2} paints={paints_after} prints_now={}",
+                    frame.width,
+                    frame.height,
+                    client.x,
+                    client.y,
+                    client.w,
+                    client.h,
+                    det.confidence,
+                    controller::window::probe_print_count() - prints_before
+                );
+                return (n.0, n.1, info);
+            }
+            std::thread::sleep(Duration::from_millis(15 + attempt * 5));
+        }
+        // diagnostic dump so a regression is diagnosable from the log
+        let frame = cap.capture().expect("frame");
+        let samples: Vec<Option<[u8; 4]>> = [
+            (10u32, 10u32),
+            (200, 150),
+            (250, 180),
+            (300, 220),
+            (399, 299),
+        ]
+        .iter()
+        .map(|(x, y)| frame.pixel(*x, *y))
+        .collect();
+        let distinct = frame
+            .data
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        panic!("probe pattern never detected after retries; distinct_bytes={distinct} samples={samples:?}");
+    };
+
+    let layout_a = wrapped.layout().expect("layout a");
+    let (ax, ay, a_info) = measure(&layout_a);
+    assert!(
+        (ax - 0.7).abs() < 0.03 && (ay - 0.7).abs() < 0.03,
+        "first measurement must be at normalized (0.7, 0.7), got ({ax},{ay}) [{a_info}]"
+    );
+
+    win.set_size(500, 400).expect("resize");
+    let layout_b = wrapped.layout().expect("layout b");
+
+    // the governor MUST flag the resize (Pause) before anyone recalibrates
+    let mut gov = SafetyGovernor::new(SafetyConfig::default(), t0()).expect("gov");
+    let verdict = gov.check_geometry(&layout_a, &layout_b);
+    assert!(
+        matches!(verdict, controller::safety::GovernorVerdict::Pause { .. }),
+        "resize must produce Pause, got {verdict:?}"
+    );
+
+    // recalibrated measurement on the new geometry
+    let (bx, by, b_info) = measure(&layout_b);
+    assert!(
+        (bx - 0.7).abs() < 0.03 && (by - 0.7).abs() < 0.03,
+        "normalized position must survive the resize, got ({bx},{by}) layout_b={layout_b:?} [{b_info}]"
+    );
+    assert!(
+        (ax - bx).abs() < 0.02 && (ay - by).abs() < 0.02,
+        "before/after normalized positions diverge: ({ax},{ay}) [{a_info}] vs ({bx},{by}) [{b_info}]"
+    );
+}
+
+fn t0() -> Instant {
+    Instant::now()
+}
