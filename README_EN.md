@@ -106,7 +106,7 @@ input is ever sent** — the input module is deliberately empty until NC4.
 
 ```powershell
 cd controller
-cargo test                     # 60 tests
+cargo test                     # 67+ tests
 cargo run -- --self-probe      # window module smoke
 cargo run -- --capture-gdi     # GDI capture + detection smoke
 cargo run -- --list-windows    # enumerate visible windows

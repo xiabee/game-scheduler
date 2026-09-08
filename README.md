@@ -145,7 +145,7 @@ internal/vision     截图辅助接口骨架(Detector / Matcher / OCR / FrameSou
 
 ```powershell
 cd controller
-cargo test                     # 60 个测试
+cargo test                     # 67+ 个测试
 cargo run -- --self-probe      # 窗口模块冒烟
 cargo run -- --capture-gdi     # GDI 捕获 + 检测冒烟
 cargo run -- --dry-run --backend auto --duration 5 --debug-dir ../_debug
