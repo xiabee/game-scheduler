@@ -599,6 +599,16 @@ mod wgc {
         out
     }
 
+    impl Drop for WgcCapture {
+        fn drop(&mut self) {
+            // End the capture graph explicitly: dropping the COM refs alone
+            // can leave the OS capture session alive (the recalibration path
+            // discards backends mid-session on healthy machines).
+            let _ = self.session.Close();
+            let _ = self.pool.Close();
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
