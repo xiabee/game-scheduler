@@ -37,13 +37,17 @@
 | M10 | ROADMAP NC0 状态 ✅ + §9 夜班记录 + 下一夜班起点 NC1；README 增 controller/NC0 章节 | PASS | 8b93a24 | 文档一致性核对 |
 | M10b | `--list-windows`（find_all 重构）+ dry-run 参数校验（空 window/非法 backend/fps/model/confidence 一律 exit 2 明确报错） | PASS | （见 git log） | 实机：空 window 拒绝、bogus backend 拒绝、list-windows 列出真实窗口 |
 | M11 | README_EN 镜像 controller 章节 | PASS | f2d954c | — |
-| M12 | `--session-log` TSV 会话日志（每周期一行 + SUMMARY；字段净化；写失败仅告警一次不中断观察）；实测探针窗口检测点精确稳定在 normalized (0.7,0.7) | PASS | （见 git log） | 60 测试全绿 + 实机 TSV 校验；发现：PrintWindow 强制渲染 ~280ms/次(640×480)，FpsLimiter 只节流不保证吞吐 |
+| M12 | `--session-log` TSV 会话日志（每周期一行 + SUMMARY；字段净化；写失败仅告警一次不中断观察）；实测探针窗口检测点精确稳定在 normalized (0.7,0.7) | PASS | 4934c96 前后 | 60 测试全绿 + 实机 TSV 校验；发现：PrintWindow 强制渲染 ~280ms/次(640×480)，FpsLimiter 只节流不保证吞吐 |
+| M16 | WGC BLOCKED 定性：`RequestAccessAsync(Programmatic)`=Allowed(4) 排除管控理论；RDP 会话 DWM 不供帧成立；复验条件=物理 console 登录后跑 `--capture-monitor` | PASS | fb265b7 | 诊断内建、60 测试绿 |
+| M17 | run_cycle 返回帧，debug 导出不再二次捕获（原先每导出周期多一次全量 PrintWindow） | PASS | 74ae4b6 | 60 测试绿 + PNG 导出复验 |
+| M18 | `.nightly/` 从本地 exclude 移入入库 .gitignore（其他克隆/win-devops 不再见到 scratch 噪音）；`--locked` 构建通过；`cargo test --release` 全绿；soak #2 带内存采样：45s 连续捕获工作集 +0.5MB 无泄漏 | PASS | 057e15e | 见左 |
 
 - CI：`scripts/ci-local.ps1` Rust 门禁 = cargo fmt --check / **clippy** / test / build；**无 cargo 的节点诚实 SKIP 并公告**（win-devops 安装 Rust 前 remote acceptance 仅覆盖 Go 侧）
 | M14 | dry-run resize 重标定修复（check_geometry Pause 后循环曾永远对着旧快照报错；现自动更新 calibrated + 重建后端；`--resize-after` 驱动实测） | PASS | （见 git log） | 实机：resize 后 recalibrated、归一化位置跨重标定保持 0.703/0.703；same-point guard 实测触发 |
 | M15 | `ci-local.ps1 -Race` 补实现（MR 文档描述的能力实际缺失；便携 mingw64 提供 CGO）+ soak 218 周期/60s 干净退出 + README CI 门禁说明 | PASS | 11fbdf0 | `-Race` 全绿无 DATA RACE；soak SUMMARY=completed |
 
-- REMOTE CI：本地全绿后 `xnightops ci run game-scheduler --node win-devops` 共 7 轮 **PASS**（exit 0；节点无 Rust，Go 侧验收）
+- REMOTE CI：本地全绿后 `xnightops ci run game-scheduler --node win-devops` 共 10 轮 **PASS**（exit 0；节点无 Rust，Go 侧验收）
+- 已 push：2828d9a..057e15e 全部在远端（分两批推送，无 force）
 - 安全：全程零输入发送（input 模块仍为空 stub，NC4 前不存在）；无注入/无内存读取/无 hooks；WGC 与 PrintWindow 均为 OS 提供的捕获 API；无新增危险依赖（windows/png）
 - Remaining：NC1 起步（需 ONNX 模型/训练脚手架前置）、WGC 非 RDP 环境复验、win-devops 装 Rust 工具链
 - Next：NC1 Vision Runtime；若模型未就绪，次选 `tools/vision/` 训练脚手架或 controller 打包集成
