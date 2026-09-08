@@ -22,12 +22,322 @@ fn main() {
         std::process::exit(run_foreign_probe(&needle));
     }
     if args.iter().any(|a| a == "--dry-run") {
-        // NC0 M5 will wire: window -> capture -> resize -> mock detection ->
-        // inverse transform -> debug overlay. Today: explicit not-implemented.
-        eprintln!("--dry-run is delivered in NC0 M5; not wired yet");
-        std::process::exit(2);
+        let opts = DryRunOptions::parse(&args);
+        std::process::exit(run_dry_run(&opts));
     }
-    println!("native-controller (NC0): use --self-probe | --capture-probe | --dry-run");
+    println!(
+        "native-controller (NC0): use --self-probe | --capture-probe | --capture-gdi | --dry-run"
+    );
+}
+
+/// Options for the dry-run pipeline loop. The dry-run NEVER sends input:
+/// it observes, detects, plans and logs — that is its whole purpose.
+#[derive(Debug, Clone)]
+struct DryRunOptions {
+    /// Window title substring; `@probe` creates an owned probe window so
+    /// the demo runs standalone (default).
+    window: String,
+    backend: String, // auto | wgc | gdi | synthetic
+    fps: f32,
+    duration_secs: f32,
+    model: u32,
+    min_confidence: f32,
+    debug_dir: Option<String>,
+    require_foreground: bool,
+    /// Latch the governor's emergency stop after N seconds (exercises the
+    /// emergency path deterministically).
+    emergency_after_secs: Option<f32>,
+}
+
+impl DryRunOptions {
+    fn parse(args: &[String]) -> DryRunOptions {
+        fn opt(args: &[String], name: &str) -> Option<String> {
+            args.iter()
+                .position(|a| a == name)
+                .and_then(|i| args.get(i + 1))
+                .cloned()
+        }
+        DryRunOptions {
+            window: opt(args, "--window").unwrap_or_else(|| "@probe".into()),
+            backend: opt(args, "--backend").unwrap_or_else(|| "auto".into()),
+            fps: opt(args, "--fps")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(15.0),
+            duration_secs: opt(args, "--duration")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3.0),
+            model: opt(args, "--model")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(256),
+            min_confidence: opt(args, "--min-confidence")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.6),
+            debug_dir: opt(args, "--debug-dir"),
+            require_foreground: args.iter().any(|a| a == "--require-foreground"),
+            emergency_after_secs: opt(args, "--emergency-after").and_then(|v| v.parse().ok()),
+        }
+    }
+}
+
+fn run_dry_run(opts: &DryRunOptions) -> i32 {
+    use controller::capture::{
+        CaptureBackend, FpsLimiter, GdiPrintWindowCapture, SyntheticCapture, WgcCapture,
+    };
+    use controller::pipeline::{draw_overlay, run_cycle};
+    use controller::safety::{SafetyConfig, SafetyGovernor};
+    use controller::vision::{Detector, MockDetector};
+    use controller::window::{ensure_dpi_awareness, GameWindow, OwnedTestWindow};
+
+    ensure_dpi_awareness();
+
+    // --- window: @probe creates our own window; otherwise find by title ---
+    let (target_hwnd, _owned_probe, calibrated) = if opts.window == "@probe" {
+        let title = format!("NFCTRL-DRYRUN-{}", std::process::id());
+        match OwnedTestWindow::new(640, 480, &title) {
+            Ok(w) => match GameWindow::from_hwnd(w.hwnd).map(|g| g.layout()) {
+                Ok(Ok(l)) => (w.hwnd, Some(w), l),
+                Ok(Err(e)) | Err(e) => {
+                    eprintln!("dry-run: probe window layout failed: {e}");
+                    return 1;
+                }
+            },
+            Err(e) => {
+                eprintln!("dry-run: probe window failed: {e}");
+                return 1;
+            }
+        }
+    } else {
+        match GameWindow::find(Some(&opts.window), None) {
+            Ok(Some(g)) => match g.layout() {
+                Ok(l) => (g.hwnd(), None, l),
+                Err(e) => {
+                    eprintln!("dry-run: layout failed: {e}");
+                    return 1;
+                }
+            },
+            Ok(None) => {
+                eprintln!("dry-run: no window matching {:?}", opts.window);
+                return 1;
+            }
+            Err(e) => {
+                eprintln!("dry-run: find failed: {e}");
+                return 1;
+            }
+        }
+    };
+    println!(
+        "dry-run: window {:?} layout={calibrated:?} backend={} model={}x{} fps={} duration={}s",
+        opts.window, opts.backend, opts.model, opts.model, opts.fps, opts.duration_secs
+    );
+
+    // --- backend: auto tries WGC, falls back to GDI on silence ---
+    let mut backend: Box<dyn CaptureBackend> = match opts.backend.as_str() {
+        "synthetic" => Box::new(SyntheticCapture::new(320, 240).expect("synthetic")),
+        "gdi" => match GdiPrintWindowCapture::new(target_hwnd, calibrated.clone()) {
+            Ok(b) => Box::new(b),
+            Err(e) => {
+                eprintln!("dry-run: gdi backend failed: {e}");
+                return 1;
+            }
+        },
+        "wgc" => match WgcCapture::new(target_hwnd, calibrated.clone()) {
+            Ok(b) => Box::new(b),
+            Err(e) => {
+                eprintln!("dry-run: wgc backend failed: {e}");
+                return 1;
+            }
+        },
+        _ => match WgcCapture::new(target_hwnd, calibrated.clone()) {
+            Ok(mut w) => match w.capture() {
+                Ok(_) => {
+                    println!("dry-run: backend wgc (probe frame OK)");
+                    Box::new(w)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "dry-run: WARNING WGC silent ({e}) - falling back to GDI PrintWindow"
+                    );
+                    match GdiPrintWindowCapture::new(target_hwnd, calibrated.clone()) {
+                        Ok(b) => Box::new(b),
+                        Err(e2) => {
+                            eprintln!("dry-run: gdi fallback failed too: {e2} - using synthetic");
+                            Box::new(SyntheticCapture::new(320, 240).expect("synthetic"))
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                eprintln!(
+                    "dry-run: WARNING WGC unavailable ({e}) - falling back to GDI PrintWindow"
+                );
+                match GdiPrintWindowCapture::new(target_hwnd, calibrated.clone()) {
+                    Ok(b) => Box::new(b),
+                    Err(e2) => {
+                        eprintln!("dry-run: gdi fallback failed too: {e2} - using synthetic");
+                        Box::new(SyntheticCapture::new(320, 240).expect("synthetic"))
+                    }
+                }
+            }
+        },
+    };
+
+    let mut detector: Box<dyn Detector> = Box::new(MockDetector::synthetic_rect());
+    let t0 = std::time::Instant::now();
+    let mut governor = match SafetyGovernor::new(
+        SafetyConfig {
+            min_confidence: opts.min_confidence,
+            ..SafetyConfig::default()
+        },
+        t0,
+    ) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("dry-run: governor config failed: {e}");
+            return 1;
+        }
+    };
+    let mut limiter = match FpsLimiter::new(opts.fps, std::time::Instant::now) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("dry-run: fps config failed: {e}");
+            return 1;
+        }
+    };
+    if let Some(dir) = &opts.debug_dir {
+        std::fs::create_dir_all(dir).ok();
+    }
+
+    let mut cycle: u32 = 0;
+    let mut allowed_count: u32 = 0;
+    let mut verdict_notes: Vec<String> = Vec::new();
+    while t0.elapsed().as_secs_f32() < opts.duration_secs {
+        if let Some(after) = opts.emergency_after_secs {
+            if t0.elapsed().as_secs_f32() >= after {
+                governor.trigger_emergency_stop();
+            }
+        }
+        limiter.wait_tick();
+        cycle += 1;
+
+        let current = match GameWindow::from_hwnd(target_hwnd) {
+            Ok(g) => match g.layout() {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("dry-run: cycle {cycle}: window layout failed ({e}) - stopping");
+                    break;
+                }
+            },
+            Err(_) => {
+                eprintln!("dry-run: cycle {cycle}: target window gone - stopping");
+                break;
+            }
+        };
+        let foreground = if opts.require_foreground {
+            GameWindow::from_hwnd(target_hwnd)
+                .and_then(|g| g.is_foreground())
+                .unwrap_or(false)
+        } else {
+            true // NC0 dry-run observes without foreground requirements
+        };
+
+        let now = t0 + std::time::Duration::from_nanos(t0.elapsed().as_nanos() as u64);
+        let report = match run_cycle(
+            cycle,
+            backend.as_mut(),
+            detector.as_mut(),
+            &mut governor,
+            &calibrated,
+            &current,
+            true, // we re-resolved the same target hwnd above
+            foreground,
+            opts.model,
+            opts.model,
+            now,
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("dry-run: cycle {cycle}: pipeline error: {e}");
+                break;
+            }
+        };
+
+        if report.allowed() {
+            allowed_count += 1;
+        } else if let Some(reason) = report
+            .pre_verdict
+            .reason()
+            .or(report.action_verdict.as_ref().and_then(|v| v.reason()))
+        {
+            let note = format!("cycle {cycle}: {reason}");
+            if verdict_notes.last() != Some(&note) {
+                verdict_notes.push(note);
+            }
+        }
+
+        let reportable = cycle % 15 == 0 || !report.pre_verdict.is_allow();
+        if reportable {
+            if let Some(d) = report.client_detections.first() {
+                let c = d.rect.center();
+                let dp = report.desktop_points.first().copied().unwrap_or((0.0, 0.0));
+                println!(
+                    "dry-run: cycle {} conf={:.2} client=({:.0},{:.0}) desktop=({:.0},{:.0})",
+                    cycle, d.confidence, c.0, c.1, dp.0, dp.1
+                );
+            }
+        }
+
+        if let Some(dir) = &opts.debug_dir {
+            if reportable {
+                if let Ok(mut frame) = backend.capture() {
+                    draw_overlay(&mut frame, &report.client_detections, [0, 230, 255, 255]);
+                    let path = format!("{dir}/cycle_{cycle:05}.png");
+                    match export_png(&path, &frame) {
+                        Ok(()) => println!("dry-run: debug frame {path}"),
+                        Err(e) => eprintln!("dry-run: png export failed: {e}"),
+                    }
+                }
+            }
+        }
+
+        if report.pre_verdict.is_stop() {
+            if let Some(reason) = report.pre_verdict.reason() {
+                println!("dry-run: governor STOP after cycle {cycle}: {reason}");
+            }
+            break;
+        }
+    }
+
+    println!(
+        "dry-run: finished - cycles={cycle} allowed={allowed_count} distinct_verdicts={}",
+        verdict_notes.len()
+    );
+    for note in &verdict_notes {
+        println!("dry-run: verdict {note}");
+    }
+    if cycle == 0 {
+        eprintln!("dry-run: no cycles ran");
+        return 1;
+    }
+    println!("dry-run: OK (no input was sent - NC0 is observation-only)");
+    0
+}
+
+fn export_png(path: &str, frame: &controller::frame::Frame) -> std::result::Result<(), String> {
+    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), frame.width, frame.height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    // BGRA -> RGBA, honoring stride
+    let mut rgba = Vec::with_capacity((frame.width * frame.height * 4) as usize);
+    for y in 0..frame.height {
+        for x in 0..frame.width {
+            let px = frame.pixel(x, y).unwrap_or([0, 0, 0, 255]);
+            rgba.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+        }
+    }
+    writer.write_image_data(&rgba).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Real-capture smoke: create a probe window, capture it through Windows

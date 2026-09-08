@@ -12,6 +12,7 @@
 pub mod capture;
 pub mod frame;
 pub mod input;
+pub mod pipeline;
 pub mod protocol;
 pub mod safety;
 pub mod state;
