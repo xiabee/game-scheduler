@@ -183,7 +183,7 @@ mod wgc {
     use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem};
     use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
     use windows::Graphics::DirectX::DirectXPixelFormat;
-    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Foundation::{GetLastError, HWND};
     use windows::Win32::Graphics::Direct3D::{
         D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0,
     };
@@ -289,14 +289,16 @@ mod wgc {
             let _ = session.SetIsCursorCaptureEnabled(false);
             let arrived = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
             let arrived_cb = arrived.clone();
-            let _arrived_token = pool.FrameArrived(&TypedEventHandler::<
-                Direct3D11CaptureFramePool,
-                windows::core::IInspectable,
-            >::new(move |_pool, _args| {
-                use std::sync::atomic::Ordering;
-                arrived_cb.fetch_add(1, Ordering::Relaxed);
-                Ok(())
-            }))?;
+            let _arrived_token = pool
+                .FrameArrived(&TypedEventHandler::<
+                    Direct3D11CaptureFramePool,
+                    windows::core::IInspectable,
+                >::new(move |_pool, _args| {
+                    use std::sync::atomic::Ordering;
+                    arrived_cb.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
+                }))
+                .map_err(|e| stage("wgc:frame-arrived", ControllerError::Win(e)))?;
             session
                 .StartCapture()
                 .map_err(|e| stage("wgc:start", ControllerError::Win(e)))?;
@@ -334,9 +336,14 @@ mod wgc {
             };
             if !unsafe { windows::Win32::Graphics::Gdi::GetMonitorInfoW(hmon, &mut info) }.as_bool()
             {
-                return Err(ControllerError::Win(windows::core::Error::from_hresult(
-                    windows::core::HRESULT(0x8007139Fu32 as i32),
-                )));
+                return Err(ControllerError::Stage(
+                    "wgc:monitor-info",
+                    Box::new(ControllerError::Win(windows::core::Error::from_hresult(
+                        windows::core::HRESULT::from_win32(
+                            unsafe { windows::Win32::Foundation::GetLastError() }.0,
+                        ),
+                    ))),
+                ));
             }
             let (device, context) = make_d3d_device()
                 .map_err(|e| ControllerError::Stage("wgc:d3d-device", Box::new(e)))?;
@@ -642,7 +649,7 @@ mod gdi {
     use crate::frame::{Frame, BYTES_PER_PIXEL};
     use crate::window::WindowLayout;
     use crate::{ControllerError, Result};
-    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Foundation::{GetLastError, HWND};
     use windows::Win32::Graphics::Gdi::{
         CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
         ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
