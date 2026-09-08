@@ -149,6 +149,8 @@ cargo test                     # 60 个测试
 cargo run -- --self-probe      # 窗口模块冒烟
 cargo run -- --capture-gdi     # GDI 捕获 + 检测冒烟
 cargo run -- --dry-run --backend auto --duration 5 --debug-dir ../_debug
+# 注意:实际吞吐受每周期捕获成本限制(PrintWindow 强制渲染 ~280ms/640x480),
+# --fps 只是节流上限;高吞吐捕获走 WGC(NC1+ 的性能路径)。
 # dry-run 可选:--window <标题|@probe> --backend auto|wgc|gdi|synthetic
 #            --fps N --model N --min-confidence F --require-foreground --emergency-after S
 ```

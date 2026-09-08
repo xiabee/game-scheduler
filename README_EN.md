@@ -111,6 +111,9 @@ cargo run -- --self-probe      # window module smoke
 cargo run -- --capture-gdi     # GDI capture + detection smoke
 cargo run -- --list-windows    # enumerate visible windows
 cargo run -- --dry-run --backend auto --duration 5 --debug-dir ../_debug
+# Note: real throughput is bounded by per-cycle capture cost (PrintWindow
+# forces a DWM flush, ~280ms at 640x480); --fps only paces. High-throughput
+# capture is WGC's job (NC1+ performance path).
 # options: --window <title|@probe> --backend auto|wgc|gdi|synthetic
 #          --fps N --model N --min-confidence F --require-foreground --emergency-after S
 ```
