@@ -131,6 +131,8 @@ internal/api        net/http 的 JSON REST + 看板 + SSE 实时流
 internal/vision     截图辅助接口骨架(Detector / Matcher / OCR / FrameSource,纯接口定义,不含任何模型或推理实现,供未来"截图辅助录入 / 诊断"扩展)
 ```
 
+> 🧭 **路线图**:下一阶段主线是自研 Native Vision Controller(Rust,窗口捕获 + CV + 状态机 + 普通 Windows 输入),现有第三方工具适配器转为 legacy/fallback,详见 [ROADMAP.md](ROADMAP.md)。`
+
 数据流:**计划(cron)** 或**手动触发** → 运行某个**任务**;任务所属**游戏**选定一个**适配器**;适配器把任务翻译成命令行;`runner` 执行,并把
 `command / stdout / stderr / exit_code / start_time / end_time` 以及失败时的 `error_msg / screenshot_path / retry_count` 记成一条**执行记录**。
 

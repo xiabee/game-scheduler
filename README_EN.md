@@ -79,6 +79,8 @@ internal/vision     screenshot-assist interface skeleton (Detector / Matcher / O
                     for future capture-assisted data entry and diagnostics)
 ```
 
+> 🧭 **Roadmap**: the next phase is a self-built Native Vision Controller (Rust; window capture + CV + state machine + plain Windows input). Existing third-party tool adapters become legacy/fallback — see [ROADMAP.md](ROADMAP.md).
+
 Data flow: a **Plan** (cron) or a **manual trigger** runs a **Task**; the task's
 **Game** selects an **Adapter**; the adapter turns the task into a command line;
 `runner` executes it and an **Execution** row records
