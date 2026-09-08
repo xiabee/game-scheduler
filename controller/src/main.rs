@@ -107,13 +107,6 @@ impl DryRunOptions {
                 .and_then(|i| args.get(i + 1))
                 .cloned()
         }
-        /// Read `n` argv slots after a flag (for multi-value options).
-        fn opt2(args: &[String], name: &str, n: usize) -> Option<Vec<String>> {
-            let pos = args.iter().position(|a| a == name)?;
-            (1..=n)
-                .map(|k| args.get(pos + k).cloned())
-                .collect::<Option<Vec<_>>>()
-        }
         let window = opt(args, "--window").unwrap_or_else(|| "@probe".into());
         if window.trim().is_empty() {
             return Err("--window must be a non-empty title substring (or @probe)".into());
@@ -155,11 +148,41 @@ impl DryRunOptions {
             min_confidence,
             debug_dir: opt(args, "--debug-dir"),
             session_log: opt(args, "--session-log"),
-            resize_after: opt2(args, "--resize-after", 2).and_then(|vals| {
-                let secs = vals[0].parse().ok()?;
-                let (w, h) = vals[1].split_once('x')?;
-                Some((secs, w.trim().parse().ok()?, h.trim().parse().ok()?))
-            }),
+            resize_after: {
+                if args.iter().any(|a| a == "--resize-after") {
+                    let secs: Option<f32> = args
+                        .iter()
+                        .position(|a| a == "--resize-after")
+                        .and_then(|i| args.get(i + 1))
+                        .and_then(|v| v.parse().ok());
+                    let dims = args
+                        .iter()
+                        .position(|a| a == "--resize-after")
+                        .and_then(|i| args.get(i + 2).cloned())
+                        .unwrap_or_default();
+                    let (w, h) = match dims.split_once('x') {
+                        Some(pair) => pair,
+                        None => {
+                            return Err(
+                                "--resize-after requires <seconds> <WxH>, e.g. --resize-after 5 700x500"
+                                    .into(),
+                            )
+                        }
+                    };
+                    match (secs, w.trim().parse::<u32>(), h.trim().parse::<u32>()) {
+                        (Some(secs), Ok(w), Ok(h)) if secs.is_finite() && secs >= 0.0 => {
+                            Some((secs, w, h))
+                        }
+                        _ => {
+                            return Err(
+                                "--resize-after requires a numeric <seconds> and <WxH>".into()
+                            )
+                        }
+                    }
+                } else {
+                    None
+                }
+            },
             require_foreground: args.iter().any(|a| a == "--require-foreground"),
             emergency_after_secs: opt(args, "--emergency-after").and_then(|v| v.parse().ok()),
         })
@@ -830,5 +853,102 @@ fn run_self_probe() -> i32 {
             eprintln!("probe: changed_since failed: {e}");
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        std::iter::once("controller.exe".to_string())
+            .chain(list.iter().map(|s| s.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn parse_defaults_without_flags() {
+        let o = DryRunOptions::parse(&args(&["--dry-run"])).expect("ok");
+        assert_eq!(o.window, "@probe");
+        assert_eq!(o.backend, "auto");
+        assert!((o.fps - 15.0).abs() < f32::EPSILON);
+        assert!((o.duration_secs - 3.0).abs() < f32::EPSILON);
+        assert_eq!(o.model, 256);
+        assert!((o.min_confidence - 0.6).abs() < f32::EPSILON);
+        assert!(!o.require_foreground);
+        assert!(o.session_log.is_none() && o.debug_dir.is_none());
+    }
+
+    #[test]
+    fn empty_window_is_rejected() {
+        let e = DryRunOptions::parse(&args(&["--dry-run", "--window", ""])).unwrap_err();
+        assert!(e.contains("non-empty"), "{e}");
+        let e = DryRunOptions::parse(&args(&["--dry-run", "--window", "   "])).unwrap_err();
+        assert!(e.contains("non-empty"), "{e}");
+    }
+
+    #[test]
+    fn backend_whitelist_is_enforced() {
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--backend", "bogus"])).is_err());
+        for ok in ["auto", "wgc", "gdi", "synthetic"] {
+            assert!(
+                DryRunOptions::parse(&args(&["--dry-run", "--backend", ok])).is_ok(),
+                "{ok} must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn fps_model_confidence_ranges_are_enforced() {
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--fps", "0"])).is_err());
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--fps", "-3"])).is_err());
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--fps", "nan"])).is_err());
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--model", "0"])).is_err());
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--model", "8192"])).is_err());
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--min-confidence", "1.5"])).is_err());
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--min-confidence", "-0.1"])).is_err());
+        // boundaries accepted
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--model", "4096"])).is_ok());
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--min-confidence", "1"])).is_ok());
+    }
+
+    #[test]
+    fn export_png_roundtrips_pixels() {
+        let mut frame = controller::frame::Frame::new(4, 4);
+        frame.set_pixel(1, 2, [10, 20, 30, 255]);
+        frame.set_pixel(3, 0, [200, 150, 100, 255]);
+        let dir = std::env::temp_dir().join(format!("nf_png_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("rt.png");
+        export_png(path.to_str().expect("utf8 path"), &frame).expect("export");
+
+        // decode and verify the two distinctive pixels survive BGRA->RGBA
+        let file = std::fs::File::open(&path).expect("open");
+        let mut reader = png::Decoder::new(std::io::BufReader::new(file))
+            .read_info()
+            .expect("png header");
+        let mut buf = vec![0u8; reader.output_buffer_size().expect("buffer size")];
+        let info = reader.next_frame(&mut buf).expect("decode");
+        assert_eq!((info.width, info.height), (4, 4));
+        let at = |x: u32, y: u32| {
+            let i = (y as usize * info.width as usize + x as usize) * 4;
+            (buf[i], buf[i + 1], buf[i + 2], buf[i + 3])
+        };
+        // BGRA [10,20,30,255] == RGBA (30,20,10,255)
+        assert_eq!(at(1, 2), (30, 20, 10, 255));
+        assert_eq!(at(3, 0), (100, 150, 200, 255));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn resize_after_parses_two_slots() {
+        let o = DryRunOptions::parse(&args(&["--dry-run", "--resize-after", "1.5", "700x500"]))
+            .expect("ok");
+        let (secs, w, h) = o.resize_after.expect("resize option");
+        assert!((secs - 1.5).abs() < f32::EPSILON);
+        assert_eq!((w, h), (700, 500));
+
+        // missing the second slot must be rejected, not silently defaulted
+        assert!(DryRunOptions::parse(&args(&["--dry-run", "--resize-after", "1.5"])).is_err());
     }
 }
