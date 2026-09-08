@@ -51,6 +51,6 @@
 ### 环境发现（重要，供后续夜班复用）
 
 1. **本机当前经 RDP 会话运行**（console 处于锁屏，LogonUI 活跃）。GDI CopyFromScreen / PrintWindow 在 RDP 会话内正常。
-2. **WGC（Windows.Graphics.Capture）在本会话整体静默**：对探针窗口、外进程窗口（ZCode 3840×2064）、主显示器 `for_primary_monitor` 三种目标，`StartCapture` 成功但 `FrameArrived` 永不触发（`frame_arrived_events=0`），`TryGetNextFrame` 恒 S_OK+null。硬件 D3D11 正常（D3D_DRIVER_TYPE_HARDWARE 创建成功）。疑似 RDP 会话限制或组织管控（该机已有 WDAC 管控记录）。诊断路径已内建：`controller --capture-monitor` / `--capture-foreign <title>` / `WgcCapture::frames_arrived()`；自动回退链 WGC→GDI→synthetic 已在 `--dry-run --backend auto` 生效并如实告警。
+2. **WGC（Windows.Graphics.Capture）BLOCKED——环境定性完成（3 次实现尝试 + 4 项诊断）**：对探针窗口、外进程窗口、主显示器三种目标，`StartCapture` 成功但 `FrameArrived` 永不触发（恒 0），`TryGetNextFrame` 恒 S_OK+null；硬件 D3D11 正常；**`RequestAccessAsync(Programmatic)` 返回 `AppCapabilityAccessStatus(4)=Allowed`——同意/管控理论被排除**；`CreateForMonitor` 在 release 构建下也开始 E_INVALIDARG（debug 曾成功，API 层亦不稳定）。结论：RDP 会话（console 锁屏，LogonUI 活跃）的 DWM 不向 WGC 供帧，属环境限制而非代码缺陷。诊断已内建：`--capture-monitor` 会打印 access status；`WgcCapture::frames_arrived()`；auto 回退链 WGC→GDI→synthetic。**WGC 复验条件：物理 console 登录（非 RDP）后重跑 `--capture-monitor`。**
 3. WDAC 拦截上夜未再现（go test 直跑全绿）；`ci-local.ps1` 的退避重试逻辑保留。
 4. `-race` 走 `ci-local.ps1 -Race`（D:\tools\mingw64）未在本次使用。

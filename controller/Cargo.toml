@@ -17,6 +17,7 @@ path = "src/main.rs"
 png = "0.18"
 windows = { version = "0.62", features = [
     "Foundation",
+    "Security_Authorization_AppCapabilityAccess",
     "Foundation_Numerics",
     "Graphics",
     "Graphics_Capture",

@@ -518,6 +518,10 @@ fn run_monitor_probe() -> i32 {
     use controller::capture::CaptureBackend;
     use controller::window::ensure_dpi_awareness;
     ensure_dpi_awareness();
+    println!(
+        "monitor-probe: capture access = {}",
+        controller::capture::WgcCapture::access_status()
+    );
     let mut cap = match controller::capture::WgcCapture::for_primary_monitor() {
         Ok(c) => c,
         Err(e) => {

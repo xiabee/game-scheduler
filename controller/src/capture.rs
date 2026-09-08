@@ -554,6 +554,36 @@ mod wgc {
         pub fn frames_arrived(&self) -> u32 {
             self.arrived.load(std::sync::atomic::Ordering::Relaxed)
         }
+
+        /// Query the capture-access consent status. On unpackaged Win32
+        /// apps this usually fails fast or reports a deny-like status; an
+        /// Allowed answer while frames still don't flow would rule OUT the
+        /// consent theory. Diagnostics only.
+        pub fn access_status() -> String {
+            use windows::Graphics::Capture::{GraphicsCaptureAccess, GraphicsCaptureAccessKind};
+            let op = match GraphicsCaptureAccess::RequestAccessAsync(
+                GraphicsCaptureAccessKind::Programmatic,
+            ) {
+                Ok(op) => op,
+                Err(e) => return format!("unavailable: {e}"),
+            };
+            // poll to completion (2s cap); RequestAccessAsync normally
+            // resolves immediately for unpackaged apps
+            for _ in 0..20 {
+                match op.Status() {
+                    Ok(s) if s.0 == 1 => {
+                        // Completed = 1
+                        return match op.GetResults() {
+                            Ok(status) => format!("{status:?} (raw {})", status.0),
+                            Err(e) => format!("GetResults failed: {e}"),
+                        };
+                    }
+                    Ok(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+                    Err(e) => return format!("status failed: {e}"),
+                }
+            }
+            "timeout waiting for access request".into()
+        }
     }
 
     fn copy_with_row_pitch(src: &[u8], pitch: usize, w: usize, h: usize) -> Vec<u8> {
