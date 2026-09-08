@@ -467,6 +467,13 @@ go vet ./...
 GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs gofmt
 + vet, builds and tests on **Linux and Windows** (so the platform-specific
 `*_windows.go` files are exercised), and runs the race detector on Linux.
+(GitHub-hosted CI is reference-only; it is not an acceptance gate.)
+
+**Local gate** (`scripts/ci-local.ps1` — the nightly/pre-commit source of
+truth): gofmt -> vet -> test -> build; `-Race` additionally runs
+`go test -race` using the portable mingw64 at `D:\tools\mingw64` for CGO;
+machines with cargo also run the controller's `fmt --check` / `clippy` /
+`test` / `build`, and nodes without Rust skip that stage honestly.
 
 ## Character Planner v1
 
