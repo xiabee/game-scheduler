@@ -16,7 +16,7 @@
 
 ## Next Milestone
 
-**NC0 — Native Controller Foundation**(下一个夜班立即启动,见 [§9 Next Nightly Development](#9-next-nightly-development))
+**NC1 — Vision Runtime(ONNX)**(下一夜班起点,前置见 [§9](#9-nightly-development-记录);NC0 已完成)
 
 ## 状态标记
 
@@ -105,9 +105,9 @@
 
 ## 3. 主线阶段:Native Vision Controller
 
-### NC0 — Native Controller Foundation ⬜(今晚启动)
+### NC0 — Native Controller Foundation ✅(2026-09-08/09 夜班完成)
 
-- **Status**:⬜ Planned(下一夜班第一批 milestone)
+- **Status**:✅ Done。M1–M6 + resize 稳定性验收全部落地(commit `60f0719..3e71fc6`);`cargo test` 58 绿、clippy 0 告警;`--dry-run` 全链路实测通过。已知环境项:本机 RDP 会话下 WGC 静默(见 docs/NIGHTLY_PROGRESS.md 环境发现),捕获默认走 PrintWindow(GDI) 回退链;WGC 待非 RDP 环境复验。
 - **Objective**:打通"窗口 → 捕获 → 坐标变换 → mock 感知 → 调试输出"的最小闭环。不训练模型、不接真实输入自动化。
 - **Scope**:
   - 新建 `controller/` Rust workspace:
@@ -288,23 +288,25 @@ BetterGI / March7thAssistant / Fhoe-Rail / ok-ww / M9A 的现有适配器:
 - Native Controller 视觉栈在 `controller/`(Rust)独立实现;两者在 NC6 通过进程协议对接,不共享进程、不 cgo 桥接。
 - `execution_mode` 配置进入 Go 侧 config/任务模型的时间点:NC6。
 
-## 9. Next Nightly Development(今晚 23:00 起点)
+## 9. Nightly Development 记录
 
-**第一目标:NC0 — Native Controller Foundation。** 按 milestone 推进:
+### 2026-09-08/09 夜班:NC0 全部完成 ✅
 
-- **M1**:`controller/` Rust workspace 骨架 + GameWindow(HWND 枚举 / client rect / DPI / ClientToScreen / foreground)。
-- **M2**:CaptureBackend trait + Windows Graphics Capture 原型(内存帧流转,FPS 限制)。
-- **M3**:FrameInfo / Transform / letterbox / 逆坐标映射 + 单元测试(1080p↔1440p 数值对拍)。
-- **M4**:Detection 类型 + MockDetector + debug frame / overlay 输出。
-- **M5**:SafetyGovernor 全规则 + `--dry-run` 模式。
-- **M6**(时间允许):TemplateMatcher 基础接口与实现骨架。
+- **M1** ✅:`controller/` Rust crate 骨架 + GameWindow(HWND 枚举 / 精确 client rect / per-monitor-v2 DPI / ClientToScreen / foreground / 变化检测)— `60f0719`。
+- **M2** ✅:Frame(BGRA8、padded stride)+ Transform 四坐标系与 letterbox 逆变换,1080p↔1440p 对拍、21:9 padding 精确断言 — `1e287da`。
+- **M3** ✅:SafetyGovernor 十条规则全测试(纯决策引擎、时间显式注入)— `2bd04e8`。
+- **M4** ✅(环境项 PARTIAL):CaptureBackend + WGC 实现 + PrintWindow(GDI) 后端 + 合成帧 + FPS 限速;WGC 本节点静默已诊断并记录,GDI 实测 PASS — `f50b812`。
+- **M5** ✅:MockDetector + overlay + `--dry-run` CLI 闭环(auto 后端回退、debug PNG、紧急停止路径)+ 集成测试 — `27aef86`。
+- **M6** ✅:NCC TemplateMatcher 骨架 — `8622dfa`。
+- **验收加项** ✅:实机 resize 稳定性测试(ROADMAP NC0 acceptance 自动化,WM_PRINT 根因修复)— `3e71fc6`;clippy 门禁 — 后续 commit;dry-run 瞬态错误退避重试 — 后续 commit。
 
-**今晚不做**:训练 YOLO、下载大型模型、OCR、真实输入自动化、开放世界导航、与 Go 的协议对接。
+**NC0 完成定义达成**:`窗口 → 捕获 → resize → mock detection → 坐标反算 → debug overlay` 全链路实测跑通;`cargo test` 全绿;SafetyGovernor 每条规则有触发路径测试。今晚未做(按计划):YOLO/模型/OCR/真实输入/开放世界/Go 协议对接。
 
-**今晚的完成定义**:`窗口 → 捕获 → resize → mock detection → 坐标反算 → debug overlay` 完整跑通,`cargo test` 全绿,SafetyGovernor 规则全有测试。
+### 下一夜班:NC1 — Vision Runtime(ONNX)
 
-每个 milestone 遵循 NightForge 循环(见 `.zcode/commands/overnight.md`),完成后向 `docs/NIGHTLY_PROGRESS.md` 追加记录。
+前置检查:WGC 在非 RDP 环境复验;训练管线(§4)产出首个 nano 模型;`tools/vision/` 训练脚手架(仓外权重,不进 Git)。每个 milestone 遵循 NightForge 循环(见 `.zcode/commands/overnight.md`),完成后向 `docs/NIGHTLY_PROGRESS.md` 追加记录。
 
 ## 10. 变更记录
 
+- **2026-09-09**:NC0 标记完成(§3/§9);下一夜班起点更新为 NC1。
 - **2026-09-08**:全面重写。历史 Go 调度核心/路线/Planner/界面能力标记 ✅(§1);主线改为 **Native Vision Controller**(§2–§3,NC0–NC8);新增数据集生命周期(§4)、性能预算(§5)、旧外部控制器降级为 fallback(§6)、安全红线(§7);明确今晚 NC0 起点(§9)。

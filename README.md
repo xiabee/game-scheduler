@@ -133,6 +133,28 @@ internal/vision     截图辅助接口骨架(Detector / Matcher / OCR / FrameSou
 
 > 🧭 **路线图**:下一阶段主线是自研 Native Vision Controller(Rust,窗口捕获 + CV + 状态机 + 普通 Windows 输入),现有第三方工具适配器转为 legacy/fallback,详见 [ROADMAP.md](ROADMAP.md)。`
 
+### 🕹️ controller/(Native Vision Controller,NC0 已落地)
+
+`controller/` 是独立 Rust crate(NC0 阶段,**纯观察,不发送任何输入**——input 模块在 NC4 之前刻意为空):
+
+- **GameWindow**:按标题/进程名找游戏窗口;精确 client rect;per-monitor-v2 DPI;ClientToScreen;foreground 检查;布局变化检测。
+- **Transform**:client / normalized / model / desktop 四坐标系互转,letterbox 等比缩放 + 居中 padding 及精确逆变换(1080p↔1440p 分辨率无关性有对拍测试;禁止任何硬编码绝对像素)。
+- **SafetyGovernor**:emergency stop、session 时长、目标窗口身份、foreground、尺寸/DPI/位移(Pause 待重标定)、置信度、动作频率、同点连击、retry/state-loop 预算,全部规则有测试。
+- **捕获后端**:Windows Graphics Capture(本机 RDP 会话下静默,见 NIGHTLY_PROGRESS)→ PrintWindow(GDI,默认可用)→ 合成帧,自动回退并如实告警。
+- **dry-run 闭环**:窗口 → 捕获 → letterbox → 检测 → 逆变换 → governor 判定 → debug PNG(`--debug-dir`)。
+
+```powershell
+cd controller
+cargo test                     # 58 个测试
+cargo run -- --self-probe      # 窗口模块冒烟
+cargo run -- --capture-gdi     # GDI 捕获 + 检测冒烟
+cargo run -- --dry-run --backend auto --duration 5 --debug-dir ../_debug
+# dry-run 可选:--window <标题|@probe> --backend auto|wgc|gdi|synthetic
+#            --fps N --model N --min-confidence F --require-foreground --emergency-after S
+```
+
+本地 CI(scripts/ci-local.ps1)在装有 cargo 的机器上会一并跑 `cargo fmt --check` / `clippy` / `test` / `build`;无 Rust 的节点诚实跳过。
+
 数据流:**计划(cron)** 或**手动触发** → 运行某个**任务**;任务所属**游戏**选定一个**适配器**;适配器把任务翻译成命令行;`runner` 执行,并把
 `command / stdout / stderr / exit_code / start_time / end_time` 以及失败时的 `error_msg / screenshot_path / retry_count` 记成一条**执行记录**。
 
