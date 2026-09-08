@@ -210,6 +210,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     let mut cycle: u32 = 0;
     let mut allowed_count: u32 = 0;
     let mut verdict_notes: Vec<String> = Vec::new();
+    let mut retry_tracker = controller::pipeline::RetryTracker::new(5);
     while t0.elapsed().as_secs_f32() < opts.duration_secs {
         if let Some(after) = opts.emergency_after_secs {
             if t0.elapsed().as_secs_f32() >= after {
@@ -240,7 +241,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             true // NC0 dry-run observes without foreground requirements
         };
 
-        let now = t0 + std::time::Duration::from_nanos(t0.elapsed().as_nanos() as u64);
+        let now = std::time::Instant::now();
         let report = match run_cycle(
             cycle,
             backend.as_mut(),
@@ -254,11 +255,28 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             opts.model,
             now,
         ) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("dry-run: cycle {cycle}: pipeline error: {e}");
+            Ok(r) => {
+                retry_tracker.on_success();
+                r
+            }
+            Err(controller::ControllerError::WindowGone) => {
+                eprintln!("dry-run: cycle {cycle}: window gone - stopping");
                 break;
             }
+            Err(e) => match retry_tracker.on_failure() {
+                Some(delay) => {
+                    eprintln!(
+                        "dry-run: cycle {cycle}: transient pipeline error: {e} - retrying in {delay:?}"
+                    );
+                    std::thread::sleep(delay);
+                    cycle -= 1; // the retry reuses the cycle number
+                    continue;
+                }
+                None => {
+                    eprintln!("dry-run: cycle {cycle}: pipeline error persists ({e}) - giving up");
+                    break;
+                }
+            },
         };
 
         if report.allowed() {

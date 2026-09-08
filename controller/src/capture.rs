@@ -683,8 +683,17 @@ mod gdi {
                 let _ = DeleteObject(HGDIOBJ(bitmap.0));
                 let _ = DeleteDC(hdc_mem);
                 ReleaseDC(Some(self.hwnd), hdc_window);
-                if !printed.as_bool() || got == 0 {
+                if !printed.as_bool() {
+                    // PrintWindow fails when the hwnd is no longer valid —
+                    // the deterministic end state for the observation loop.
                     return Err(ControllerError::WindowGone);
+                }
+                if got == 0 {
+                    // the window lives but the bitmap read hiccuped —
+                    // retryable, NOT a terminal WindowGone
+                    return Err(ControllerError::Win(windows::core::Error::from_hresult(
+                        windows::core::HRESULT(0x8007139Fu32 as i32), // ERROR_OPERATION_ABORTED-ish transient marker
+                    )));
                 }
             }
             Frame::from_bgra(data, w as u32, h as u32, row as u32)

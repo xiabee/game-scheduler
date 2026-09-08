@@ -11,7 +11,7 @@ use crate::transform::Transform;
 use crate::vision::{Detection, Detector};
 use crate::window::WindowLayout;
 use crate::Result;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Resize a client frame into `model_w x model_h` with nearest-neighbour
 /// sampling and letterbox (uniform scale, centered padding, dark fill).
@@ -170,6 +170,50 @@ pub fn run_cycle(
     })
 }
 
+/// Bounded exponential-backoff retry tracker for the observation loop.
+///
+/// Transient capture/pipeline failures (a PrintWindow hiccup, a layout
+/// read racing a resize) must not kill an overnight session; deterministic
+/// end states (window gone, governor Stop) are handled by the caller and
+/// never reach this tracker. `on_failure` returns the delay to sleep
+/// before the next attempt, or `None` when the budget is exhausted.
+#[derive(Debug)]
+pub struct RetryTracker {
+    max_consecutive: u32,
+    consecutive: u32,
+}
+
+impl RetryTracker {
+    pub fn new(max_consecutive: u32) -> RetryTracker {
+        RetryTracker {
+            max_consecutive: max_consecutive.max(1),
+            consecutive: 0,
+        }
+    }
+
+    /// Record a failure: `Some(delay)` to keep retrying (100ms doubling,
+    /// capped at 2s), `None` to abort the session.
+    pub fn on_failure(&mut self) -> Option<Duration> {
+        self.consecutive += 1;
+        if self.consecutive > self.max_consecutive {
+            return None;
+        }
+        let exp = self.consecutive - 1;
+        let shift = exp.min(5); // 100ms..3.2s raw, capped below
+        let delay = 100u64.saturating_mul(1 << shift).min(2000);
+        Some(Duration::from_millis(delay))
+    }
+
+    /// Record a success: consecutive-failure counter resets.
+    pub fn on_success(&mut self) {
+        self.consecutive = 0;
+    }
+
+    pub fn consecutive_failures(&self) -> u32 {
+        self.consecutive
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,6 +223,33 @@ mod tests {
 
     fn governor(t0: Instant) -> SafetyGovernor {
         SafetyGovernor::new(SafetyConfig::default(), t0).expect("gov")
+    }
+
+    #[test]
+    fn retry_tracker_backs_off_then_exhausts() {
+        let mut t = RetryTracker::new(5);
+        // 100, 200, 400, 800, 1600 -> capped 2000 on 5th? no: shifts 0..4
+        let expected = [100, 200, 400, 800, 1600];
+        for (i, e) in expected.iter().enumerate() {
+            assert_eq!(
+                t.on_failure(),
+                Some(Duration::from_millis(*e)),
+                "failure {i}"
+            );
+        }
+        // 6th consecutive failure: budget exhausted
+        assert_eq!(t.on_failure(), None);
+        // success resets the counter
+        t.on_success();
+        assert_eq!(t.consecutive_failures(), 0);
+        assert_eq!(t.on_failure(), Some(Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn retry_tracker_max_is_at_least_one() {
+        let mut t = RetryTracker::new(0);
+        assert_eq!(t.on_failure(), Some(Duration::from_millis(100)));
+        assert_eq!(t.on_failure(), None, "budget of 1 allows exactly one retry");
     }
 
     #[test]
