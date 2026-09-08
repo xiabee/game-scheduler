@@ -174,41 +174,38 @@ fn build_backend(
     kind: &str,
     hwnd: windows::Win32::Foundation::HWND,
     layout: &controller::window::WindowLayout,
-) -> Box<dyn controller::capture::CaptureBackend> {
+) -> Result<Box<dyn controller::capture::CaptureBackend>, String> {
     use controller::capture::{
         CaptureBackend, GdiPrintWindowCapture, SyntheticCapture, WgcCapture,
     };
     match kind {
-        "synthetic" => Box::new(SyntheticCapture::new(320, 240).expect("synthetic")),
-        "gdi" => match GdiPrintWindowCapture::new(hwnd, layout.clone()) {
-            Ok(b) => Box::new(b),
-            Err(e) => {
-                eprintln!("dry-run: gdi backend failed: {e}");
-                std::process::exit(1);
-            }
-        },
-        "wgc" => match WgcCapture::new(hwnd, layout.clone()) {
-            Ok(b) => Box::new(b),
-            Err(e) => {
-                eprintln!("dry-run: wgc backend failed: {e}");
-                std::process::exit(1);
-            }
-        },
+        "synthetic" => Ok(Box::new(
+            SyntheticCapture::new(320, 240).expect("synthetic"),
+        )),
+        "gdi" => GdiPrintWindowCapture::new(hwnd, layout.clone())
+            .map(|b| Box::new(b) as Box<dyn CaptureBackend>)
+            .map_err(|e| format!("gdi backend failed: {e}")),
+        "wgc" => WgcCapture::new(hwnd, layout.clone())
+            .map(|b| Box::new(b) as Box<dyn CaptureBackend>)
+            .map_err(|e| format!("wgc backend failed: {e}")),
         _ => match WgcCapture::new(hwnd, layout.clone()) {
             Ok(mut w) => match w.capture() {
                 Ok(_) => {
                     println!("dry-run: backend wgc (probe frame OK)");
-                    Box::new(w)
+                    Ok(Box::new(w))
                 }
                 Err(e) => {
                     eprintln!(
                         "dry-run: WARNING WGC silent ({e}) - falling back to GDI PrintWindow"
                     );
                     match GdiPrintWindowCapture::new(hwnd, layout.clone()) {
-                        Ok(b) => Box::new(b),
+                        Ok(b) => Ok(Box::new(b)),
                         Err(e2) => {
-                            eprintln!("dry-run: gdi fallback failed too: {e2} - using synthetic");
-                            Box::new(SyntheticCapture::new(320, 240).expect("synthetic"))
+                            eprintln!("dry-run: WARNING gdi fallback failed ({e2}) - synthetic");
+                            Ok(
+                                Box::new(SyntheticCapture::new(320, 240).expect("synthetic"))
+                                    as Box<dyn controller::capture::CaptureBackend>,
+                            )
                         }
                     }
                 }
@@ -218,10 +215,13 @@ fn build_backend(
                     "dry-run: WARNING WGC unavailable ({e}) - falling back to GDI PrintWindow"
                 );
                 match GdiPrintWindowCapture::new(hwnd, layout.clone()) {
-                    Ok(b) => Box::new(b),
+                    Ok(b) => Ok(Box::new(b)),
                     Err(e2) => {
-                        eprintln!("dry-run: gdi fallback failed too: {e2} - using synthetic");
-                        Box::new(SyntheticCapture::new(320, 240).expect("synthetic"))
+                        eprintln!("dry-run: WARNING gdi fallback failed ({e2}) - synthetic");
+                        Ok(
+                            Box::new(SyntheticCapture::new(320, 240).expect("synthetic"))
+                                as Box<dyn controller::capture::CaptureBackend>,
+                        )
                     }
                 }
             }
@@ -278,7 +278,13 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         opts.window, opts.backend, opts.model, opts.model, opts.fps, opts.duration_secs
     );
 
-    let mut backend = build_backend(&opts.backend, target_hwnd, &calibrated);
+    let mut backend = match build_backend(&opts.backend, target_hwnd, &calibrated) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("dry-run: {e}");
+            return 1;
+        }
+    };
 
     let mut detector: Box<dyn Detector> = Box::new(MockDetector::synthetic_rect());
     let t0 = std::time::Instant::now();
@@ -419,7 +425,18 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         if report.pre_verdict.is_allow() && !report.geometry_ok {
             calibrated = current.clone();
             if opts.backend != "synthetic" {
-                backend = build_backend(&opts.backend, target_hwnd, &calibrated);
+                backend = match build_backend(&opts.backend, target_hwnd, &calibrated) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!(
+                            "dry-run: WARNING recalibration backend failed ({e}) - continuing with synthetic frames"
+                        );
+                        Box::new(
+                            controller::capture::SyntheticCapture::new(320, 240)
+                                .expect("synthetic"),
+                        )
+                    }
+                };
             }
             retry_tracker.on_success();
             println!(
@@ -438,6 +455,10 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             let note = format!("cycle {cycle}: {reason}");
             if verdict_notes.last() != Some(&note) {
                 verdict_notes.push(note);
+                // long sessions alternate verdicts; keep the summary bounded
+                if verdict_notes.len() > 50 {
+                    verdict_notes.remove(0);
+                }
             }
         }
 

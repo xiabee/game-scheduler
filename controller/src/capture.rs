@@ -183,7 +183,7 @@ mod wgc {
     use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem};
     use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
     use windows::Graphics::DirectX::DirectXPixelFormat;
-    use windows::Win32::Foundation::{GetLastError, HWND};
+    use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Direct3D::{
         D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0,
     };
@@ -649,7 +649,7 @@ mod gdi {
     use crate::frame::{Frame, BYTES_PER_PIXEL};
     use crate::window::WindowLayout;
     use crate::{ControllerError, Result};
-    use windows::Win32::Foundation::{GetLastError, HWND};
+    use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Gdi::{
         CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
         ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
