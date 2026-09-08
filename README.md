@@ -673,7 +673,8 @@ gofmt -l .           # 应当无输出
 go vet ./...
 ```
 
-- **CI**([.github/workflows/ci.yml](.github/workflows/ci.yml)):gofmt + vet,在 **Linux 与 Windows** 双平台构建+测试(让 `*_windows.go` 在真 Windows 上被检查),并在 Linux 上跑 `-race`。
+- **本地 CI 门禁**(`scripts/ci-local.ps1`,夜间与提交前的事实验收):gofmt → vet → test → build;`-Race` 追加 `go test -race`(用 D:	ools\mingw64 提供 CGO,见 MR_ENVIRONMENT.md);装有 cargo 的机器会追加 controller 的 fmt --check / clippy / test / build,无 Rust 的节点诚实跳过。
+- **CI**([.github/workflows/ci.yml](.github/workflows/ci.yml)):gofmt + vet,在 **Linux 与 Windows** 双平台构建+测试(让 `*_windows.go` 在真 Windows 上被检查),并在 Linux 上跑 `-race`。(GitHub hosted 仅为参考规格,不是验收门禁。)
 - **安全**([.github/workflows/security.yml](.github/workflows/security.yml)):每次推送/PR + **每周定时**跑 [`govulncheck`](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) 扫描依赖与标准库漏洞。
 - **Dependabot**([.github/dependabot.yml](.github/dependabot.yml)):每周自动为 Go 依赖与 GitHub Actions 提更新 PR。
 
