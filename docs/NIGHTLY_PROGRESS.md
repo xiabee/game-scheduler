@@ -41,6 +41,8 @@
 | M16 | WGC BLOCKED 定性：`RequestAccessAsync(Programmatic)`=Allowed(4) 排除管控理论；RDP 会话 DWM 不供帧成立；复验条件=物理 console 登录后跑 `--capture-monitor` | PASS | fb265b7 | 诊断内建、60 测试绿 |
 | M17 | run_cycle 返回帧，debug 导出不再二次捕获（原先每导出周期多一次全量 PrintWindow） | PASS | 74ae4b6 | 60 测试绿 + PNG 导出复验 |
 | M18 | `.nightly/` 从本地 exclude 移入入库 .gitignore（其他克隆/win-devops 不再见到 scratch 噪音）；`--locked` 构建通过；`cargo test --release` 全绿；soak #2 带内存采样：45s 连续捕获工作集 +0.5MB 无泄漏 | PASS | 057e15e | 见左 |
+| M19 | 【复审发现】`window_process` 的 OpenProcess 句柄从不关闭——观察循环每周期泄漏一个句柄；已 CloseHandle + 句柄计数回归测试（50 次查找增量 ≤25 容差） | PASS | 76fdb1e | 61 测试绿 |
+| M20 | 【复审发现】WgcCapture 无 Drop——重标定丢弃后端时会话可能残留；补 session/pool Close（结构性验证；本机 WGC 静默无法实测帧） | PASS | 83d1a9b | 61 测试绿 + clippy 0 |
 
 - CI：`scripts/ci-local.ps1` Rust 门禁 = cargo fmt --check / **clippy** / test / build；**无 cargo 的节点诚实 SKIP 并公告**（win-devops 安装 Rust 前 remote acceptance 仅覆盖 Go 侧）
 | M14 | dry-run resize 重标定修复（check_geometry Pause 后循环曾永远对着旧快照报错；现自动更新 calibrated + 重建后端；`--resize-after` 驱动实测） | PASS | （见 git log） | 实机：resize 后 recalibrated、归一化位置跨重标定保持 0.703/0.703；same-point guard 实测触发 |
