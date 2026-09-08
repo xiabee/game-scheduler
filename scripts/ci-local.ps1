@@ -59,6 +59,17 @@ if ($cargo) {
     if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
     Pop-Location
 
+    Write-Host "== cargo clippy (controller/) =="
+    Push-Location controller
+    cargo clippy --all-targets --quiet 2>&1 | Out-Null
+    $clippyCode = $LASTEXITCODE
+    if ($clippyCode -ne 0) {
+        Pop-Location
+        Write-Host "cargo clippy failed (exit $clippyCode)"
+        exit $clippyCode
+    }
+    Pop-Location
+
     Write-Host "== cargo test (controller/) =="
     Push-Location controller
     cargo test --quiet

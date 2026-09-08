@@ -274,7 +274,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             }
         }
 
-        let reportable = cycle % 15 == 0 || !report.pre_verdict.is_allow();
+        let reportable = cycle.is_multiple_of(15) || !report.pre_verdict.is_allow();
         if reportable {
             if let Some(d) = report.client_detections.first() {
                 let c = d.rect.center();

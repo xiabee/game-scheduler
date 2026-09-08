@@ -57,7 +57,6 @@ fn five_cycles_track_the_moving_rect_and_stay_allowed() {
 /// verified by re-scanning the client frame directly.
 #[test]
 fn inverse_transform_lands_on_the_real_client_pixels() {
-    let t0 = Instant::now();
     let mut backend = SyntheticCapture::new(320, 240).expect("cap");
     let frame = backend.capture().expect("client frame");
 

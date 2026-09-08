@@ -436,7 +436,7 @@ unsafe extern "system" fn probe_wnd_proc(
     wparam: windows::Win32::Foundation::WPARAM,
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
-    use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, WM_PRINT};
+    use windows::Win32::UI::WindowsAndMessaging::WM_PRINT;
     // PrintWindow(PW_CLIENTONLY) asks the window to render into a foreign
     // DC via WM_PRINT; without an explicit handler the content falls back
     // to a stale redirection surface. Draw the scene ourselves into
