@@ -81,6 +81,44 @@ internal/vision     screenshot-assist interface skeleton (Detector / Matcher / O
 
 > 🧭 **Roadmap**: the next phase is a self-built Native Vision Controller (Rust; window capture + CV + state machine + plain Windows input). Existing third-party tool adapters become legacy/fallback — see [ROADMAP.md](ROADMAP.md).
 
+### 🕹️ controller/ (Native Vision Controller — NC0 landed)
+
+`controller/` is a standalone Rust crate. NC0 is **observation-only: no
+input is ever sent** — the input module is deliberately empty until NC4.
+
+- **GameWindow**: locate the game window by title/process name; exact
+  client rect; per-monitor-v2 DPI; ClientToScreen; foreground check;
+  layout change detection.
+- **Transform**: client / normalized / model / desktop coordinate mappings
+  with letterbox scaling, exact inverse, and a 1080p↔1440p
+  resolution-independence parity test. Hard-coded absolute pixels are
+  forbidden anywhere in the pipeline.
+- **SafetyGovernor**: emergency stop, session duration, target window
+  identity, foreground, size/DPI/move (Pause → recalibrate), confidence,
+  action rate, same-point repeat guard, retry/state-loop budgets — every
+  rule has a test.
+- **Capture backends**: Windows Graphics Capture (silently produces no
+  frames on this machine's RDP session — see NIGHTLY_PROGRESS) →
+  PrintWindow/GDI (works) → synthetic frames, with automatic fallback and
+  honest warnings.
+- **Dry-run loop**: window → capture → letterbox → detect → inverse
+  transform → governor verdict → debug PNG (`--debug-dir`).
+
+```powershell
+cd controller
+cargo test                     # 58 tests
+cargo run -- --self-probe      # window module smoke
+cargo run -- --capture-gdi     # GDI capture + detection smoke
+cargo run -- --list-windows    # enumerate visible windows
+cargo run -- --dry-run --backend auto --duration 5 --debug-dir ../_debug
+# options: --window <title|@probe> --backend auto|wgc|gdi|synthetic
+#          --fps N --model N --min-confidence F --require-foreground --emergency-after S
+```
+
+The local CI (scripts/ci-local.ps1) also runs `cargo fmt --check` /
+`clippy` / `test` / `build` for the controller when cargo is installed;
+nodes without Rust skip that stage honestly.
+
 Data flow: a **Plan** (cron) or a **manual trigger** runs a **Task**; the task's
 **Game** selects an **Adapter**; the adapter turns the task into a command line;
 `runner` executes it and an **Execution** row records
