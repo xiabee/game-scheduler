@@ -8,6 +8,9 @@ fn main() {
     if args.iter().any(|a| a == "--self-probe") {
         std::process::exit(run_self_probe());
     }
+    if args.iter().any(|a| a == "--list-windows") {
+        std::process::exit(run_list_windows());
+    }
     if args.iter().any(|a| a == "--capture-probe") {
         std::process::exit(run_capture_probe());
     }
@@ -22,12 +25,55 @@ fn main() {
         std::process::exit(run_foreign_probe(&needle));
     }
     if args.iter().any(|a| a == "--dry-run") {
-        let opts = DryRunOptions::parse(&args);
+        let opts = match DryRunOptions::parse(&args) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("dry-run: {e}");
+                std::process::exit(2);
+            }
+        };
         std::process::exit(run_dry_run(&opts));
     }
     println!(
-        "native-controller (NC0): use --self-probe | --capture-probe | --capture-gdi | --dry-run"
+        "native-controller (NC0): use --list-windows | --self-probe | --capture-gdi | --dry-run"
     );
+}
+
+/// Enumerate visible top-level windows: the discovery aid for choosing a
+/// `--window <title>` filter. Tab-separated: title / pid / process /
+/// client size (physical pixels).
+fn run_list_windows() -> i32 {
+    use controller::window::GameWindow;
+    match GameWindow::find_all(None, None) {
+        Ok(windows) => {
+            if windows.is_empty() {
+                println!("(no visible top-level windows found)");
+                return 0;
+            }
+            for w in &windows {
+                match w.layout() {
+                    Ok(l) => println!(
+                        "{:?}\tpid={}\tprocess={:?}\tclient={}x{}",
+                        w.title(),
+                        w.pid(),
+                        w.process_name(),
+                        l.client_size.0,
+                        l.client_size.1
+                    ),
+                    Err(e) => println!(
+                        "{:?}\tpid={}\t(layout unavailable: {e})",
+                        w.title(),
+                        w.pid()
+                    ),
+                }
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("list-windows: enumeration failed: {e}");
+            1
+        }
+    }
 }
 
 /// Options for the dry-run pipeline loop. The dry-run NEVER sends input:
@@ -50,32 +96,56 @@ struct DryRunOptions {
 }
 
 impl DryRunOptions {
-    fn parse(args: &[String]) -> DryRunOptions {
+    fn parse(args: &[String]) -> Result<DryRunOptions, String> {
         fn opt(args: &[String], name: &str) -> Option<String> {
             args.iter()
                 .position(|a| a == name)
                 .and_then(|i| args.get(i + 1))
                 .cloned()
         }
-        DryRunOptions {
-            window: opt(args, "--window").unwrap_or_else(|| "@probe".into()),
-            backend: opt(args, "--backend").unwrap_or_else(|| "auto".into()),
-            fps: opt(args, "--fps")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(15.0),
+        let window = opt(args, "--window").unwrap_or_else(|| "@probe".into());
+        if window.trim().is_empty() {
+            return Err("--window must be a non-empty title substring (or @probe)".into());
+        }
+        let backend = opt(args, "--backend").unwrap_or_else(|| "auto".into());
+        if !matches!(backend.as_str(), "auto" | "wgc" | "gdi" | "synthetic") {
+            return Err(format!(
+                "--backend must be auto|wgc|gdi|synthetic, got {backend:?}"
+            ));
+        }
+        let fps: f32 = opt(args, "--fps")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(15.0);
+        if !(fps.is_finite() && fps > 0.0) {
+            return Err(format!("--fps must be a positive number, got {fps}"));
+        }
+        let model = opt(args, "--model")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(256);
+        if model == 0 || model > 4096 {
+            return Err(format!("--model must be in 1..=4096, got {model}"));
+        }
+        let min_confidence = opt(args, "--min-confidence")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.6);
+        if !(0.0..=1.0).contains(&min_confidence) {
+            return Err(format!(
+                "--min-confidence must be in [0, 1], got {min_confidence}"
+            ));
+        }
+        Ok(DryRunOptions {
+            window,
+            backend,
+            fps,
             duration_secs: opt(args, "--duration")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(3.0),
-            model: opt(args, "--model")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(256),
-            min_confidence: opt(args, "--min-confidence")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0.6),
+            model,
+            min_confidence,
             debug_dir: opt(args, "--debug-dir"),
             require_foreground: args.iter().any(|a| a == "--require-foreground"),
             emergency_after_secs: opt(args, "--emergency-after").and_then(|v| v.parse().ok()),
-        }
+        })
     }
 }
 

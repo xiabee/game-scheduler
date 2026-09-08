@@ -61,10 +61,21 @@ impl GameWindow {
     /// case-insensitively (e.g. `"genshin.exe"`). Both filters are ANDed;
     /// passing `None` for a filter skips it. Tool windows and invisible
     /// windows are always skipped.
+    /// First window matching the filters, if any. See [`Self::find_all`].
     pub fn find(
         title_substring: Option<&str>,
         process_name: Option<&str>,
     ) -> Result<Option<GameWindow>> {
+        Ok(Self::find_all(title_substring, process_name)?
+            .into_iter()
+            .next())
+    }
+
+    /// All visible top-level windows matching the filters, in Z order.
+    pub fn find_all(
+        title_substring: Option<&str>,
+        process_name: Option<&str>,
+    ) -> Result<Vec<GameWindow>> {
         let needle_title = title_substring.map(str::to_lowercase);
         let needle_process = process_name.map(str::to_lowercase);
         let mut ctx = Box::new((needle_title, needle_process, Vec::<GameWindow>::new()));
@@ -74,7 +85,7 @@ impl GameWindow {
         // call. Fail only after enumeration finished so partial results are
         // never silently used.
         enum_result?;
-        Ok(ctx.2.into_iter().next())
+        Ok(ctx.2)
     }
 
     /// Wrap a raw handle, re-reading title/process metadata.
