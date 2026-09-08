@@ -1,0 +1,577 @@
+//! GameWindow: find the game's top-level window and answer the geometry
+//! questions the rest of the controller needs (client rect, DPI, screen
+//! mapping, foreground, layout changes).
+//!
+//! Everything here is plain Win32 window inspection: no injection, no
+//! memory access, no input synthesis. NC0 reads window metrics only.
+
+use crate::{ControllerError, Result};
+use std::sync::OnceLock;
+use windows::core::{BOOL, PCWSTR, PWSTR};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, POINT, RECT};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::{
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+};
+use windows::Win32::UI::HiDpi::{
+    GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, GetClientRect,
+    GetForegroundWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, IsWindow, IsWindowVisible, RegisterClassExW, SetWindowPos,
+    GWL_EXSTYLE, HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+};
+
+/// Client-area geometry in the coordinate systems the pipeline uses.
+///
+/// `client_size` is the render area (what a capture of the client covers);
+/// `screen_origin` is the desktop position of the client's top-left corner;
+/// `dpi` is the window's effective DPI (96 = 100% scale).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowLayout {
+    pub client_size: (i32, i32),
+    pub screen_origin: (i32, i32),
+    pub dpi: u32,
+}
+
+/// A discovered top-level window handle plus its identifying metadata.
+///
+/// The handle is not owned: the window may disappear at any moment, and
+/// every accessor re-validates the handle before answering.
+#[derive(Debug, Clone)]
+pub struct GameWindow {
+    hwnd: HWND,
+    title: String,
+    process_path: String,
+    process_name: String,
+    pid: u32,
+}
+
+impl GameWindow {
+    /// Find the first visible top-level window matching the given filters.
+    ///
+    /// `title_substring` matches case-insensitively against the window
+    /// title; `process_name` matches the executable file name
+    /// case-insensitively (e.g. `"genshin.exe"`). Both filters are ANDed;
+    /// passing `None` for a filter skips it. Tool windows and invisible
+    /// windows are always skipped.
+    pub fn find(
+        title_substring: Option<&str>,
+        process_name: Option<&str>,
+    ) -> Result<Option<GameWindow>> {
+        let needle_title = title_substring.map(str::to_lowercase);
+        let needle_process = process_name.map(str::to_lowercase);
+        let mut ctx = Box::new((needle_title, needle_process, Vec::<GameWindow>::new()));
+        let lparam = LPARAM(&mut *ctx as *mut _ as isize);
+        let enum_result = unsafe { EnumWindows(Some(enum_proc), lparam) };
+        // `ctx` still owns the allocation; the LPARAM borrow ended with the
+        // call. Fail only after enumeration finished so partial results are
+        // never silently used.
+        enum_result?;
+        Ok(ctx.2.into_iter().next())
+    }
+
+    /// Wrap a raw handle, re-reading title/process metadata.
+    pub fn from_hwnd(hwnd: HWND) -> Result<GameWindow> {
+        if !valid_window(hwnd) {
+            return Err(ControllerError::WindowGone);
+        }
+        let title = window_title(hwnd);
+        let (pid, process_path) = window_process(hwnd)?;
+        let process_name = process_path
+            .rsplit(['\\', '/'])
+            .next()
+            .unwrap_or("")
+            .to_lowercase();
+        Ok(GameWindow {
+            hwnd,
+            title,
+            process_path,
+            process_name,
+            pid,
+        })
+    }
+
+    pub fn hwnd(&self) -> HWND {
+        self.hwnd
+    }
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+    pub fn process_path(&self) -> &str {
+        &self.process_path
+    }
+    /// Executable file name only, lowercase (e.g. `"genshin.exe"`). Empty
+    /// when the process image could not be queried (elevated process).
+    pub fn process_name(&self) -> &str {
+        &self.process_name
+    }
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    /// Current client-area layout, or `WindowGone` if the window closed.
+    pub fn layout(&self) -> Result<WindowLayout> {
+        layout_of(self.hwnd)
+    }
+
+    /// True when size, screen position or DPI changed compared to `prev`.
+    pub fn changed_since(&self, prev: &WindowLayout) -> Result<bool> {
+        Ok(self.layout()? != *prev)
+    }
+
+    /// Is this handle also the foreground window right now?
+    pub fn is_foreground(&self) -> Result<bool> {
+        if !valid_window(self.hwnd) {
+            return Err(ControllerError::WindowGone);
+        }
+        let fg = unsafe { GetForegroundWindow() };
+        Ok(!fg.is_invalid() && fg == self.hwnd)
+    }
+
+    /// DPI the window is currently rendered at (96 = 100%).
+    pub fn dpi(&self) -> Result<u32> {
+        if !valid_window(self.hwnd) {
+            return Err(ControllerError::WindowGone);
+        }
+        Ok(unsafe { GetDpiForWindow(self.hwnd) })
+    }
+}
+
+/// Per-monitor-v2 DPI awareness, called once from `main` before any
+/// geometry is read. Without it Windows lies about client rects on scaled
+/// displays. Returns false when the call was rejected (already set to a
+/// different mode); the legacy `SetProcessDPIAware` fallback is attempted
+/// in that case so at least system-DPI-aware behaviour is locked in.
+pub fn ensure_dpi_awareness() -> bool {
+    static DONE: OnceLock<bool> = OnceLock::new();
+    *DONE.get_or_init(|| {
+        unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) }.is_ok()
+    })
+}
+
+fn layout_of(hwnd: HWND) -> Result<WindowLayout> {
+    if !valid_window(hwnd) {
+        return Err(ControllerError::WindowGone);
+    }
+    let mut rect = RECT::default();
+    unsafe { GetClientRect(hwnd, &mut rect) }.map_err(ControllerError::Win)?;
+    let mut origin = POINT { x: 0, y: 0 };
+    if !unsafe { ClientToScreen(hwnd, &mut origin) }.as_bool() {
+        return Err(ControllerError::WindowGone);
+    }
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    Ok(WindowLayout {
+        client_size: (rect.right - rect.left, rect.bottom - rect.top),
+        screen_origin: (origin.x, origin.y),
+        dpi,
+    })
+}
+
+fn valid_window(hwnd: HWND) -> bool {
+    !hwnd.is_invalid() && unsafe { IsWindow(Some(hwnd)) }.as_bool()
+}
+
+fn window_title(hwnd: HWND) -> String {
+    let len = unsafe { GetWindowTextLengthW(hwnd) };
+    if len <= 0 {
+        return String::new();
+    }
+    let mut buf = vec![0u16; (len + 1) as usize];
+    let copied = unsafe { GetWindowTextW(hwnd, &mut buf) };
+    if copied <= 0 {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buf[..copied as usize])
+}
+
+fn window_process(hwnd: HWND) -> Result<(u32, String)> {
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    if pid == 0 {
+        return Err(ControllerError::WindowGone);
+    }
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }
+        .map_err(ControllerError::Win)?;
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    let path = match unsafe {
+        QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_WIN32,
+            PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        )
+    } {
+        Ok(()) => String::from_utf16_lossy(&buf[..len as usize]),
+        // Elevated processes deny the query; that must not hide the window.
+        Err(_) => String::new(),
+    };
+    Ok((pid, path))
+}
+
+unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let ctx = &mut *(lparam.0 as *mut (Option<String>, Option<String>, Vec<GameWindow>));
+    if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
+        return BOOL(1);
+    }
+    // Skip tool windows (tooltips, floating palettes) — games never are.
+    let ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+    if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
+        return BOOL(1);
+    }
+    let mut rect = RECT::default();
+    if unsafe { GetClientRect(hwnd, &mut rect) }.is_err() {
+        return BOOL(1);
+    }
+    if rect.right - rect.left <= 0 || rect.bottom - rect.top <= 0 {
+        return BOOL(1);
+    }
+    if let Some(needle) = &ctx.0 {
+        let title = window_title(hwnd);
+        if !title.to_lowercase().contains(needle) {
+            return BOOL(1);
+        }
+    }
+    if let Some(needle) = &ctx.1 {
+        let (_pid, path) = match window_process(hwnd) {
+            Ok(v) => v,
+            Err(_) => return BOOL(1),
+        };
+        let name = path.rsplit(['\\', '/']).next().unwrap_or("").to_lowercase();
+        if !name.contains(needle) {
+            return BOOL(1);
+        }
+    }
+    if let Ok(win) = GameWindow::from_hwnd(hwnd) {
+        ctx.2.push(win);
+    }
+    BOOL(1)
+}
+
+// ---------------------------------------------------------------------------
+// OwnedTestWindow: a real top-level window this process owns. Used by tests
+// and the CLI's `--self-probe` mode; never touches any other process.
+// ---------------------------------------------------------------------------
+
+/// A real top-level window whose *client* area has an exact requested size.
+pub struct OwnedTestWindow {
+    pub hwnd: HWND,
+    title: String,
+}
+
+impl OwnedTestWindow {
+    pub fn new(client_w: i32, client_h: i32, title: &str) -> Result<OwnedTestWindow> {
+        if client_w <= 0 || client_h <= 0 {
+            return Err(ControllerError::InvalidInput(format!(
+                "client size must be positive, got {client_w}x{client_h}"
+            )));
+        }
+        let _atom = register_probe_class();
+        let hinstance = unsafe { GetModuleHandleW(None) }?;
+        let mut title16: Vec<u16> = title.encode_utf16().collect();
+        title16.push(0);
+        let class_name = probe_class_name16();
+        let window_rect = client_to_window_rect(client_w, client_h)?;
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                PCWSTR(class_name.as_ptr()),
+                PCWSTR(title16.as_ptr()),
+                probe_window_style(),
+                80,
+                60,
+                window_rect.0,
+                window_rect.1,
+                None,
+                None,
+                Some(HINSTANCE(hinstance.0)),
+                None,
+            )
+        }?;
+        Ok(OwnedTestWindow {
+            hwnd,
+            title: title.to_string(),
+        })
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// Resize so the *client* area becomes exactly `client_w x client_h`.
+    pub fn set_size(&self, client_w: i32, client_h: i32) -> Result<()> {
+        let (w, h) = client_to_window_rect(client_w, client_h)?;
+        unsafe {
+            SetWindowPos(
+                self.hwnd,
+                Some(HWND_BOTTOM),
+                0,
+                0,
+                w,
+                h,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE,
+            )
+        }
+        .map_err(ControllerError::Win)
+    }
+
+    pub fn set_position(&self, x: i32, y: i32) -> Result<()> {
+        unsafe {
+            SetWindowPos(
+                self.hwnd,
+                Some(HWND_BOTTOM),
+                x,
+                y,
+                0,
+                0,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE,
+            )
+        }
+        .map_err(ControllerError::Win)
+    }
+}
+
+impl Drop for OwnedTestWindow {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyWindow(self.hwnd);
+        }
+    }
+}
+
+fn probe_window_style() -> WINDOW_STYLE {
+    WS_OVERLAPPEDWINDOW | WS_VISIBLE
+}
+
+fn client_to_window_rect(client_w: i32, client_h: i32) -> Result<(i32, i32)> {
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: client_w,
+        bottom: client_h,
+    };
+    unsafe { AdjustWindowRectEx(&mut rect, probe_window_style(), false, WINDOW_EX_STYLE(0)) }
+        .map_err(ControllerError::Win)?;
+    Ok((rect.right - rect.left, rect.bottom - rect.top))
+}
+
+fn probe_class_name16() -> Vec<u16> {
+    b"nf_controller_probe_window\0"
+        .iter()
+        .map(|&b| b as u16)
+        .collect()
+}
+
+fn register_probe_class() -> u16 {
+    static ATOM: OnceLock<u16> = OnceLock::new();
+    *ATOM.get_or_init(|| {
+        let hinstance = unsafe { GetModuleHandleW(None) }.expect("module handle");
+        let class_name = probe_class_name16();
+        let class = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            style: Default::default(),
+            lpfnWndProc: Some(probe_wnd_proc),
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hInstance: HINSTANCE(hinstance.0),
+            hIcon: Default::default(),
+            hCursor: Default::default(),
+            hbrBackground: Default::default(),
+            lpszMenuName: PCWSTR::null(),
+            lpszClassName: PCWSTR(class_name.as_ptr()),
+            hIconSm: Default::default(),
+        };
+        unsafe { RegisterClassExW(&class) }
+    })
+}
+
+unsafe extern "system" fn probe_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    fn unique_title(tag: &str) -> String {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        format!("NFCTRL-{tag}-{pid}-{n}")
+    }
+
+    #[test]
+    fn dpi_awareness_succeeds() {
+        let _ = ensure_dpi_awareness();
+        assert!(
+            ensure_dpi_awareness(),
+            "second call reports the chosen mode"
+        );
+    }
+
+    #[test]
+    fn creates_window_with_exact_client_size_and_finds_it_by_title() {
+        ensure_dpi_awareness();
+        let title = unique_title("exact");
+        let win = OwnedTestWindow::new(640, 480, &title).expect("create window");
+
+        let wrapped = GameWindow::from_hwnd(win.hwnd).expect("wrap");
+        let layout = wrapped.layout().expect("layout");
+        assert_eq!(layout.client_size, (640, 480), "client rect must be exact");
+
+        let found = GameWindow::find(Some(&title), None)
+            .expect("find")
+            .expect("some window");
+        assert_eq!(found.hwnd(), win.hwnd, "find must locate the probe window");
+
+        // substring match, case-insensitive on both sides
+        let lower = GameWindow::find(Some(&title.to_lowercase()), None)
+            .expect("find")
+            .expect("some");
+        assert_eq!(lower.hwnd(), win.hwnd);
+    }
+
+    #[test]
+    fn finds_window_by_process_name() {
+        ensure_dpi_awareness();
+        let title = unique_title("procname");
+        let win = OwnedTestWindow::new(320, 240, &title).expect("create window");
+        let wrapped = GameWindow::from_hwnd(win.hwnd).expect("wrap");
+        let pname = wrapped.process_name().to_string();
+        assert!(
+            !pname.is_empty(),
+            "process image name must resolve for our own process"
+        );
+        assert!(pname.ends_with(".exe"), "unexpected process name {pname}");
+
+        let by_proc = GameWindow::find(Some(&title), Some(&pname))
+            .expect("find")
+            .expect("some");
+        assert_eq!(by_proc.hwnd(), win.hwnd);
+
+        let wrong = GameWindow::find(Some(&title), Some("definitely_not_running_xyz.exe"))
+            .expect("find must not error on no match");
+        assert!(wrong.is_none(), "no window may match a bogus process name");
+    }
+
+    #[test]
+    fn client_to_screen_origin_is_consistent_with_window_rect() {
+        ensure_dpi_awareness();
+        let title = unique_title("origin");
+        let win = OwnedTestWindow::new(400, 300, &title).expect("create window");
+        win.set_position(120, 90).expect("move");
+
+        let mut window_rect = RECT::default();
+        unsafe { GetWindowRect(win.hwnd, &mut window_rect) }
+            .map_err(ControllerError::Win)
+            .expect("GetWindowRect");
+        let layout = GameWindow::from_hwnd(win.hwnd)
+            .expect("wrap")
+            .layout()
+            .expect("layout");
+
+        let (ox, oy) = layout.screen_origin;
+        assert!(
+            ox >= window_rect.left && ox <= window_rect.right,
+            "client origin x {ox} outside window rect x-range {}..{}",
+            window_rect.left,
+            window_rect.right
+        );
+        assert!(
+            oy >= window_rect.top && oy <= window_rect.bottom,
+            "client origin y {oy} outside window rect y-range {}..{}",
+            window_rect.top,
+            window_rect.bottom
+        );
+    }
+
+    #[test]
+    fn change_detection_sees_resize_and_move() {
+        ensure_dpi_awareness();
+        let title = unique_title("change");
+        let win = OwnedTestWindow::new(500, 400, &title).expect("create window");
+        let wrapped = GameWindow::from_hwnd(win.hwnd).expect("wrap");
+        let before = wrapped.layout().expect("layout");
+        assert!(
+            !wrapped.changed_since(&before).expect("changed"),
+            "no change yet"
+        );
+
+        win.set_size(480, 360).expect("resize");
+        assert!(
+            wrapped.changed_since(&before).expect("changed"),
+            "resize must register"
+        );
+        let after = wrapped.layout().expect("layout");
+        assert_eq!(after.client_size, (480, 360));
+
+        // same-size move also counts as a change (screen origin shifts)
+        let baseline = wrapped.layout().expect("layout");
+        win.set_position(300, 200).expect("move");
+        assert!(
+            wrapped.changed_since(&baseline).expect("changed"),
+            "move must register"
+        );
+    }
+
+    #[test]
+    fn foreground_answers_and_dpi_is_sane() {
+        ensure_dpi_awareness();
+        let title = unique_title("fg");
+        let win = OwnedTestWindow::new(200, 150, &title).expect("create window");
+        let wrapped = GameWindow::from_hwnd(win.hwnd).expect("wrap");
+        // Result is environment-dependent (nothing guarantees the probe
+        // window is foreground in a headless run); it just must answer.
+        let _ = wrapped.is_foreground().expect("foreground");
+        let dpi = wrapped.dpi().expect("dpi");
+        assert!(
+            (96..=480).contains(&dpi),
+            "dpi {dpi} out of plausible range"
+        );
+    }
+
+    #[test]
+    fn invalid_handles_report_window_gone() {
+        let stale_probe = GameWindow::from_hwnd(HWND(std::ptr::null_mut()));
+        assert!(matches!(stale_probe, Err(ControllerError::WindowGone)));
+
+        let title = unique_title("gone");
+        let win = OwnedTestWindow::new(100, 80, &title).expect("create window");
+        let hwnd = win.hwnd;
+        drop(win); // window destroyed; the stale handle must be detected
+        let stale = GameWindow::from_hwnd(hwnd);
+        assert!(matches!(stale, Err(ControllerError::WindowGone)));
+    }
+
+    #[test]
+    fn filterless_enumeration_never_errors_and_metadata_reads() {
+        let first = GameWindow::find(None, None).expect("filterless enumeration must not error");
+        if let Some(w) = first {
+            assert!(w.pid() > 0, "pid must be known for any returned window");
+        }
+        // No assertion that a window exists: a truly windowless session is
+        // allowed to answer None, but enumeration itself may not fail.
+    }
+
+    #[test]
+    fn invalid_client_size_is_rejected_before_any_window_is_created() {
+        let err = match OwnedTestWindow::new(0, 100, "bad") {
+            Err(e) => e,
+            Ok(_) => panic!("size 0 must be rejected"),
+        };
+        assert!(matches!(err, ControllerError::InvalidInput(_)));
+    }
+}

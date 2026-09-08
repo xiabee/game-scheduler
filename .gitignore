@@ -33,3 +33,6 @@ config.local.*
 stest.*
 run.log
 run.err
+
+# rust controller (NC0)
+controller/target/

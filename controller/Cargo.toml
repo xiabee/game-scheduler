@@ -1,0 +1,28 @@
+[package]
+name = "native-controller"
+version = "0.1.0"
+edition = "2021"
+description = "Native vision controller for game-scheduler: window capture, perception traits, coordinate transforms and a dry-run safety governor. NC0 scope: no real input, no models, no injection."
+publish = false
+
+[lib]
+name = "controller"
+path = "src/lib.rs"
+
+[[bin]]
+name = "controller"
+path = "src/main.rs"
+
+[dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.dev]
+# keep test/debug builds small and fast; the windows crate is the only heavy dep
+debug = 1
