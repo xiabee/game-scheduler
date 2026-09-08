@@ -7,6 +7,8 @@ dist/
 .gopath/
 .gotelemetry/
 
+.nightly/
+
 # runtime data (db, logs, screenshots)
 /data/
 data/
