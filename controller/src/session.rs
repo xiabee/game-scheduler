@@ -166,6 +166,7 @@ mod tests {
             }],
             desktop_points: vec![(40.0, 60.0)],
             action_verdict: Some(GovernorVerdict::Allow),
+            frame: None,
         }
     }
 

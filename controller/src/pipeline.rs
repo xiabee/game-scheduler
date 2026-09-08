@@ -77,6 +77,10 @@ pub struct CycleReport {
     /// Same detections' centers in DESKTOP coordinates.
     pub desktop_points: Vec<(f32, f32)>,
     pub action_verdict: Option<GovernorVerdict>,
+    /// The captured client frame for this cycle, when one was taken
+    /// (None when a precondition or geometry check short-circuited).
+    /// Reuse it for overlays — do NOT capture again.
+    pub frame: Option<Frame>,
 }
 
 impl CycleReport {
@@ -116,6 +120,7 @@ pub fn run_cycle(
             client_detections: Vec::new(),
             desktop_points: Vec::new(),
             action_verdict: None,
+            frame: None,
         });
     }
     let geometry_ok = governor.check_geometry(calibrated, current).is_allow();
@@ -127,6 +132,7 @@ pub fn run_cycle(
             client_detections: Vec::new(),
             desktop_points: Vec::new(),
             action_verdict: None,
+            frame: None,
         });
     }
 
@@ -167,6 +173,7 @@ pub fn run_cycle(
         client_detections,
         desktop_points,
         action_verdict,
+        frame: Some(frame),
     })
 }
 
