@@ -1,6 +1,10 @@
 # XNightOps local CI gate — the single acceptance entry for night work.
 # Local only; exit code is authoritative; GitHub hosted CI is not a gate.
+# -Race: additionally run the Go suite under the race detector, using the
+#        portable mingw64 at D:\tools\mingw64 for CGO (see
+#        docs/MR_ENVIRONMENT.md). Product builds stay CGO-free.
 #Requires -Version 5
+param([switch]$Race)
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath (Join-Path $PSScriptRoot "..")
 
@@ -42,6 +46,22 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "== go test =="
 go test ./...
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+if ($Race) {
+    $mingw = "D:\tools\mingw64\bin"
+    if (Test-Path (Join-Path $mingw "gcc.exe")) {
+        Write-Host "== go test -race (CGO via portable mingw64) =="
+        $env:PATH = "$mingw;$env:PATH"
+        $env:CGO_ENABLED = "1"
+        go test -race ./...
+        $raceCode = $LASTEXITCODE
+        Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+        if ($raceCode -ne 0) { exit $raceCode }
+    }
+    else {
+        Write-Host "SKIP go test -race: D:\tools\mingw64 not found (see docs/MR_ENVIRONMENT.md)."
+    }
+}
 
 Write-Host "== go build =="
 go build ./...
