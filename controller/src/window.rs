@@ -428,7 +428,7 @@ unsafe extern "system" fn probe_wnd_proc(
         };
         unsafe { FillRect(hdc, &ps.rcPaint, brush) };
         let _ = unsafe { DeleteObject(brush.into()) };
-        unsafe { EndPaint(hwnd, &ps) };
+        let _ = unsafe { EndPaint(hwnd, &ps) };
         return windows::Win32::Foundation::LRESULT(0);
     }
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
