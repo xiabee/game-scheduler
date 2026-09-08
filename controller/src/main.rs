@@ -90,6 +90,9 @@ struct DryRunOptions {
     min_confidence: f32,
     debug_dir: Option<String>,
     session_log: Option<String>,
+    /// Probe-window-only: resize the probe window to WxH after S seconds
+    /// (exercises governor Pause + live recalibration deterministically).
+    resize_after: Option<(f32, u32, u32)>,
     require_foreground: bool,
     /// Latch the governor's emergency stop after N seconds (exercises the
     /// emergency path deterministically).
@@ -103,6 +106,13 @@ impl DryRunOptions {
                 .position(|a| a == name)
                 .and_then(|i| args.get(i + 1))
                 .cloned()
+        }
+        /// Read `n` argv slots after a flag (for multi-value options).
+        fn opt2(args: &[String], name: &str, n: usize) -> Option<Vec<String>> {
+            let pos = args.iter().position(|a| a == name)?;
+            (1..=n)
+                .map(|k| args.get(pos + k).cloned())
+                .collect::<Option<Vec<_>>>()
         }
         let window = opt(args, "--window").unwrap_or_else(|| "@probe".into());
         if window.trim().is_empty() {
@@ -145,16 +155,82 @@ impl DryRunOptions {
             min_confidence,
             debug_dir: opt(args, "--debug-dir"),
             session_log: opt(args, "--session-log"),
+            resize_after: opt2(args, "--resize-after", 2).and_then(|vals| {
+                let secs = vals[0].parse().ok()?;
+                let (w, h) = vals[1].split_once('x')?;
+                Some((secs, w.trim().parse().ok()?, h.trim().parse().ok()?))
+            }),
             require_foreground: args.iter().any(|a| a == "--require-foreground"),
             emergency_after_secs: opt(args, "--emergency-after").and_then(|v| v.parse().ok()),
         })
     }
 }
 
-fn run_dry_run(opts: &DryRunOptions) -> i32 {
+/// Build the selected capture backend for `hwnd` at `layout`. `auto`
+/// resolves WGC -> GDI -> synthetic with honest warnings (a silent WGC
+/// costs one probe capture). Re-invoked after recalibration so the backend
+/// rebuilds against the fresh layout.
+fn build_backend(
+    kind: &str,
+    hwnd: windows::Win32::Foundation::HWND,
+    layout: &controller::window::WindowLayout,
+) -> Box<dyn controller::capture::CaptureBackend> {
     use controller::capture::{
-        CaptureBackend, FpsLimiter, GdiPrintWindowCapture, SyntheticCapture, WgcCapture,
+        CaptureBackend, GdiPrintWindowCapture, SyntheticCapture, WgcCapture,
     };
+    match kind {
+        "synthetic" => Box::new(SyntheticCapture::new(320, 240).expect("synthetic")),
+        "gdi" => match GdiPrintWindowCapture::new(hwnd, layout.clone()) {
+            Ok(b) => Box::new(b),
+            Err(e) => {
+                eprintln!("dry-run: gdi backend failed: {e}");
+                std::process::exit(1);
+            }
+        },
+        "wgc" => match WgcCapture::new(hwnd, layout.clone()) {
+            Ok(b) => Box::new(b),
+            Err(e) => {
+                eprintln!("dry-run: wgc backend failed: {e}");
+                std::process::exit(1);
+            }
+        },
+        _ => match WgcCapture::new(hwnd, layout.clone()) {
+            Ok(mut w) => match w.capture() {
+                Ok(_) => {
+                    println!("dry-run: backend wgc (probe frame OK)");
+                    Box::new(w)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "dry-run: WARNING WGC silent ({e}) - falling back to GDI PrintWindow"
+                    );
+                    match GdiPrintWindowCapture::new(hwnd, layout.clone()) {
+                        Ok(b) => Box::new(b),
+                        Err(e2) => {
+                            eprintln!("dry-run: gdi fallback failed too: {e2} - using synthetic");
+                            Box::new(SyntheticCapture::new(320, 240).expect("synthetic"))
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                eprintln!(
+                    "dry-run: WARNING WGC unavailable ({e}) - falling back to GDI PrintWindow"
+                );
+                match GdiPrintWindowCapture::new(hwnd, layout.clone()) {
+                    Ok(b) => Box::new(b),
+                    Err(e2) => {
+                        eprintln!("dry-run: gdi fallback failed too: {e2} - using synthetic");
+                        Box::new(SyntheticCapture::new(320, 240).expect("synthetic"))
+                    }
+                }
+            }
+        },
+    }
+}
+
+fn run_dry_run(opts: &DryRunOptions) -> i32 {
+    use controller::capture::FpsLimiter;
     use controller::pipeline::{draw_overlay, run_cycle};
     use controller::safety::{SafetyConfig, SafetyGovernor};
     use controller::vision::{Detector, MockDetector};
@@ -163,7 +239,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     ensure_dpi_awareness();
 
     // --- window: @probe creates our own window; otherwise find by title ---
-    let (target_hwnd, _owned_probe, calibrated) = if opts.window == "@probe" {
+    let (target_hwnd, _owned_probe, mut calibrated) = if opts.window == "@probe" {
         let title = format!("NFCTRL-DRYRUN-{}", std::process::id());
         match OwnedTestWindow::new(640, 480, &title) {
             Ok(w) => match GameWindow::from_hwnd(w.hwnd).map(|g| g.layout()) {
@@ -202,56 +278,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         opts.window, opts.backend, opts.model, opts.model, opts.fps, opts.duration_secs
     );
 
-    // --- backend: auto tries WGC, falls back to GDI on silence ---
-    let mut backend: Box<dyn CaptureBackend> = match opts.backend.as_str() {
-        "synthetic" => Box::new(SyntheticCapture::new(320, 240).expect("synthetic")),
-        "gdi" => match GdiPrintWindowCapture::new(target_hwnd, calibrated.clone()) {
-            Ok(b) => Box::new(b),
-            Err(e) => {
-                eprintln!("dry-run: gdi backend failed: {e}");
-                return 1;
-            }
-        },
-        "wgc" => match WgcCapture::new(target_hwnd, calibrated.clone()) {
-            Ok(b) => Box::new(b),
-            Err(e) => {
-                eprintln!("dry-run: wgc backend failed: {e}");
-                return 1;
-            }
-        },
-        _ => match WgcCapture::new(target_hwnd, calibrated.clone()) {
-            Ok(mut w) => match w.capture() {
-                Ok(_) => {
-                    println!("dry-run: backend wgc (probe frame OK)");
-                    Box::new(w)
-                }
-                Err(e) => {
-                    eprintln!(
-                        "dry-run: WARNING WGC silent ({e}) - falling back to GDI PrintWindow"
-                    );
-                    match GdiPrintWindowCapture::new(target_hwnd, calibrated.clone()) {
-                        Ok(b) => Box::new(b),
-                        Err(e2) => {
-                            eprintln!("dry-run: gdi fallback failed too: {e2} - using synthetic");
-                            Box::new(SyntheticCapture::new(320, 240).expect("synthetic"))
-                        }
-                    }
-                }
-            },
-            Err(e) => {
-                eprintln!(
-                    "dry-run: WARNING WGC unavailable ({e}) - falling back to GDI PrintWindow"
-                );
-                match GdiPrintWindowCapture::new(target_hwnd, calibrated.clone()) {
-                    Ok(b) => Box::new(b),
-                    Err(e2) => {
-                        eprintln!("dry-run: gdi fallback failed too: {e2} - using synthetic");
-                        Box::new(SyntheticCapture::new(320, 240).expect("synthetic"))
-                    }
-                }
-            }
-        },
-    };
+    let mut backend = build_backend(&opts.backend, target_hwnd, &calibrated);
 
     let mut detector: Box<dyn Detector> = Box::new(MockDetector::synthetic_rect());
     let t0 = std::time::Instant::now();
@@ -287,6 +314,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     let mut allowed_count: u32 = 0;
     let mut verdict_notes: Vec<String> = Vec::new();
     let mut outcome = "completed";
+    let mut resized_once = false;
     let mut retry_tracker = controller::pipeline::RetryTracker::new(5);
     while t0.elapsed().as_secs_f32() < opts.duration_secs {
         if let Some(after) = opts.emergency_after_secs {
@@ -297,6 +325,20 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         limiter.wait_tick();
         cycle += 1;
         let cycle_started = std::time::Instant::now();
+
+        // Deterministic mid-run resize for the probe window: drives the
+        // governor Pause + recalibration path live. Must run on THIS thread
+        // (the window's owner) — SetWindowPos from a foreign thread cannot
+        // deliver WM_WINDOWPOSCHANGING without a message pump.
+        if let (Some(_probe), Some((secs, w, h))) = (&_owned_probe, opts.resize_after) {
+            if !resized_once && t0.elapsed().as_secs_f32() >= secs {
+                match controller::window::resize_window(target_hwnd, w as i32, h as i32) {
+                    Ok(()) => println!("dry-run: probe window resized to {w}x{h}"),
+                    Err(e) => eprintln!("dry-run: WARNING probe resize failed: {e}"),
+                }
+                resized_once = true;
+            }
+        }
         #[allow(unused_assignments)]
         let mut last_cycle_duration = std::time::Duration::ZERO;
 
@@ -368,6 +410,22 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 backend: &opts.backend,
                 report: &report,
             });
+        }
+
+        // Geometry drift (Pause from check_geometry): recalibrate NOW —
+        // re-anchor the calibration to the fresh layout and rebuild the
+        // backend so its buffers match the new size. Without this the loop
+        // would report pause forever against a stale snapshot.
+        if report.pre_verdict.is_allow() && !report.geometry_ok {
+            calibrated = current.clone();
+            if opts.backend != "synthetic" {
+                backend = build_backend(&opts.backend, target_hwnd, &calibrated);
+            }
+            retry_tracker.on_success();
+            println!(
+                "dry-run: recalibrated to client {:?} (backend {})",
+                calibrated.client_size, opts.backend
+            );
         }
 
         if report.allowed() {

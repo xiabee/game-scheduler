@@ -431,6 +431,31 @@ fn register_probe_class() -> u16 {
 static PAINT_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static PRINT_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// Resize ANY window's client area to exactly WxH (used by the dry-run's
+/// `--resize-after` probe harness on its own window).
+pub fn resize_window(hwnd: HWND, client_w: i32, client_h: i32) -> Result<()> {
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: client_w,
+        bottom: client_h,
+    };
+    unsafe { AdjustWindowRectEx(&mut rect, probe_window_style(), false, WINDOW_EX_STYLE(0)) }
+        .map_err(ControllerError::Win)?;
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(HWND_BOTTOM),
+            0,
+            0,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE,
+        )
+    }
+    .map_err(ControllerError::Win)
+}
+
 /// WM_PAINT executions across all probe windows in this process.
 pub fn probe_paint_count() -> u32 {
     PAINT_COUNT.load(std::sync::atomic::Ordering::Relaxed)
