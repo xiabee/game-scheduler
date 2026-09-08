@@ -15,6 +15,7 @@ pub mod input;
 pub mod pipeline;
 pub mod protocol;
 pub mod safety;
+pub mod session;
 pub mod state;
 pub mod template;
 pub mod transform;

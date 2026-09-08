@@ -89,6 +89,7 @@ struct DryRunOptions {
     model: u32,
     min_confidence: f32,
     debug_dir: Option<String>,
+    session_log: Option<String>,
     require_foreground: bool,
     /// Latch the governor's emergency stop after N seconds (exercises the
     /// emergency path deterministically).
@@ -143,6 +144,7 @@ impl DryRunOptions {
             model,
             min_confidence,
             debug_dir: opt(args, "--debug-dir"),
+            session_log: opt(args, "--session-log"),
             require_foreground: args.iter().any(|a| a == "--require-foreground"),
             emergency_after_secs: opt(args, "--emergency-after").and_then(|v| v.parse().ok()),
         })
@@ -276,10 +278,15 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     if let Some(dir) = &opts.debug_dir {
         std::fs::create_dir_all(dir).ok();
     }
+    let mut session_log = opts
+        .session_log
+        .as_deref()
+        .map(controller::session::SessionLogger::new);
 
     let mut cycle: u32 = 0;
     let mut allowed_count: u32 = 0;
     let mut verdict_notes: Vec<String> = Vec::new();
+    let mut outcome = "completed";
     let mut retry_tracker = controller::pipeline::RetryTracker::new(5);
     while t0.elapsed().as_secs_f32() < opts.duration_secs {
         if let Some(after) = opts.emergency_after_secs {
@@ -289,6 +296,9 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         }
         limiter.wait_tick();
         cycle += 1;
+        let cycle_started = std::time::Instant::now();
+        #[allow(unused_assignments)]
+        let mut last_cycle_duration = std::time::Duration::ZERO;
 
         let current = match GameWindow::from_hwnd(target_hwnd) {
             Ok(g) => match g.layout() {
@@ -327,6 +337,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         ) {
             Ok(r) => {
                 retry_tracker.on_success();
+                last_cycle_duration = std::time::Instant::now().duration_since(cycle_started);
                 r
             }
             Err(controller::ControllerError::WindowGone) => {
@@ -348,6 +359,16 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 }
             },
         };
+
+        if let Some(log) = session_log.as_mut() {
+            log.write_cycle(&controller::session::SessionLine {
+                cycle,
+                elapsed_ms: t0.elapsed().as_millis(),
+                cycle_duration: last_cycle_duration,
+                backend: &opts.backend,
+                report: &report,
+            });
+        }
 
         if report.allowed() {
             allowed_count += 1;
@@ -391,6 +412,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             if let Some(reason) = report.pre_verdict.reason() {
                 println!("dry-run: governor STOP after cycle {cycle}: {reason}");
             }
+            outcome = "stopped";
             break;
         }
     }
@@ -399,6 +421,9 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         "dry-run: finished - cycles={cycle} allowed={allowed_count} distinct_verdicts={}",
         verdict_notes.len()
     );
+    if let Some(log) = session_log.as_mut() {
+        log.write_summary(cycle, allowed_count, verdict_notes.len() as u32, outcome);
+    }
     for note in &verdict_notes {
         println!("dry-run: verdict {note}");
     }
