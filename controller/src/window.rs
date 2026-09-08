@@ -8,7 +8,7 @@
 use crate::{ControllerError, Result};
 use std::sync::OnceLock;
 use windows::core::{BOOL, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, POINT, RECT};
+use windows::Win32::Foundation::{CloseHandle, HINSTANCE, HWND, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, ClientToScreen, CreateSolidBrush, DeleteObject, EndPaint, FillRect, RedrawWindow,
     HDC, PAINTSTRUCT, RDW_ERASE, RDW_INVALIDATE, RDW_UPDATENOW,
@@ -224,6 +224,9 @@ fn window_process(hwnd: HWND) -> Result<(u32, String)> {
         // Elevated processes deny the query; that must not hide the window.
         Err(_) => String::new(),
     };
+    // The observation loop calls this every cycle — an unclosed process
+    // handle here is a per-cycle leak (caught by the handle-count test).
+    unsafe { CloseHandle(handle) }.ok();
     Ok((pid, path))
 }
 
@@ -689,6 +692,34 @@ mod tests {
         }
         // No assertion that a window exists: a truly windowless session is
         // allowed to answer None, but enumeration itself may not fail.
+    }
+
+    #[test]
+    fn repeated_lookups_do_not_leak_process_handles() {
+        use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
+        ensure_dpi_awareness();
+        let title = unique_title("handles");
+        let win = OwnedTestWindow::new(120, 90, &title).expect("create window");
+        let mut count = 0u32;
+        unsafe {
+            GetProcessHandleCount(GetCurrentProcess(), &mut count).expect("handle count");
+        }
+        let baseline = count;
+
+        // 50 lookups: a leaked OpenProcess handle per lookup would show up
+        // as +50 (noise from parallel tests is far smaller).
+        for _ in 0..50 {
+            let w = GameWindow::from_hwnd(win.hwnd).expect("wrap");
+            assert!(!w.process_path().is_empty() || w.process_name().is_empty());
+            let _ = GameWindow::find(Some(&title), None).expect("find");
+        }
+        unsafe {
+            GetProcessHandleCount(GetCurrentProcess(), &mut count).expect("handle count");
+        }
+        assert!(
+            count <= baseline + 25,
+            "handle leak: {baseline} -> {count} after 50 lookups"
+        );
     }
 
     #[test]
