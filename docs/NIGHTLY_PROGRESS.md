@@ -120,3 +120,4 @@
 | M25 | 配置脚枪防护：skill 期望引用未配置探针 → 启动即 WARNING（此前只能靠超时失败）；`SkillDefinition::referenced_probes()` / `LayeredPerception::probe_names()` 支撑 | PASS | （下方 commit） | 127 测试；实机 smoke 打印 WARNING |
 | M26 | 采集→训练闭环桥：`frames_to_dataset.py`（controller --record 帧目录 → YOLO 数据集布局 + source manifest，stdlib-only）；实机端到端：4 帧真实录制 → 转换 → prepare_dataset 校验切分通过 | PASS | 15cc4be | --help/合成/真实帧三路验证 |
 | M27 | 会话 TSV `skill_state` 列：`--skill` 驱动的会话每行追加第 9 列（离线分析技能时间线 × 检测联合），无 skill 会话保持经典 8 列不变（双向断言） | PASS | bcae0cf | 127 测试；实机验证第 9 列 |
+| M28 | NCC 粗到细精修（NC2）：stride-N 粗扫后于 ±stride 邻域做 stride-1 重评分——精度等同全扫描、成本大降；测试用非周期纹理证明非网格偏移 (37,21) 精确恢复 score≥0.99（棋盘格周期性会致粗扫混叠，已换纹理并留注释） | PASS | f919f2e | 127→128 测试 |
