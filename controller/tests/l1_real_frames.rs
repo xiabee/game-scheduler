@@ -7,10 +7,14 @@ use controller::capture::{CaptureBackend, SyntheticCapture};
 use controller::frame::Frame;
 use controller::perception::{LayeredPerception, PixelProbe, TemplateTarget};
 use controller::pipeline::letterbox_to_model;
-use controller::replay::FrameRecorder;
+use controller::replay::{FrameRecorder, ReplayCapture};
+use controller::safety::{SafetyConfig, SafetyGovernor};
+use controller::skill::{SkillDefinition, SkillRunner, StepOutcome};
 use controller::template::{NccTemplateMatcher, TemplateMatcher};
+use controller::vision::Detector;
 use controller::window::{ensure_dpi_awareness, OwnedTestWindow};
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 #[test]
 fn l1_template_tracks_a_real_recorded_scene() {
@@ -163,5 +167,139 @@ fn replay_backend_feeds_layered_perception_end_to_end() {
     assert!(report.allowed(), "replayed cycle must be clean: {report:?}");
     assert!(!report.evidence.probes.is_empty(), "L0 evidence must exist");
     assert_eq!(report.client_detections.len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn recorded_real_frames_drive_a_probe_skill_to_done() {
+    // NC2+NC3 acceptance in miniature, on REAL content: record the probe
+    // window, define an L0 probe over its anchored red rect, and require
+    // the skill (expect: probe fired) to reach Done through replayed
+    // cycles — offline, deterministic, input-free.
+    ensure_dpi_awareness();
+    if !controller::window::interactive_desktop_available() {
+        println!("skipped: needs an interactive desktop for live GDI content (service session)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("nf_probe_skill_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // 1. record real frames of the probe window (red rect anchored at
+    //    normalized (0.6,0.6)-(0.8,0.8) of the 400x300 client)
+    let title = format!("NFCTRL-PROBE-SKILL-{}", std::process::id());
+    let win = OwnedTestWindow::new(400, 300, &title).expect("probe window");
+    let layout = controller::window::GameWindow::from_hwnd(win.hwnd)
+        .expect("wrap")
+        .layout()
+        .expect("layout");
+    let mut cap =
+        controller::capture::GdiPrintWindowCapture::new(win.hwnd, layout).expect("gdi backend");
+    let mut recorder = FrameRecorder::create(&dir, 6).expect("recorder");
+    let mut warmup = 0;
+    while recorder.written() < 3 && warmup < 12 {
+        warmup += 1;
+        win.nudge();
+        let f = cap.capture().expect("capture");
+        let has_red = (0..f.width).step_by(4).any(|x| {
+            (0..f.height).step_by(4).any(|y| {
+                f.pixel(x, y)
+                    .map(|p| p[2] > 150 && p[0] < 80)
+                    .unwrap_or(false)
+            })
+        });
+        if has_red {
+            recorder.record(&f).expect("record");
+        }
+    }
+    let recorded = recorder.written();
+    assert!(recorded >= 3, "need real frames, got {recorded}");
+
+    // 2. a probe over the anchored red rect + a skill gated on it
+    let mut perception = LayeredPerception::new();
+    perception.add_probe(PixelProbe {
+        name: "red_anchor".into(),
+        x: 250,
+        y: 190,
+        w: 40,
+        h: 40,
+        expected: [16, 40, 200], // BGRA body of the anchor rect
+        tolerance: 12,
+        min_fraction: 0.8,
+        step: 2,
+    });
+    let def = SkillDefinition::from_json(
+        r#"{
+            "name": "wait_anchor",
+            "start": "watch",
+            "states": [
+                {
+                    "name": "watch",
+                    "expect": [{ "probe": "red_anchor" }],
+                    "actions": ["acknowledge anchor"],
+                    "next": "seen",
+                    "timeout_ms": 60000
+                },
+                {
+                    "name": "seen",
+                    "terminal": true,
+                    "expect": [],
+                    "next": "seen",
+                    "timeout_ms": 0
+                }
+            ]
+        }"#,
+    )
+    .expect("skill");
+    let mut runner = SkillRunner::start(def, 0);
+    let mut replay = ReplayCapture::open(&dir, true).expect("replay");
+    let mut governor = SafetyGovernor::new(SafetyConfig::default(), Instant::now()).expect("gov");
+    let calibrated = replay.calibrated_layout();
+    let mut detector = controller::vision::MockDetector::synthetic_rect();
+    let t0 = Instant::now();
+
+    let mut reached_done = false;
+    for cycle in 0..6u32 {
+        let report = controller::pipeline::run_cycle(
+            cycle,
+            &mut replay,
+            &mut detector,
+            &mut governor,
+            &calibrated,
+            &calibrated,
+            true,
+            true,
+            256,
+            256,
+            Some(&mut perception),
+            t0 + Duration::from_millis(cycle as u64 * 50),
+        )
+        .expect("cycle");
+        assert!(
+            report.evidence.probe_fired("red_anchor"),
+            "the anchored rect must fire the probe on real frames"
+        );
+        let fired = |name: &str| report.evidence.probe_fired(name);
+        let dets: Vec<(String, f32)> = report
+            .client_detections
+            .iter()
+            .map(|d| (d.label.clone(), d.confidence))
+            .collect();
+        let now_ms = (Instant::now() - t0).as_millis() as u64 + cycle as u64;
+        match runner.step(now_ms, &fired, &dets) {
+            StepOutcome::Done => {
+                reached_done = true;
+                break;
+            }
+            StepOutcome::Transitioned { to, planned } => {
+                assert_eq!(to, "seen");
+                assert_eq!(planned, vec!["acknowledge anchor".to_string()]);
+                reached_done = true;
+                break;
+            }
+            StepOutcome::Waiting => continue,
+            other => panic!("unexpected outcome {other:?}"),
+        }
+    }
+    assert!(reached_done, "the skill must complete on real evidence");
     let _ = std::fs::remove_dir_all(&dir);
 }
