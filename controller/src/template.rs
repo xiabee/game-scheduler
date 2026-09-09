@@ -113,6 +113,57 @@ impl TemplateMatcher for NccTemplateMatcher {
             }
             oy += stride as usize;
         }
+
+        // NC2 coarse-to-fine: the coarse pass can miss the true peak by up
+        // to one stride. Re-score stride-1 around the coarse best before
+        // accepting it — same accuracy class as exhaustive at a fraction
+        // of the cost.
+        if let Some(b) = &best {
+            let (bw, bh) = (template.width as usize, template.height as usize);
+            let lo_x = b.x.saturating_sub(stride) as usize;
+            let lo_y = b.y.saturating_sub(stride) as usize;
+            let hi_x = (b.x as usize + bw - 1 + stride as usize).min(max_x as usize);
+            let hi_y = (b.y as usize + bh - 1 + stride as usize).min(max_y as usize);
+            let mut ox = lo_x;
+            while ox <= hi_x {
+                let mut oy = lo_y;
+                while oy <= hi_y {
+                    let mut sum = 0.0f32;
+                    for ty in 0..th {
+                        let row = (oy + ty) * iw + ox;
+                        for tx in 0..tw {
+                            sum += img[row + tx];
+                        }
+                    }
+                    let w_mean = sum / (tw * th) as f32;
+                    let mut num = 0.0f32;
+                    let mut w_sq = 0.0f32;
+                    for ty in 0..th {
+                        let row = (oy + ty) * iw + ox;
+                        for tx in 0..tw {
+                            let d = img[row + tx] - w_mean;
+                            num += d * t_dev[ty * tw + tx];
+                            w_sq += d * d;
+                        }
+                    }
+                    let w_norm = w_sq.sqrt();
+                    let score = if w_norm < 1e-6 {
+                        0.0
+                    } else {
+                        num / (w_norm * t_norm)
+                    };
+                    if best.as_ref().is_none_or(|b| score > b.score) {
+                        best = Some(TemplateMatch {
+                            x: ox as u32,
+                            y: oy as u32,
+                            score,
+                        });
+                    }
+                    oy += 1;
+                }
+                ox += 1;
+            }
+        }
         best
     }
 }
@@ -194,6 +245,34 @@ mod tests {
             "brightness-shifted match score {}",
             hit.score
         );
+    }
+
+    #[test]
+    fn coarse_to_fine_recovers_non_aligned_peaks() {
+        // a NON-periodic template pasted at an offset that is NOT a
+        // multiple of the scan stride: the coarse pass alone lands on the
+        // grid, the stride-1 refinement must recover the exact position
+        let template = texture(16, 16);
+        let mut image = Frame::new(120, 90);
+        for y in 0..90u32 {
+            for x in 0..120u32 {
+                image.set_pixel(x, y, [20, 20, 20, 255]);
+            }
+        }
+        for y in 0..16u32 {
+            for x in 0..16u32 {
+                let px = template.pixel(x, y).unwrap();
+                image.set_pixel(37 + x, 21 + y, px);
+            }
+        }
+        let mut m = NccTemplateMatcher;
+        let hit = m.find(&image, &template, 8).expect("match");
+        assert_eq!(
+            (hit.x, hit.y),
+            (37, 21),
+            "refinement must recover the exact position: {hit:?}"
+        );
+        assert!(hit.score >= 0.99, "self-match score: {hit:?}");
     }
 
     #[test]
