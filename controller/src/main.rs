@@ -795,7 +795,13 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         if let (Some(dir), Some(mut frame)) = (&opts.debug_dir, report.frame.clone()) {
             if reportable {
                 draw_overlay(&mut frame, &report.client_detections, [0, 230, 255, 255]);
-                let path = format!("{dir}/cycle_{cycle:05}.png");
+                // NC3 traceability: the skill state rides in the filename so
+                // a flip through the debug dir reads as a state timeline
+                let state_tag = match skill_runner.as_ref() {
+                    Some(r) => format!("_{}", r.current().replace(['/', '\\', ':'], "_")),
+                    None => String::new(),
+                };
+                let path = format!("{dir}/cycle_{cycle:05}{state_tag}.png");
                 match export_png(&path, &frame) {
                     Ok(()) => println!("dry-run: debug frame {path}"),
                     Err(e) => eprintln!("dry-run: png export failed: {e}"),
