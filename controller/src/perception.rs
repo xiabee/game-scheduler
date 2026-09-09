@@ -265,6 +265,54 @@ mod tests {
     }
 
     #[test]
+    fn layered_evaluation_stays_within_the_cpu_budget() {
+        // ROADMAP §5/NC2: cheap-first means an L0(+L1) evaluation over a
+        // normal frame must cost milliseconds, not a frame budget. This is
+        // a generous regression tripwire (not a benchmark): a stride or
+        // sampling regression shows up as a many-x slowdown.
+        let mut f = Frame::new(320, 240);
+        for y in 0..240u32 {
+            for x in 0..320u32 {
+                let v = ((x / 8 + y / 8) % 2) as u8 * 180;
+                f.set_pixel(x, y, [v, v, v, 255]);
+            }
+        }
+        let mut lp = LayeredPerception::new();
+        lp.add_probe(probe("a", 0, 0, [0, 0, 0]));
+        lp.add_probe(probe("b", 150, 100, [180, 180, 180]));
+        lp.add_template(TemplateTarget {
+            name: "patch".into(),
+            template: {
+                let mut t = Frame::new(8, 8);
+                for y in 0..8u32 {
+                    for x in 0..8u32 {
+                        let v = ((x / 4 + y / 4) % 2) as u8 * 180;
+                        t.set_pixel(x, y, [v, v, v, 255]);
+                    }
+                }
+                t
+            },
+            min_score: 0.9,
+            stride: 4,
+        });
+
+        let started = std::time::Instant::now();
+        const EVALS: u32 = 100;
+        for _ in 0..EVALS {
+            let ev = lp.evaluate(&f);
+            assert!(!ev.probes.is_empty());
+        }
+        let avg_ms = started.elapsed().as_millis() as f32 / EVALS as f32;
+        // ceiling sized for DEBUG builds (release is ~50x faster); a
+        // sampling/stride regression shows up as a many-x slowdown, far
+        // beyond this margin
+        assert!(
+            avg_ms < 60.0,
+            "layered evaluation averaged {avg_ms:.2}ms (>60ms debug) - a cheap layer regressed"
+        );
+    }
+
+    #[test]
     fn the_committed_example_probes_always_parse() {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/probes.example.json");
