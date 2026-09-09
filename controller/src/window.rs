@@ -531,7 +531,19 @@ unsafe fn draw_probe_scene(hwnd: HWND, hdc: HDC) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
     use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    /// Serializes every window-creating test. `SetProcessDpiAwarenessContext`
+    /// is PROCESS-global and flips how subsequent windows are sized, so two
+    /// tests racing "create window" against "set awareness" could observe a
+    /// scaled client rect (a 2x flake once test counts grew). Holding this
+    /// lock across ensure_dpi_awareness + create + measure keeps each test's
+    /// observations internally consistent.
+    fn window_test_lock() -> MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     fn unique_title(tag: &str) -> String {
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -571,6 +583,7 @@ mod tests {
 
     #[test]
     fn dpi_awareness_succeeds() {
+        let _window_guard = window_test_lock();
         if !require_interactive("dpi_awareness_succeeds") {
             return;
         }
@@ -583,6 +596,7 @@ mod tests {
 
     #[test]
     fn creates_window_with_exact_client_size_and_finds_it_by_title() {
+        let _window_guard = window_test_lock();
         if !require_interactive("creates_window_..._finds_it_by_title") {
             return;
         }
@@ -607,6 +621,7 @@ mod tests {
 
     #[test]
     fn finds_window_by_process_name() {
+        let _window_guard = window_test_lock();
         if !require_interactive("finds_window_by_process_name") {
             return;
         }
@@ -632,6 +647,7 @@ mod tests {
 
     #[test]
     fn client_to_screen_origin_is_consistent_with_window_rect() {
+        let _window_guard = window_test_lock();
         ensure_dpi_awareness();
         let title = unique_title("origin");
         let win = OwnedTestWindow::new(400, 300, &title).expect("create window");
@@ -663,6 +679,7 @@ mod tests {
 
     #[test]
     fn change_detection_sees_resize_and_move() {
+        let _window_guard = window_test_lock();
         ensure_dpi_awareness();
         let title = unique_title("change");
         let win = OwnedTestWindow::new(500, 400, &title).expect("create window");
@@ -692,6 +709,7 @@ mod tests {
 
     #[test]
     fn foreground_answers_and_dpi_is_sane() {
+        let _window_guard = window_test_lock();
         ensure_dpi_awareness();
         let title = unique_title("fg");
         let win = OwnedTestWindow::new(200, 150, &title).expect("create window");
@@ -708,6 +726,7 @@ mod tests {
 
     #[test]
     fn invalid_handles_report_window_gone() {
+        let _window_guard = window_test_lock();
         let stale_probe = GameWindow::from_hwnd(HWND(std::ptr::null_mut()));
         assert!(matches!(stale_probe, Err(ControllerError::WindowGone)));
 
@@ -721,6 +740,7 @@ mod tests {
 
     #[test]
     fn filterless_enumeration_never_errors_and_metadata_reads() {
+        let _window_guard = window_test_lock();
         let first = GameWindow::find(None, None).expect("filterless enumeration must not error");
         if let Some(w) = first {
             assert!(w.pid() > 0, "pid must be known for any returned window");
@@ -731,6 +751,7 @@ mod tests {
 
     #[test]
     fn repeated_lookups_do_not_leak_process_handles() {
+        let _window_guard = window_test_lock();
         use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
         ensure_dpi_awareness();
         let title = unique_title("handles");
@@ -759,6 +780,7 @@ mod tests {
 
     #[test]
     fn invalid_client_size_is_rejected_before_any_window_is_created() {
+        let _window_guard = window_test_lock();
         let err = match OwnedTestWindow::new(0, 100, "bad") {
             Err(e) => e,
             Ok(_) => panic!("size 0 must be rejected"),

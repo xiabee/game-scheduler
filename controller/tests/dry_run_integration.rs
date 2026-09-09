@@ -31,6 +31,7 @@ fn five_cycles_track_the_moving_rect_and_stay_allowed() {
             true,
             256,
             256,
+            None,
             now,
         )
         .expect("cycle");
@@ -167,6 +168,7 @@ fn emergency_latch_terminates_the_loop_midway() {
             true,
             256,
             256,
+            None,
             now,
         )
         .expect("cycle");

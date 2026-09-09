@@ -6,6 +6,7 @@
 
 use crate::capture::CaptureBackend;
 use crate::frame::Frame;
+use crate::perception::{Evidence, LayeredPerception};
 use crate::safety::{GovernorVerdict, SafetyGovernor};
 use crate::transform::Transform;
 use crate::vision::{Detection, Detector};
@@ -81,6 +82,9 @@ pub struct CycleReport {
     /// (None when a precondition or geometry check short-circuited).
     /// Reuse it for overlays — do NOT capture again.
     pub frame: Option<Frame>,
+    /// L0 perception evidence for this cycle (empty when no probes are
+    /// configured or the cycle short-circuited before capture).
+    pub evidence: Evidence,
 }
 
 impl CycleReport {
@@ -96,7 +100,9 @@ impl CycleReport {
 
 /// Run ONE dry-run cycle against a live backend. `same_window` and
 /// `foreground` come from the caller's window observations; the calibrated
-/// layout is the geometry the transform was built with.
+/// layout is the geometry the transform was built with. When `perception`
+/// is present its L0 probes evaluate over the RAW CLIENT frame (probes
+/// are defined in client pixels, before any letterbox).
 #[allow(clippy::too_many_arguments)]
 pub fn run_cycle(
     cycle: u32,
@@ -109,6 +115,7 @@ pub fn run_cycle(
     foreground: bool,
     model_w: u32,
     model_h: u32,
+    perception: Option<&mut LayeredPerception>,
     now: Instant,
 ) -> Result<CycleReport> {
     let pre_verdict = governor.check_preconditions(now, same_window, foreground);
@@ -121,6 +128,7 @@ pub fn run_cycle(
             desktop_points: Vec::new(),
             action_verdict: None,
             frame: None,
+            evidence: Evidence::default(),
         });
     }
     let geometry_ok = governor.check_geometry(calibrated, current).is_allow();
@@ -133,11 +141,16 @@ pub fn run_cycle(
             desktop_points: Vec::new(),
             action_verdict: None,
             frame: None,
+            evidence: Evidence::default(),
         });
     }
 
-    // capture → letterbox → detect → inverse transform
+    // capture → L0 probes (client space) → letterbox → detect → inverse
     let frame = backend.capture()?;
+    let evidence = match perception {
+        Some(lp) => lp.evaluate(&frame),
+        None => Evidence::default(),
+    };
     let transform = Transform::new(current, model_w, model_h)?;
     let model_frame = letterbox_to_model(&frame, model_w, model_h)?;
     let model_detections = detector.detect(&model_frame);
@@ -174,6 +187,7 @@ pub fn run_cycle(
         desktop_points,
         action_verdict,
         frame: Some(frame),
+        evidence,
     })
 }
 
@@ -309,6 +323,7 @@ mod tests {
             true,
             256,
             256,
+            None,
             t0,
         )
         .expect("cycle");
@@ -347,6 +362,7 @@ mod tests {
             true,
             256,
             256,
+            None,
             t0,
         )
         .expect("cycle");
@@ -376,6 +392,7 @@ mod tests {
             false,
             256,
             256,
+            None,
             t0,
         )
         .expect("cycle");

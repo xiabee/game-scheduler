@@ -27,7 +27,7 @@ pub enum Layer {
 /// What one L0 probe checks: a small region whose pixels must match an
 /// expected color within per-channel tolerance. Region sampling uses
 /// `step` so a big region still costs a bounded number of reads.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct PixelProbe {
     pub name: String,
     pub x: u32,
@@ -109,6 +109,34 @@ impl LayeredPerception {
         self.probes.push(probe);
     }
 
+    /// Parse and validate an L0 probe set from JSON (the `--probes`
+    /// config). Schema: `[{ "name", "x", "y", "w", "h", "expected":
+    /// [b,g,r], "tolerance", "min_fraction", "step" }]`.
+    pub fn probes_from_json(text: &str) -> Result<Vec<PixelProbe>, String> {
+        let probes: Vec<PixelProbe> =
+            serde_json::from_str(text).map_err(|e| format!("invalid probes JSON: {e}"))?;
+        if probes.len() > 256 {
+            return Err(format!(
+                "at most 256 probes per session, got {}",
+                probes.len()
+            ));
+        }
+        for (i, p) in probes.iter().enumerate() {
+            if p.name.trim().is_empty() {
+                return Err(format!("probes[{i}].name must be non-blank"));
+            }
+            if p.w == 0 || p.h == 0 {
+                return Err(format!("probes[{}].w/h must be positive", i));
+            }
+            if !(p.min_fraction > 0.0 && p.min_fraction <= 1.0) {
+                return Err(format!(
+                    "probes[{i}].min_fraction must be in (0, 1], got {}",
+                    p.min_fraction
+                ));
+            }
+        }
+        Ok(probes)
+    }
     pub fn add_template(&mut self, target: TemplateTarget) {
         self.templates.push(target);
     }

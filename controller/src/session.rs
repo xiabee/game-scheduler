@@ -156,6 +156,7 @@ mod tests {
 
     fn report_with_detection() -> CycleReport {
         CycleReport {
+            evidence: Default::default(),
             cycle: 7,
             pre_verdict: GovernorVerdict::Allow,
             geometry_ok: true,

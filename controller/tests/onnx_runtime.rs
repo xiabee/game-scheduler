@@ -171,6 +171,7 @@ fn onnx_detector_flows_through_a_full_dry_run_cycle() {
         true,
         64,
         64,
+        None,
         Instant::now(),
     )
     .expect("cycle");

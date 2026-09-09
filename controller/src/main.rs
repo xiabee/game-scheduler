@@ -151,6 +151,9 @@ struct DryRunOptions {
     /// Replay a recorded directory instead of capturing live frames;
     /// the window still anchors geometry (default @probe).
     replay: Option<String>,
+    /// NC2: L0 probe definitions (JSON list), evaluated against the raw
+    /// client frame every cycle.
+    probes: Option<String>,
 }
 
 impl DryRunOptions {
@@ -252,6 +255,7 @@ impl DryRunOptions {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(600),
             replay: opt(args, "--replay").filter(|p| !p.trim().is_empty()),
+            probes: opt(args, "--probes").filter(|p| !p.trim().is_empty()),
         };
         if opts.record.is_some() && opts.replay.is_some() {
             return Err("--record and --replay are mutually exclusive".into());
@@ -457,6 +461,37 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     };
 
     let mut detector = choice.detector;
+
+    // NC2: optional L0 probe set, evaluated against the raw client frame
+    // every cycle (cheap-first: probes cost a handful of pixel reads).
+    let mut perception = match &opts.probes {
+        Some(path) => {
+            let text = match std::fs::read_to_string(path) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("dry-run: cannot read probes {path:?}: {e}");
+                    return 1;
+                }
+            };
+            match controller::perception::LayeredPerception::probes_from_json(&text) {
+                Ok(probes) => {
+                    let count = probes.len();
+                    let mut lp = controller::perception::LayeredPerception::new();
+                    for p in probes {
+                        lp.add_probe(p);
+                    }
+                    println!("dry-run: L0 probes = {count}");
+                    Some(lp)
+                }
+                Err(e) => {
+                    eprintln!("dry-run: {path:?}: {e}");
+                    return 1;
+                }
+            }
+        }
+        None => None,
+    };
+
     let t0 = std::time::Instant::now();
     let mut governor = match SafetyGovernor::new(
         SafetyConfig {
@@ -556,6 +591,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             foreground,
             model_w,
             model_h,
+            perception.as_mut(),
             now,
         ) {
             Ok(r) => {
@@ -670,6 +706,26 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 println!(
                     "dry-run: cycle {} conf={:.2} client=({:.0},{:.0}) desktop=({:.0},{:.0})",
                     cycle, d.confidence, c.0, c.1, dp.0, dp.1
+                );
+            }
+            if !report.evidence.probes.is_empty() {
+                let fired: Vec<String> = report
+                    .evidence
+                    .probes
+                    .iter()
+                    .filter(|p| p.fired)
+                    .map(|p| p.name.clone())
+                    .collect();
+                println!(
+                    "dry-run: cycle {} L0 probes {}/{} fired: {}",
+                    cycle,
+                    fired.len(),
+                    report.evidence.probes.len(),
+                    if fired.is_empty() {
+                        "-".into()
+                    } else {
+                        fired.join(",")
+                    }
                 );
             }
         }
@@ -1228,5 +1284,13 @@ mod tests {
         // default without the flag
         let o = DryRunOptions::parse(&args(&["--dry-run", "--record", "d"])).expect("ok");
         assert_eq!(o.record_max, 600);
+    }
+
+    #[test]
+    fn probes_flag_parses_and_drops_blanks() {
+        let o = DryRunOptions::parse(&args(&["--dry-run", "--probes", "probes.json"])).expect("ok");
+        assert_eq!(o.probes.as_deref(), Some("probes.json"));
+        let o = DryRunOptions::parse(&args(&["--dry-run", "--probes", " "])).expect("ok");
+        assert!(o.probes.is_none(), "blank probes path treated as absent");
     }
 }
