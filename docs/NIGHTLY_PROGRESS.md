@@ -118,3 +118,4 @@
 | M23 | NC3 轨迹联动：skill 当前状态进入 debug PNG 文件名（`cycle_00030_home.png`），调试目录按序浏览即状态时间线（路径净化） | PASS | （下方 commit） | 实机：2 帧导出文件名含状态 |
 | M24 | 回放确定性 + 终态转移 API 修复：新增测试发现「转入终态直接返回 Done、调用方看不到状态名与计划动作」——改为返回 Transitioned{to,planned} 并置 done；回放确定性测试（同录制两次回放，skill 轨迹逐字节一致）使录制会话成为稳定测试夹具 | PASS | （下方 commit） | 126→127 测试；clippy 0 |
 | M25 | 配置脚枪防护：skill 期望引用未配置探针 → 启动即 WARNING（此前只能靠超时失败）；`SkillDefinition::referenced_probes()` / `LayeredPerception::probe_names()` 支撑 | PASS | （下方 commit） | 127 测试；实机 smoke 打印 WARNING |
+| M26 | 采集→训练闭环桥：`frames_to_dataset.py`（controller --record 帧目录 → YOLO 数据集布局 + source manifest，stdlib-only）；实机端到端：4 帧真实录制 → 转换 → prepare_dataset 校验切分通过 | PASS | 15cc4be | --help/合成/真实帧三路验证 |
