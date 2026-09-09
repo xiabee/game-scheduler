@@ -18,6 +18,7 @@ pub mod nms;
 pub mod onnx;
 pub mod pipeline;
 pub mod protocol;
+pub mod replay;
 pub mod safety;
 pub mod session;
 pub mod state;

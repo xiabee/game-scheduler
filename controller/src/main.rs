@@ -144,6 +144,13 @@ struct DryRunOptions {
     imgsz_explicit: bool,
     /// True when `--min-confidence` was explicitly passed.
     confidence_explicit: bool,
+    /// Record every captured client frame as numbered PNGs (bounded by
+    /// `record_max`) for offline replay.
+    record: Option<String>,
+    record_max: u32,
+    /// Replay a recorded directory instead of capturing live frames;
+    /// the window still anchors geometry (default @probe).
+    replay: Option<String>,
 }
 
 impl DryRunOptions {
@@ -184,7 +191,7 @@ impl DryRunOptions {
                 "--min-confidence must be in [0, 1], got {min_confidence}"
             ));
         }
-        Ok(DryRunOptions {
+        let opts = DryRunOptions {
             window,
             backend,
             fps,
@@ -240,7 +247,22 @@ impl DryRunOptions {
             },
             imgsz_explicit: args.iter().any(|a| a == "--model"),
             confidence_explicit: args.iter().any(|a| a == "--min-confidence"),
-        })
+            record: opt(args, "--record").filter(|p| !p.trim().is_empty()),
+            record_max: opt(args, "--record-max")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(600),
+            replay: opt(args, "--replay").filter(|p| !p.trim().is_empty()),
+        };
+        if opts.record.is_some() && opts.replay.is_some() {
+            return Err("--record and --replay are mutually exclusive".into());
+        }
+        if opts.record_max == 0 || opts.record_max > 100_000 {
+            return Err(format!(
+                "--record-max must be in 1..=100000, got {}",
+                opts.record_max
+            ));
+        }
+        Ok(opts)
     }
 }
 
@@ -385,12 +407,53 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         opts.window, opts.backend, opts.fps, opts.duration_secs
     );
 
-    let mut backend = match build_backend(&opts.backend, target_hwnd, &calibrated) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("dry-run: {e}");
-            return 1;
+    // Replay replaces the capture source; the window still anchors the
+    // geometry (calibration, drift checks) so the governor semantics are
+    // identical between live and offline sessions.
+    let mut backend: Box<dyn controller::capture::CaptureBackend> = if let Some(dir) = &opts.replay
+    {
+        match controller::replay::ReplayCapture::open(std::path::Path::new(dir), true) {
+            Ok(r) => {
+                println!(
+                    "dry-run: backend replay ({} frame(s) from {dir}, looping)",
+                    r.frame_count()
+                );
+                Box::new(r)
+            }
+            Err(e) => {
+                eprintln!("dry-run: {e}");
+                return 1;
+            }
         }
+    } else {
+        match build_backend(&opts.backend, target_hwnd, &calibrated) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("dry-run: {e}");
+                return 1;
+            }
+        }
+    };
+
+    // Recording captures each cycle's raw client frame, bounded.
+    let mut recorder = match &opts.record {
+        Some(dir) => match controller::replay::FrameRecorder::create(
+            std::path::Path::new(dir),
+            opts.record_max,
+        ) {
+            Ok(r) => {
+                println!(
+                    "dry-run: recording frames to {dir} (max {})",
+                    opts.record_max
+                );
+                Some(r)
+            }
+            Err(e) => {
+                eprintln!("dry-run: {e}");
+                return 1;
+            }
+        },
+        None => None,
     };
 
     let mut detector = choice.detector;
@@ -516,6 +579,13 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 } else {
                     consecutive_inference_errors = 0;
                 }
+                if let (Some(rec), Some(frame)) = (recorder.as_mut(), r.frame.as_ref()) {
+                    match rec.record(frame) {
+                        Ok(true) => {}
+                        Ok(false) => {}
+                        Err(e) => eprintln!("dry-run: WARNING record failed: {e}"),
+                    }
+                }
                 r
             }
             Err(controller::ControllerError::WindowGone) => {
@@ -628,6 +698,9 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         "dry-run: finished - cycles={cycle} allowed={allowed_count} distinct_verdicts={}",
         verdict_notes.len()
     );
+    if let Some(rec) = recorder.as_ref() {
+        println!("dry-run: recorded {} frame(s)", rec.written());
+    }
     if inference_error_cycles > 0 {
         eprintln!(
             "dry-run: WARNING {inference_error_cycles}/{cycle} cycle(s) had inference errors"
@@ -1119,5 +1192,41 @@ mod tests {
             let e = DryRunOptions::parse(&args(&["--dry-run", "--model-path", bad])).unwrap_err();
             assert!(e.contains("--model-path"), "{e}");
         }
+    }
+
+    #[test]
+    fn record_and_replay_are_mutually_exclusive() {
+        let e = DryRunOptions::parse(&args(&["--dry-run", "--record", "a", "--replay", "b"]))
+            .unwrap_err();
+        assert!(e.contains("mutually exclusive"), "{e}");
+        for flag in ["--record", "--replay"] {
+            let o = DryRunOptions::parse(&args(&["--dry-run", flag, "dir"])).expect("ok");
+            assert!(o.record.is_some() || o.replay.is_some());
+        }
+        // blank values are dropped like --model-path blanks
+        let o = DryRunOptions::parse(&args(&["--dry-run", "--record", "  "])).expect("ok");
+        assert!(o.record.is_none());
+    }
+
+    #[test]
+    fn record_max_bounds_are_enforced() {
+        assert!(
+            DryRunOptions::parse(&args(&["--dry-run", "--record", "d", "--record-max", "0"]))
+                .is_err()
+        );
+        assert!(DryRunOptions::parse(&args(&[
+            "--dry-run",
+            "--record",
+            "d",
+            "--record-max",
+            "100001"
+        ]))
+        .is_err());
+        let o = DryRunOptions::parse(&args(&["--dry-run", "--record", "d", "--record-max", "10"]))
+            .expect("ok");
+        assert_eq!(o.record_max, 10);
+        // default without the flag
+        let o = DryRunOptions::parse(&args(&["--dry-run", "--record", "d"])).expect("ok");
+        assert_eq!(o.record_max, 600);
     }
 }
