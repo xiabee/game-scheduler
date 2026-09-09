@@ -1,0 +1,24 @@
+[
+  {
+    "name": "menu_button",
+    "x": 1720,
+    "y": 940,
+    "w": 30,
+    "h": 30,
+    "expected": [30, 90, 220],
+    "tolerance": 12,
+    "min_fraction": 0.8,
+    "step": 2
+  },
+  {
+    "name": "loading_bar",
+    "x": 760,
+    "y": 1040,
+    "w": 400,
+    "h": 6,
+    "expected": [40, 200, 40],
+    "tolerance": 20,
+    "min_fraction": 0.6,
+    "step": 4
+  }
+]

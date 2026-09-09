@@ -475,6 +475,17 @@ mod tests {
     }
 
     #[test]
+    fn the_committed_example_skill_always_parses() {
+        // keeps examples/skills/*.example.json honest by construction
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/skills/daily_claim.example.json");
+        let text = std::fs::read_to_string(&path).expect("example file");
+        let def = SkillDefinition::from_json(&text).expect("example must validate");
+        assert_eq!(def.name, "daily_claim_example");
+        assert!(def.state("done").expect("done state").terminal);
+    }
+
+    #[test]
     fn json_expectation_forms_are_strict() {
         // unknown fields are rejected outright
         let bad = r#"[{ "probe": "x", "bogus": 1 }]"#;

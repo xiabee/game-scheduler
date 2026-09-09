@@ -1,0 +1,49 @@
+{
+  "name": "daily_claim_example",
+  "start": "home",
+  "states": [
+    {
+      "name": "home",
+      "expect": [{ "probe": "menu_button" }],
+      "actions": ["click menu_button"],
+      "next": "menu",
+      "timeout_ms": 10000,
+      "max_retries": 2,
+      "fallback": "home_reset"
+    },
+    {
+      "name": "home_reset",
+      "expect": [{ "label": "dialog_close", "min_confidence": 0.6 }],
+      "actions": ["click dialog_close"],
+      "next": "home",
+      "timeout_ms": 5000,
+      "max_retries": 1
+    },
+    {
+      "name": "menu",
+      "expect": [{ "probe": "daily_entry" }],
+      "actions": ["click daily_entry"],
+      "next": "reward_visible",
+      "timeout_ms": 8000,
+      "max_retries": 2
+    },
+    {
+      "name": "reward_visible",
+      "expect": [
+        { "label": "reward_icon", "min_confidence": 0.7 }
+      ],
+      "actions": ["click reward_icon", "click confirm"],
+      "next": "done",
+      "timeout_ms": 10000,
+      "max_retries": 3
+    },
+    {
+      "name": "done",
+      "terminal": true,
+      "expect": [],
+      "actions": [],
+      "next": "done",
+      "timeout_ms": 0
+    }
+  ]
+}

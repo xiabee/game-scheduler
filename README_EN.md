@@ -132,6 +132,13 @@ input is ever sent** — the input module is deliberately empty until NC4.
   Output layout auto-detection (rows-major `[1,N,>=6]` and YOLOv8-export
   channels-first `[1,4+nc,N]`), confidence gate + class-aware NMS;
   missing/broken models degrade to the mock loudly, never silently.
+- **Layered perception & skills (NC2/NC3 groundwork)**: L0 pixel probes
+  (`--probes`, region color + tolerance + fraction gate) are evaluated and
+  reported every dry-run cycle; `--skill` drives a data-driven state machine
+  (expectations = probe fired or label detection) with timeout/retry/
+  fallback/terminal semantics; `--record`/`--replay` reproduce any session
+  offline. Planned actions are LOGGED only — input sending does not exist
+  before NC4. See `controller/examples/`.
 - **Training scaffold**: `tools/vision/` (prepare_dataset / train /
   export_onnx) — training happens on the Python side; export writes a
   schema-v1 manifest aligned with the controller; `datasets/` tracks

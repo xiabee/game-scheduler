@@ -156,6 +156,7 @@ internal/vision     截图辅助接口骨架(Detector / Matcher / OCR / FrameSou
 - **捕获后端**:Windows Graphics Capture(本机 RDP 会话下静默,见 NIGHTLY_PROGRESS)→ PrintWindow(GDI,默认可用)→ 合成帧,自动回退并如实告警。
 - **模型 manifest(NC1)**:`models/*.manifest.json` schema-v1(labels/version/imgsz/confidence/game-profile)严格校验;权重不进 Git(`*.onnx` 全局 ignore)。
 - **ONNX 推理(NC1)**:经 **WinML**(Windows 内建 ONNX 运行时)在 CPU 设备上执行——运行时零下载、不用 GPU、无 Python 依赖;输出布局自动识别(rows-major `[1,N,≥6]` 与 YOLOv8 导出的 channels-first `[1,4+nc,N]`),置信度门 + class-aware NMS;模型缺失/坏 manifest 如实告警并降级 Mock,绝不静默。
+- **分层感知与技能（NC2/NC3 地基）**：L0 像素探针（`--probes`，区域颜色+容差+比例门）随每个 dry-run 周期评估并汇报触发状态；`--skill` 驱动数据驱动状态机（期望=探针触发或标签检测），超时/重试/回退/终态全链路可测；`--record`/`--replay` 离线复现任意会话。计划动作只记录——输入发送在 NC4 之前不存在。示例见 `controller/examples/`。
 - **训练脚手架**:`tools/vision/`(prepare_dataset / train / export_onnx)——训练在 Python 侧完成,导出时生成与 controller 对齐的 schema-v1 manifest;`datasets/` 只进清单不进图片。
 - **dry-run 闭环**:窗口 → 捕获 → letterbox → 检测(ONNX 或 Mock)→ 逆变换 → governor 判定 → debug PNG(`--debug-dir`)→ 会话 TSV(`--session-log`)。
 

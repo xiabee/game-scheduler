@@ -265,6 +265,16 @@ mod tests {
     }
 
     #[test]
+    fn the_committed_example_probes_always_parse() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/probes.example.json");
+        let text = std::fs::read_to_string(&path).expect("example file");
+        let probes = LayeredPerception::probes_from_json(&text).expect("example must validate");
+        assert_eq!(probes.len(), 2);
+        assert_eq!(probes[0].name, "menu_button");
+    }
+
+    #[test]
     fn l0_probe_fires_on_matching_region() {
         let f = frame_with_patch(10, 10, [200, 40, 16]); // BGRA pixel body
         let p = probe("ready", 10, 10, [200, 40, 16]);
