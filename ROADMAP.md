@@ -21,7 +21,7 @@ Current Focus:
 Native Vision Controller
 
 Current Phase:
-NC1 — Vision Runtime (ONNX)
+NC1 — Vision Runtime (ONNX) 🚧 运行时已落地,首个真实模型待训练
 ```
 
 NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`controller/` Rust crate:GameWindow、四坐标系 Transform、SafetyGovernor、捕获后端、dry-run 闭环;详见 §9)。**不要倒退重复实现 NC0。**
@@ -146,15 +146,17 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Dependencies**:Windows 10 1903+(WGC);Rust toolchain;无 Python/CUDA 依赖。
 - **Out of Scope**:YOLO 训练与模型下载、OCR、真实输入发送、开放世界导航、与 Go 的协议对接(NC6)。
 
-### NC1 — Vision Runtime ⬜
+### NC1 — Vision Runtime 🚧(运行时已落地,首个真实模型待训练)
 
-- **Status**:⬜ Planned(NC0 稳定后)
+- **Status**:🚧 In Progress(2026-09-09/10 夜班:运行时侧全部落地;剩余为训练产出首个真实模型)。NC0 稳定后启动。
 - **Objective**:接入真实 YOLO 推理。**训练与运行解耦**:训练用 Python/Ultralytics,部署用 ONNX;controller 运行时不依赖 Python / PyTorch / CUDA。
 - **Scope**:`InferenceBackend` trait;Windows 优先 WinML 或 ONNX Runtime;`models/` 目录 + model manifest(labels / version / input size / confidence / game-profile);配置项 `model_path` / `confidence` / `imgsz` / `device(provider)`;**大型权重不进 Git**。
+- **已落地(2026-09-09/10)**:WinML 推理后端(CPU 设备,运行时零下载、零 GPU 依赖);schema-v1 模型 manifest(`controller/models/`,严格校验);`--model-path` / `--manifest-check` CLI;模型缺失/非法→Mock 诚实降级;输出布局自动识别(rows-major `[1,N,≥6]` + YOLOv8 channels-first `[1,4+nc,N]`)+ class-aware NMS;`tools/vision/` 训练脚手架(PLAN gate 防意外下载/训练);跨机验证:win-devops 全量 Rust 门禁 PASS(含 WinML 实测,节点 WinML 兼容线 = ir3/opset9)。
+- **剩余**:用 `tools/vision/` 训练并导出首个真实 nano 模型(白天工作:采集/标注/训练);`device(provider)` 配置化(当前固定 CPU,低资源约束下非必需)。
 - **Deliverables**:可加载一个导出的 ONNX nano 级模型并输出 Detection;manifest 校验。
-- **Acceptance Criteria**:同一 ONNX 模型在 1080p 与 1440p 截图上,经 letterbox 变换后检出一致(坐标按 client 系换算正确)。
-- **Tests**:letterbox 前后数值对拍、manifest 解析、推理超时与降级(模型缺失→Mock)。
-- **Dependencies**:NC0;训练管线(§4)产出首个模型。
+- **Acceptance Criteria**:同一 ONNX 模型在 1080p 与 1440p 截图上,经 letterbox 变换后检出一致(坐标按 client 系换算正确)。(已以确定性形式覆盖:fixture 模型跨同宽高比分辨率归一化位置/框占比不变,有测试;真实模型就绪后以实机对拍复验。)
+- **Tests**:letterbox 前后数值对拍、manifest 解析、推理超时与降级(模型缺失→Mock)。(降级已落地;推理超时线程化 deferred——WinML 同步调用不可取消,当前以连续失败熔断代替。)
+- **Dependencies**:NC0 ✅;训练管线(§4)✅ 脚手架已落地,首个模型待训练。
 - **Out of Scope**:OCR;训练代码本身(在 `tools/vision/`,Python 仓内工具,不属于 controller runtime)。
 
 ### NC2 — Perception Stack(分层感知) ⬜
