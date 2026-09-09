@@ -250,10 +250,12 @@ impl SkillRunner {
             self.current = to.clone();
             self.state_entered_at_ms = now_ms;
             self.reentries = 0;
+            // Landing on a terminal state completes the skill, but the
+            // caller still learns ABOUT the transition (state + planned
+            // actions) — `Done` is reserved for steps afterwards.
             if let Some(next_def) = self.definition.state(&to) {
                 if next_def.terminal {
                     self.done = true;
-                    return StepOutcome::Done;
                 }
             }
             return StepOutcome::Transitioned { to, planned };
@@ -392,9 +394,14 @@ mod tests {
                 planned: vec!["click daily_icon".into()]
             }
         );
+        // the transition INTO the terminal state is reported as a
+        // Transitioned (caller sees state + plans); Done follows after
         assert_eq!(
             r.step(500, &probes(&["claim_banner"]), &detections(&[])),
-            StepOutcome::Done
+            StepOutcome::Transitioned {
+                to: "done".into(),
+                planned: vec![]
+            }
         );
         assert!(r.is_done());
         assert_eq!(

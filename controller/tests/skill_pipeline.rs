@@ -176,3 +176,83 @@ fn l0_probe_evidence_drives_probe_expectations() {
     }
     assert!(ever_waiting);
 }
+
+#[test]
+fn replaying_the_same_recording_reproduces_the_same_skill_trace() {
+    // Determinism contract for offline regression: record once, replay
+    // twice — the skill must walk identical states at identical cycle
+    // numbers, so a recorded session becomes a stable test fixture.
+    use controller::capture::CaptureBackend;
+    use controller::replay::{FrameRecorder, ReplayCapture};
+
+    let dir = std::env::temp_dir().join(format!("nf_skill_det_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut rec = FrameRecorder::create(&dir, 4).expect("recorder");
+    let mut src = SyntheticCapture::new(320, 240).expect("capture");
+    for _ in 0..4 {
+        rec.record(&src.capture().expect("capture"))
+            .expect("record");
+    }
+
+    let mut traces: Vec<Vec<String>> = Vec::new();
+    for _replay_run in 0..2 {
+        let def = SkillDefinition::from_json(SEE_RECT_SKILL).expect("skill");
+        let mut runner = SkillRunner::start(def, 0);
+        let mut replay = ReplayCapture::open(&dir, false).expect("replay");
+        let mut governor =
+            SafetyGovernor::new(SafetyConfig::default(), Instant::now()).expect("gov");
+        let calibrated = replay.calibrated_layout();
+        let mut detector = controller::vision::MockDetector::synthetic_rect();
+        let t0 = Instant::now();
+        let mut trace = Vec::new();
+        for cycle in 0..6u32 {
+            let Ok(report) = controller::pipeline::run_cycle(
+                cycle,
+                &mut replay,
+                &mut detector,
+                &mut governor,
+                &calibrated,
+                &calibrated,
+                true,
+                true,
+                256,
+                256,
+                None::<&mut LayeredPerception>,
+                t0 + Duration::from_millis(cycle as u64 * 50),
+            ) else {
+                break; // recording exhausted
+            };
+            let fired = |name: &str| {
+                report
+                    .evidence
+                    .probes
+                    .iter()
+                    .any(|p| p.name == name && p.fired)
+            };
+            let dets: Vec<(String, f32)> = report
+                .client_detections
+                .iter()
+                .map(|d| (d.label.clone(), d.confidence))
+                .collect();
+            let now_ms = t0.elapsed().as_millis() as u64;
+            match runner.step(now_ms, &fired, &dets) {
+                StepOutcome::Waiting => trace.push(format!("{cycle}:wait")),
+                StepOutcome::Transitioned { to, .. } => trace.push(format!("{cycle}->{to}")),
+                StepOutcome::Done => trace.push(format!("{cycle}:done")),
+                other => trace.push(format!("{cycle}:{other:?}")),
+            }
+        }
+        traces.push(trace);
+    }
+    assert_eq!(traces.len(), 2);
+    assert_eq!(
+        traces[0], traces[1],
+        "the same recording must produce the identical skill trace"
+    );
+    assert!(
+        traces[0].iter().any(|s| s.ends_with("->seen")),
+        "the skill must still reach its terminal state: {:?}",
+        traces[0]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
