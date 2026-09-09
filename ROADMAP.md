@@ -314,9 +314,19 @@ BetterGI / March7thAssistant / Fhoe-Rail / ok-ww / M9A 的现有适配器:
 
 **NC0 完成定义达成**:`窗口 → 捕获 → resize → mock detection → 坐标反算 → debug overlay` 全链路实测跑通;`cargo test` 全绿;SafetyGovernor 每条规则有触发路径测试。今晚未做(按计划):YOLO/模型/OCR/真实输入/开放世界/Go 协议对接。
 
-### 下一夜班:NC1 — Vision Runtime(ONNX)
+### 2026-09-09/10 夜班:NC1 运行时落地 + NC2/NC3 地基 🚧
 
-前置检查:WGC 在非 RDP 环境复验;训练管线(§4)产出首个 nano 模型;`tools/vision/` 训练脚手架(仓外权重,不进 Git)。每个 milestone 遵循 NightForge 循环(见 `.zcode/commands/overnight.md`),完成后向 `docs/NIGHTLY_PROGRESS.md` 追加记录。
+详见 docs/NIGHTLY_PROGRESS.md(M1–M31)。要点:
+
+- **NC1 运行时**:schema-v1 模型 manifest(严格校验);WinML ONNX 推理(CPU,零下载零 GPU);rows-major `[1,N,≥6]` 与 YOLOv8 channels-first `[1,4+nc,N]` 解码自动识别 + class-aware NMS;模型缺失→Mock 诚实降级;`--manifest-check`/`--model-path`/`--probes`/`--skill`/`--record`/`--replay` CLI;`tools/vision/` 训练脚手架(PLAN gate);185B/193B 手写 ONNX fixture 走通真实 load→session→bind→evaluate 全链。
+- **NC2/NC3 地基**:L0 探针进主管线(原始 client 帧);统一 Evidence;SkillDefinition+SkillRunner 纯转移评估器(超时/重试/回退/终态);`--skill` 由真实证据驱动、计划只记录;会话 TSV `skill_state` 列。
+- **可靠性**:推理错误上报+连续失败熔断;推理缓存(静态场景 77 周期仅 4 次推理);DPI/枚举竞态修复;服务会话环境门控;全表面 120s soak 零泄漏;CPU 预算守护测试。
+- **跨机验证**:win-devops 首次全量跑 Rust 门禁(129 测试)PASS——节点已装 Rust;节点 WinML 兼容线 ir3/opset9、服务会话无交互桌面(环境发现见 NIGHTLY_PROGRESS)。
+- **未做(按计划)**:首个真实 nano 模型(白天采集/标注/训练);WGC 非 RDP 复验;输入发送(NC4,红线内未触碰);下一阶段 NC2 真实 UI 数据补全。
+
+### 下一夜班起点:NC2 真实数据补全 / NC4 输入设计评审
+
+前置:①用 `tools/vision/` 完成首个真实 nano 模型的采集/标注/训练/导出(白天);②NC4 输入控制器的安全设计评审(SendInput 封装 + governor 硬前置, Dummy window 验证);③NC6 协议草案(docs/controller-protocol-draft.md)评审定稿。
 
 ## 10. 变更记录
 
