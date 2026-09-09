@@ -85,3 +85,4 @@
 3. WDAC 拦截上夜未再现（go test 直跑全绿）；`ci-local.ps1` 的退避重试逻辑保留。
 4. `-race` 走 `ci-local.ps1 -Race`（D:\tools\mingw64）未在本次使用。
 | M3 | `tools/vision/` 训练脚手架（ROADMAP §4，NC1 模型来源前置）：`prepare_dataset.py`（stdlib-only 数据集校验+manifest+train/val 切分）、`train.py`（Ultralytics 封装，PLAN gate：无 `--yes` 只打印计划含将下载的基模型，device 默认 cpu）、`export_onnx.py`（.pt→ONNX + 生成 controller schema-v1 manifest，闭合训练→导出→运行时链路）；`datasets/README.md`（覆盖矩阵/隐私/红线）；gitignore 补 runs/ 与数据集图片目录 | PASS | a739e1b | 语法/help 全过；合成数据集 e2e（5 图 1 无标注剔除、坏标注拒绝）；plan gate 实测不触发下载/训练 |
+| M4 | P1 可靠性复审：`Detector` trait 增加 `take_error()` 钩子（默认 None）——dry-run 每周期上报推理失败（前 3 条打印、汇总计数），全部周期失败 exit 1 不再假报 OK；onnx NCHW 暂存 buffer 复用（真实 imgsz 640 每周期 ~20MB 分配消除）；resolve() 消除 manifest 二次读盘；`controller-smoke.ps1` 补 NC1 段（manifest-check 三态门 + 真实 WinML ONNX dry-run；预期失败经 cmd 隔离规避 PS5.1 stderr+Stop 坑） | PASS | 45ddefb | 92 测试绿；clippy 0；`controller-smoke.ps1` 实机全段 PASS；`ci-local.ps1` 全门禁 PASS（33s） |
