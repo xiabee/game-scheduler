@@ -15,6 +15,10 @@ use std::path::Path;
 #[test]
 fn l1_template_tracks_a_real_recorded_scene() {
     ensure_dpi_awareness();
+    if !controller::window::interactive_desktop_available() {
+        println!("skipped: needs an interactive desktop for live GDI content (service session)");
+        return;
+    }
     let dir = std::env::temp_dir().join(format!("nf_l1_real_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
 

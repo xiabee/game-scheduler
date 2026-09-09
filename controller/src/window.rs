@@ -167,6 +167,27 @@ pub fn ensure_dpi_awareness() -> bool {
     })
 }
 
+/// True when the process is attached to an interactive desktop (the user's
+/// console/RDP session). Service sessions (Session 0) answer `false`: there
+/// window enumeration misses freshly created windows and
+/// `SetProcessDpiAwarenessContext` is denied. Live capture content and any
+/// future input path are only meaningful on an interactive desktop — callers
+/// gate on this instead of failing mysteriously (see ROADMAP §7/NC4 and the
+/// remote-acceptance environment notes in docs/NIGHTLY_PROGRESS.md).
+pub fn interactive_desktop_available() -> bool {
+    use windows::Win32::System::StationsAndDesktops::{
+        CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS,
+    };
+    let desk = unsafe { OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_READOBJECTS) };
+    match desk {
+        Ok(h) => {
+            let _ = unsafe { CloseDesktop(h) };
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 fn layout_of(hwnd: HWND) -> Result<WindowLayout> {
     if !valid_window(hwnd) {
         return Err(ControllerError::WindowGone);
@@ -559,18 +580,7 @@ mod tests {
     /// while direct-HWND paths still work. Tests that depend on the
     /// interactive environment skip honestly instead of failing.
     fn interactive_desktop() -> bool {
-        use windows::Win32::System::StationsAndDesktops::{
-            CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS,
-        };
-        let desk =
-            unsafe { OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_READOBJECTS) };
-        match desk {
-            Ok(h) => {
-                let _ = unsafe { CloseDesktop(h) };
-                true
-            }
-            Err(_) => false,
-        }
+        interactive_desktop_available()
     }
 
     fn require_interactive(what: &str) -> bool {
