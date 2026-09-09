@@ -154,6 +154,10 @@ struct DryRunOptions {
     /// NC2: L0 probe definitions (JSON list), evaluated against the raw
     /// client frame every cycle.
     probes: Option<String>,
+    /// NC3: skill definition (JSON); the dry-run steps the state machine
+    /// each cycle from live evidence and logs transitions/plans. It never
+    /// sends input.
+    skill: Option<String>,
 }
 
 impl DryRunOptions {
@@ -256,6 +260,7 @@ impl DryRunOptions {
                 .unwrap_or(600),
             replay: opt(args, "--replay").filter(|p| !p.trim().is_empty()),
             probes: opt(args, "--probes").filter(|p| !p.trim().is_empty()),
+            skill: opt(args, "--skill").filter(|p| !p.trim().is_empty()),
         };
         if opts.record.is_some() && opts.replay.is_some() {
             return Err("--record and --replay are mutually exclusive".into());
@@ -492,6 +497,31 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         None => None,
     };
 
+    // NC3: optional skill state machine, stepped from live evidence each
+    // cycle. Plans are LOGGED only — this session never sends input.
+    let mut skill_runner = match &opts.skill {
+        Some(path) => {
+            let text = match std::fs::read_to_string(path) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("dry-run: cannot read skill {path:?}: {e}");
+                    return 1;
+                }
+            };
+            match controller::skill::SkillDefinition::from_json(&text) {
+                Ok(def) => {
+                    println!("skill: {:?} started at state {:?}", def.name, def.start);
+                    Some(controller::skill::SkillRunner::start(def, 0))
+                }
+                Err(e) => {
+                    eprintln!("dry-run: {path:?}: {e}");
+                    return 1;
+                }
+            }
+        }
+        None => None,
+    };
+
     let t0 = std::time::Instant::now();
     let mut governor = match SafetyGovernor::new(
         SafetyConfig {
@@ -652,6 +682,35 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 backend: &opts.backend,
                 report: &report,
             });
+        }
+
+        // NC3: step the skill from this cycle's evidence. Plans are only
+        // logged — the dry-run session never sends input.
+        if let Some(runner) = skill_runner.as_mut() {
+            let fired = |name: &str| {
+                report
+                    .evidence
+                    .probes
+                    .iter()
+                    .any(|p| p.name == name && p.fired)
+            };
+            let dets: Vec<(String, f32)> = report
+                .client_detections
+                .iter()
+                .map(|d| (d.label.clone(), d.confidence))
+                .collect();
+            let now_ms = t0.elapsed().as_millis() as u64;
+            match runner.step(now_ms, &fired, &dets) {
+                controller::skill::StepOutcome::Waiting => {}
+                controller::skill::StepOutcome::Transitioned { to, planned } => {
+                    println!("skill: -> {to} (planned: {})", planned.join(", "));
+                }
+                controller::skill::StepOutcome::FellBack { to } => {
+                    println!("skill: fallback -> {to}");
+                }
+                controller::skill::StepOutcome::Done => println!("skill: DONE"),
+                controller::skill::StepOutcome::Failed => println!("skill: FAILED"),
+            }
         }
 
         // Geometry drift (Pause from check_geometry): recalibrate NOW —
