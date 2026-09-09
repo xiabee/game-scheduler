@@ -86,3 +86,10 @@
 4. `-race` 走 `ci-local.ps1 -Race`（D:\tools\mingw64）未在本次使用。
 | M3 | `tools/vision/` 训练脚手架（ROADMAP §4，NC1 模型来源前置）：`prepare_dataset.py`（stdlib-only 数据集校验+manifest+train/val 切分）、`train.py`（Ultralytics 封装，PLAN gate：无 `--yes` 只打印计划含将下载的基模型，device 默认 cpu）、`export_onnx.py`（.pt→ONNX + 生成 controller schema-v1 manifest，闭合训练→导出→运行时链路）；`datasets/README.md`（覆盖矩阵/隐私/红线）；gitignore 补 runs/ 与数据集图片目录 | PASS | a739e1b | 语法/help 全过；合成数据集 e2e（5 图 1 无标注剔除、坏标注拒绝）；plan gate 实测不触发下载/训练 |
 | M4 | P1 可靠性复审：`Detector` trait 增加 `take_error()` 钩子（默认 None）——dry-run 每周期上报推理失败（前 3 条打印、汇总计数），全部周期失败 exit 1 不再假报 OK；onnx NCHW 暂存 buffer 复用（真实 imgsz 640 每周期 ~20MB 分配消除）；resolve() 消除 manifest 二次读盘；`controller-smoke.ps1` 补 NC1 段（manifest-check 三态门 + 真实 WinML ONNX dry-run；预期失败经 cmd 隔离规避 PS5.1 stderr+Stop 坑） | PASS | 45ddefb | 92 测试绿；clippy 0；`controller-smoke.ps1` 实机全段 PASS；`ci-local.ps1` 全门禁 PASS（33s） |
+| M5 | 远端 FAIL 修复（win-devops 首次真实跑 Rust 门禁，暴露环境依赖）：①`window` 三个枚举/DPI 测试加 `interactive_desktop()`（OpenInputDesktop 探针）门控——服务会话（Session 0）EnumWindows 看不到探针窗口、`SetProcessDpiAwarenessContext` 被拒，诚实打印 `skipped:` 而非假失败；②ONNX fixture 降到 `ir_version 3 / opset 9`——节点 WinML 为 Win10 1809 时代 ORT（先拒 ir8，再拒 opset11），Identity@9+ir3 兼容全部 WinML 且现代 ORT 向后兼容 | PASS | 386329a | 本机 92 测试绿；**REMOTE CI (win-devops) PASS exit=0**——节点首次全量跑 Rust 92 测试（含跨机 WinML ONNX 实测）+ Go 门禁 |
+
+### 环境发现（win-devops 节点，2026-09-10）
+
+1. 节点已装 Rust 工具链（cargo 可用）——remote acceptance 从「仅 Go」升级为全量 Go+Rust。
+2. 节点以服务上下文跑 CI：无交互桌面（OpenInputDesktop 失败）；EnumWindows 枚举不到自建窗口（直接 HWND 路径正常）；SetProcessDpiAwarenessContext 返回失败。
+3. 节点 WinML 的 ONNX Runtime 为 1809 时代：模型要求 ir_version ≤3、opset ≤9；报错形态两种——ir 超版 `Unknown model file format version`、op 超版 `No Op registered for <Op> with domain_version of N`。**训练导出（tools/vision/export_onnx.py）如需覆盖此类节点，opset 应 ≤9。**
