@@ -11,7 +11,6 @@ use controller::replay::{FrameRecorder, ReplayCapture};
 use controller::safety::{SafetyConfig, SafetyGovernor};
 use controller::skill::{SkillDefinition, SkillRunner, StepOutcome};
 use controller::template::{NccTemplateMatcher, TemplateMatcher};
-use controller::vision::Detector;
 use controller::window::{ensure_dpi_awareness, OwnedTestWindow};
 use std::path::Path;
 use std::time::{Duration, Instant};
