@@ -20,6 +20,14 @@ fn main() {
     if args.iter().any(|a| a == "--capture-gdi") {
         std::process::exit(run_gdi_probe());
     }
+    if let Some(pos) = args.iter().position(|a| a == "--manifest-check") {
+        let path = args.get(pos + 1).cloned().unwrap_or_default();
+        if path.trim().is_empty() {
+            eprintln!("manifest-check: requires a path to a manifest JSON");
+            std::process::exit(2);
+        }
+        std::process::exit(run_manifest_check(&path));
+    }
     if let Some(pos) = args.iter().position(|a| a == "--capture-foreign") {
         let needle = args.get(pos + 1).cloned().unwrap_or_default();
         std::process::exit(run_foreign_probe(&needle));
@@ -35,8 +43,38 @@ fn main() {
         std::process::exit(run_dry_run(&opts));
     }
     println!(
-        "native-controller (NC0): use --list-windows | --self-probe | --capture-gdi | --dry-run"
+        "native-controller (NC1): use --list-windows | --self-probe | --capture-gdi | --manifest-check | --dry-run"
     );
+}
+
+/// NC1 deliverable "manifest 校验": load, parse and validate a model
+/// manifest, printing its contract. Exit 0 = valid, 2 = unusable.
+fn run_manifest_check(path: &str) -> i32 {
+    match controller::manifest::load(std::path::Path::new(path)) {
+        Ok(m) => {
+            let labels = if m.labels.len() <= 8 {
+                format!("{:?}", m.labels)
+            } else {
+                format!("{:?} (+{} more)", &m.labels[..8], m.labels.len() - 8)
+            };
+            println!(
+                "manifest OK: {} v{} (game={} imgsz={}x{} confidence={} labels={} weights={})",
+                m.name,
+                m.version,
+                m.game_profile,
+                m.input_size.width,
+                m.input_size.height,
+                m.default_confidence,
+                labels,
+                m.weights.as_deref().unwrap_or("(none)")
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("manifest-check: {e}");
+            2
+        }
+    }
 }
 
 /// Enumerate visible top-level windows: the discovery aid for choosing a
@@ -97,6 +135,15 @@ struct DryRunOptions {
     /// Latch the governor's emergency stop after N seconds (exercises the
     /// emergency path deterministically).
     emergency_after_secs: Option<f32>,
+    /// NC1: optional model manifest path. When present (and valid) the
+    /// manifest's imgsz/confidence drive the session unless the operator
+    /// explicitly overrode them; real ONNX inference lands with the next
+    /// NC1 runtime milestone (detector degrades to mock until then).
+    model_path: Option<String>,
+    /// True when `--model` was explicitly passed (beats the manifest).
+    imgsz_explicit: bool,
+    /// True when `--min-confidence` was explicitly passed.
+    confidence_explicit: bool,
 }
 
 impl DryRunOptions {
@@ -185,6 +232,14 @@ impl DryRunOptions {
             },
             require_foreground: args.iter().any(|a| a == "--require-foreground"),
             emergency_after_secs: opt(args, "--emergency-after").and_then(|v| v.parse().ok()),
+            model_path: match opt(args, "--model-path") {
+                Some(p) if p.trim().is_empty() => {
+                    return Err("--model-path must be a non-empty manifest path".into())
+                }
+                p => p,
+            },
+            imgsz_explicit: args.iter().any(|a| a == "--model"),
+            confidence_explicit: args.iter().any(|a| a == "--min-confidence"),
         })
     }
 }
@@ -256,7 +311,6 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     use controller::capture::FpsLimiter;
     use controller::pipeline::{draw_overlay, run_cycle};
     use controller::safety::{SafetyConfig, SafetyGovernor};
-    use controller::vision::{Detector, MockDetector};
     use controller::window::{ensure_dpi_awareness, GameWindow, OwnedTestWindow};
 
     ensure_dpi_awareness();
@@ -296,9 +350,36 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             }
         }
     };
+    // NC1: resolve the detector (and the effective imgsz/confidence) from
+    // the optional --model-path manifest. Any unusable model degrades to
+    // the NC0 mock loudly instead of failing the session.
+    let choice = controller::inference::resolve(&controller::inference::DetectorRequest {
+        model_path: opts.model_path.as_deref(),
+        imgsz: (opts.model, opts.model),
+        imgsz_explicit: opts.imgsz_explicit,
+        min_confidence: opts.min_confidence,
+        confidence_explicit: opts.confidence_explicit,
+    });
+    match &choice.source {
+        controller::inference::DetectorSource::Mock => {}
+        controller::inference::DetectorSource::ManifestPending {
+            name,
+            version,
+            labels,
+            ..
+        } => println!(
+            "dry-run: detector = mock (manifest {name} v{version}: {labels} label(s), imgsz {}x{}, confidence {:.2} honored; ONNX runtime lands with the next NC1 milestone)",
+            choice.imgsz.0, choice.imgsz.1, choice.min_confidence
+        ),
+        controller::inference::DetectorSource::MockFallback { path, reason } => eprintln!(
+            "dry-run: WARNING model {path:?} unusable ({reason}) - falling back to the mock detector"
+        ),
+    }
+    let (model_w, model_h) = choice.imgsz;
+
     println!(
-        "dry-run: window {:?} layout={calibrated:?} backend={} model={}x{} fps={} duration={}s",
-        opts.window, opts.backend, opts.model, opts.model, opts.fps, opts.duration_secs
+        "dry-run: window {:?} layout={calibrated:?} backend={} model={model_w}x{model_h} fps={} duration={}s",
+        opts.window, opts.backend, opts.fps, opts.duration_secs
     );
 
     let mut backend = match build_backend(&opts.backend, target_hwnd, &calibrated) {
@@ -309,11 +390,11 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         }
     };
 
-    let mut detector: Box<dyn Detector> = Box::new(MockDetector::synthetic_rect());
+    let mut detector = choice.detector;
     let t0 = std::time::Instant::now();
     let mut governor = match SafetyGovernor::new(
         SafetyConfig {
-            min_confidence: opts.min_confidence,
+            min_confidence: choice.min_confidence,
             ..SafetyConfig::default()
         },
         t0,
@@ -402,8 +483,8 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             &current,
             true, // we re-resolved the same target hwnd above
             foreground,
-            opts.model,
-            opts.model,
+            model_w,
+            model_h,
             now,
         ) {
             Ok(r) => {
@@ -969,5 +1050,38 @@ mod tests {
 
         // missing the second slot must be rejected, not silently defaulted
         assert!(DryRunOptions::parse(&args(&["--dry-run", "--resize-after", "1.5"])).is_err());
+    }
+
+    #[test]
+    fn model_path_parses_and_tracks_flag_explicitness() {
+        let o = DryRunOptions::parse(&args(&["--dry-run", "--model-path", "m.json"])).expect("ok");
+        assert_eq!(o.model_path.as_deref(), Some("m.json"));
+        // neither geometry nor threshold was explicitly set: the manifest
+        // contract wins for both
+        assert!(!o.imgsz_explicit && !o.confidence_explicit);
+
+        let o = DryRunOptions::parse(&args(&[
+            "--dry-run",
+            "--model-path",
+            "m.json",
+            "--model",
+            "320",
+            "--min-confidence",
+            "0.9",
+        ]))
+        .expect("ok");
+        assert!(o.imgsz_explicit && o.confidence_explicit, "explicit wins");
+
+        // no --model-path at all: None, not Some("")
+        let o = DryRunOptions::parse(&args(&["--dry-run"])).expect("ok");
+        assert!(o.model_path.is_none());
+    }
+
+    #[test]
+    fn blank_model_path_is_rejected_not_silently_dropped() {
+        for bad in ["", "   "] {
+            let e = DryRunOptions::parse(&args(&["--dry-run", "--model-path", bad])).unwrap_err();
+            assert!(e.contains("--model-path"), "{e}");
+        }
     }
 }

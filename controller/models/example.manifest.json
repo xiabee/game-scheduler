@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "probe-ui-nano",
+  "version": "0.1.0",
+  "game_profile": "generic-ui",
+  "input_size": { "width": 256, "height": 256 },
+  "labels": ["moving_rect"],
+  "default_confidence": 0.6,
+  "weights": "probe-ui-nano.onnx",
+  "notes": "Schema example for the NC1 dry-run probe. The referenced weights live on external storage (never in Git); the current dry-run degrades to the mock detector until the ONNX runtime milestone lands."
+}

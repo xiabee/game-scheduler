@@ -39,3 +39,6 @@ run.err
 
 # rust controller (NC0)
 controller/target/
+
+# NC1: model weights stay external (ROADMAP §4); only manifests are committed
+*.onnx
