@@ -16,6 +16,7 @@ pub mod input;
 pub mod manifest;
 pub mod nms;
 pub mod onnx;
+pub mod perception;
 pub mod pipeline;
 pub mod protocol;
 pub mod replay;
