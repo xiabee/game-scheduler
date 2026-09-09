@@ -15,14 +15,17 @@
 param(
     [string]$Version = "",
     [string]$OutDir = "dist",
-    [switch]$IncludeLinux
+    [switch]$IncludeLinux,
+    [switch]$IncludeController
 )
 
 $ErrorActionPreference = "Stop"
 
 if ($Version -eq "") {
-    # Prefer the last tag; fall back to a short commit hash.
-    $tag = git describe --tags --abbrev=0 2>$null
+    # Prefer the last tag; fall back to a short commit hash. Run through
+    # cmd so a failing git (untagged repo) cannot trip the PS 5.1
+    # stderr + Stop preference quirk.
+    $tag = cmd /c "git describe --tags --abbrev=0 2>nul"
     if ($LASTEXITCODE -ne 0 -or -not $tag) { $tag = "v0.0.0-dev" }
     $sha = (git rev-parse --short HEAD).Trim()
     $dirty = git status --porcelain
@@ -58,6 +61,32 @@ foreach ($goos in $targets) {
         Copy-Item $f (Join-Path $root $f)
     }
     Copy-Item examples (Join-Path $root "examples") -Recurse
+
+    # NC1+: optionally ship the native controller (Rust, Windows only).
+    # Honest skip when cargo is missing or the switch is off - the Go
+    # scheduler is fully functional without it (external adapters remain).
+    if ($goos -eq "windows" -and $IncludeController) {
+        $ctrl = Join-Path $root "controller"
+        New-Item -ItemType Directory -Path $ctrl -Force | Out-Null
+        $hasCargo = $false
+        try { cargo --version | Out-Null; $hasCargo = ($LASTEXITCODE -eq 0) } catch { $hasCargo = $false }
+        if ($hasCargo) {
+            Push-Location controller
+            try {
+                cargo build --release --locked
+                if ($LASTEXITCODE -ne 0) { throw "cargo build (controller) failed" }
+            } finally {
+                Pop-Location
+            }
+            Copy-Item controller/target/release/controller.exe (Join-Path $ctrl "controller.exe")
+            Copy-Item controller\models\README.md (Join-Path $ctrl "MODELS.md")
+            Copy-Item controller\models\example.manifest.json (Join-Path $ctrl "example.manifest.json")
+            Write-Host "controller: packaged (native-controller.exe + example manifest)"
+        } else {
+            Write-Host "controller: SKIPPED (cargo not available on this machine)"
+        }
+    }
+
     Set-Content -Path (Join-Path $root "VERSION") -Value $Version -Encoding UTF8
 }
 
