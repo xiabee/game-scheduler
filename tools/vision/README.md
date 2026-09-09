@@ -7,10 +7,15 @@ Windows 内建的 ONNX Runtime（WinML），不依赖 Python / PyTorch / CUDA。
 datasets/                  (仓外权重与大图, 见 datasets/README.md)
   manifests/               数据集清单 (json)
 tools/vision/
+  frames_to_dataset.py     controller --record 帧目录 → 数据集布局(桥接采集)
   prepare_dataset.py       校验目录结构 + 生成数据集 manifest + train/val 切分
   train.py                 Ultralytics 训练封装 (先打印 plan, --yes 才执行)
   export_onnx.py           导出 ONNX + 生成 controller schema-v1 模型 manifest
 ```
+
+采集→训练闭环：`controller --record` 录帧 → `frames_to_dataset.py` 转
+数据集布局 → 标注 labels/ → `prepare_dataset.py` 校验切分 → `train.py`
+→ `export_onnx.py` → `controller --model-path` 加载。
 
 ## 流程
 
