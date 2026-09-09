@@ -125,3 +125,9 @@
 | M30 | Go 侧整夜审计 + 全链路冒烟复验：逐行走读 runner/scheduler/monitor/task-service/api-security（截图端点防穿越、恒时 token、安全头、过载迟滞、WAL/busy_timeout）——零 P0/P1 发现；`examples/windows_smoke.ps1` 11/11 步 PASS（隔离临时实例：health→discover→game→route→task→preflight→假执行→日志→统计→运行中删除无孤儿） | PASS | （下方 commit） | 本夜 Go 零改动零回归；全链路证据齐全 |
 | M31 | 真实帧 × 探针技能验收（NC2+NC3 微型闭环）：录制探针窗口真实帧 → L0 探针对准归一化锚定红盒 → 回放驱动技能 → Done（计划动作与状态转移断言）；服务会话诚实跳过 | PASS | eff15a4 | 128→129 测试 |
 | M31b | clippy 清理：移除 l1_real_frames 未使用导入（上一次提交遗留） | PASS | （下方 commit） | clippy 0 |
+### Go 审计扩展结论（凌晨维护轮）
+
+- `internal/events`（52 行 bus：合流通知/once 取消/nil 安全）✅ 零发现
+- `internal/store/planner_import`（单事务 + deferred Rollback + dry_run 计数同逻辑）✅ 与 ROADMAP 声明一致
+- 推荐生命周期终态守卫（`recOpen` + errRecommendationClosed）✅ 代码与测试俱在
+- **发现并修复**：README 中英 controller 章节 `cargo test` 计数漂移（97 → 实际 130）
