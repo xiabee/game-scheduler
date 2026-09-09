@@ -106,3 +106,4 @@
 | M17 | 打包集成：build.ps1 `-IncludeController` 可选段（cargo release --locked 构建入包 controller.exe + MODELS.md + 示例 manifest，无 cargo 诚实 SKIPPED）；**修复打包脚本在无 tag 仓库的潜在 bug**（git describe stderr 触发 PS5.1 Stop 终止错误，版本探测改经 cmd） | PASS | 29ca064 | 实机端到端打包验证：zip 内含 controller 三件套 |
 | M18 | 组合 soak（60s，probes+skill+record 200 帧上限）：762 周期，WS 9.9→10.2MB 平坦、句柄 96-97 无泄漏、exit 0（TSV 留档 `.nightly/session-skill-soak.tsv`） | PASS | （随 M19 批次推送） | 见左 |
 | M19 | L1 模板匹配 × 真实录制帧：录制 GDI 探针窗口真实帧（DWM 过渡帧 warmup——过渡全黑帧会污染模板），letterbox 后切取含红盒边缘的 40x40 纹理模板（纯色区域 NCC 退化），L1 层须在全部录制帧中持续命中且与直接 matcher 调用一致；另含 replay→perception 组成测试 | PASS | 29c0500 | 新增 2 集成测试（真实内容对照合成测试）；全套 122 测试绿 |
+| M20 | 帧级推理缓存（§5 预算「YOLO 按需触发,不每帧跑」）：`cache.rs` CachingDetector——全帧 FNV-1a 精确哈希，同帧跳过推理（语义等价），32 周期强制刷新兜底，场景缓存 64 条有界，错误不缓存且经 take_error 上报；`Detector for Box<T>` blanket impl 使装饰器可包 trait object；dry-run 汇总输出 inference 次数与 cache hits | PASS | cbf3f44 | 122→126 测试；实机 smoke：合成移动场景 16 推理/0 命中（符合预期，缓存服务静态 UI）；clippy 0 |
