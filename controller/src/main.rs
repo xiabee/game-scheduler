@@ -695,12 +695,14 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         };
 
         if let Some(log) = session_log.as_mut() {
+            let skill_state = skill_runner.as_ref().map(|r| r.current());
             log.write_cycle(&controller::session::SessionLine {
                 cycle,
                 elapsed_ms: t0.elapsed().as_millis(),
                 cycle_duration: last_cycle_duration,
                 backend: &opts.backend,
                 report: &report,
+                skill_state,
             });
         }
 

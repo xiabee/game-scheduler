@@ -17,6 +17,10 @@ pub struct SessionLine<'a> {
     pub cycle_duration: Duration,
     pub backend: &'a str,
     pub report: &'a CycleReport,
+    /// NC3: the skill's current state when a skill drives the session
+    /// (rendered as a trailing `skill_state` column; `None` keeps the
+    /// classic column count for sessions without a skill).
+    pub skill_state: Option<&'a str>,
 }
 
 /// Sanitize a field for TSV: newlines/tabs become spaces so a record is
@@ -108,15 +112,22 @@ impl SessionLogger {
             Some(v) => verdict_tag(v),
             None => "none".into(),
         };
+        // the skill column exists only when a skill drives the session, so
+        // classic sessions keep their exact historical column count
+        let skill_col = match line.skill_state {
+            Some(state) => format!("\t{}", field(state)),
+            None => String::new(),
+        };
         let record = format!(
-            "CYCLE\t{}\t{}\t{:?}\t{}\t{}\t{}\t{}\n",
+            "CYCLE\t{}\t{}\t{:?}\t{}\t{}\t{}\t{}{}\n",
             line.cycle,
             line.elapsed_ms,
             line.cycle_duration,
             field(line.backend),
             verdict_tag(&line.report.pre_verdict),
             verdict,
-            det_summary.join(";")
+            det_summary.join(";"),
+            skill_col
         );
         match f.write_all(record.as_bytes()).and_then(|_| f.flush()) {
             Ok(()) => self.written += 1,
@@ -185,6 +196,7 @@ mod tests {
                 cycle_duration: Duration::from_millis(66),
                 backend: "gdi",
                 report: &report,
+                skill_state: Some("menu"),
             };
             log.write_cycle(&line);
             log.write_summary(10, 9, 2, "completed");
@@ -199,7 +211,12 @@ mod tests {
             lines[0]
         );
         let cols: Vec<&str> = lines[0].split('\t').collect();
-        assert_eq!(cols.len(), 8, "8 columns, got {:?}", cols);
+        assert_eq!(
+            cols.len(),
+            9,
+            "8 classic columns + trailing skill_state, got {:?}",
+            cols
+        );
         assert!(
             cols[6].starts_with("allow"),
             "action verdict col: {:?}",
@@ -210,12 +227,42 @@ mod tests {
             "detection col: {:?}",
             cols[7]
         );
+        assert_eq!(cols[8], "menu", "skill_state column appended");
         assert!(
             lines[1].starts_with(
                 "SUMMARY\tcycles=10\tallowed=9\tdistinct_verdicts=2\toutcome=completed"
             ),
             "summary: {:?}",
             lines[1]
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn without_a_skill_the_column_count_is_unchanged() {
+        let dir = std::env::temp_dir().join(format!("nf_session2_{}", std::process::id()));
+        let path = dir.join("session.tsv");
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut log = SessionLogger::new(path.to_string_lossy().to_string());
+            let report = report_with_detection();
+            let line = SessionLine {
+                cycle: 1,
+                elapsed_ms: 10,
+                cycle_duration: Duration::from_millis(5),
+                backend: "synthetic",
+                report: &report,
+                skill_state: None,
+            };
+            log.write_cycle(&line);
+        }
+        let content = std::fs::read_to_string(&path).expect("read back");
+        let cols: Vec<&str> = content.lines().next().unwrap().split('\t').collect();
+        assert_eq!(
+            cols.len(),
+            8,
+            "sessions without a skill keep the classic 8 columns: {:?}",
+            cols
         );
         let _ = std::fs::remove_file(&path);
     }
