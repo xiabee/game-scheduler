@@ -155,6 +155,12 @@ cargo run -- --dry-run --backend auto --duration 5 --debug-dir ../_debug
 #            --fps N --model N --min-confidence F --require-foreground --emergency-after S
 ```
 
+一键冒烟(窗口查找 → GDI 捕获+检测 → dry-run,逐项校验退出码):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\controller-smoke.ps1   # 输出 CONTROLLER SMOKE PASS
+```
+
 本地 CI(scripts/ci-local.ps1)在装有 cargo 的机器上会一并跑 `cargo fmt --check` / `clippy` / `test` / `build`;无 Rust 的节点诚实跳过。
 
 数据流:**计划(cron)** 或**手动触发** → 运行某个**任务**;任务所属**游戏**选定一个**适配器**;适配器把任务翻译成命令行;`runner` 执行,并把

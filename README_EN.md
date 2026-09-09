@@ -118,6 +118,13 @@ cargo run -- --dry-run --backend auto --duration 5 --debug-dir ../_debug
 #          --fps N --model N --min-confidence F --require-foreground --emergency-after S
 ```
 
+One-command smoke (window lookup -> GDI capture + detection -> dry-run,
+each step's exit code checked):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\controller-smoke.ps1   # prints CONTROLLER SMOKE PASS
+```
+
 The local CI (scripts/ci-local.ps1) also runs `cargo fmt --check` /
 `clippy` / `test` / `build` for the controller when cargo is installed;
 nodes without Rust skip that stage honestly.
