@@ -541,8 +541,39 @@ mod tests {
         format!("NFCTRL-{tag}-{pid}-{n}")
     }
 
+    /// True when the process can talk to an interactive desktop. CI nodes
+    /// run jobs from service contexts (Session 0): window ENUMERATION and
+    /// `SetProcessDpiAwarenessContext` misbehave or are denied there,
+    /// while direct-HWND paths still work. Tests that depend on the
+    /// interactive environment skip honestly instead of failing.
+    fn interactive_desktop() -> bool {
+        use windows::Win32::System::StationsAndDesktops::{
+            CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS,
+        };
+        let desk =
+            unsafe { OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_READOBJECTS) };
+        match desk {
+            Ok(h) => {
+                let _ = unsafe { CloseDesktop(h) };
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn require_interactive(what: &str) -> bool {
+        if interactive_desktop() {
+            return true;
+        }
+        println!("skipped: {what} needs an interactive desktop (service session detected)");
+        false
+    }
+
     #[test]
     fn dpi_awareness_succeeds() {
+        if !require_interactive("dpi_awareness_succeeds") {
+            return;
+        }
         let _ = ensure_dpi_awareness();
         assert!(
             ensure_dpi_awareness(),
@@ -552,7 +583,9 @@ mod tests {
 
     #[test]
     fn creates_window_with_exact_client_size_and_finds_it_by_title() {
-        ensure_dpi_awareness();
+        if !require_interactive("creates_window_..._finds_it_by_title") {
+            return;
+        }
         let title = unique_title("exact");
         let win = OwnedTestWindow::new(640, 480, &title).expect("create window");
 
@@ -574,7 +607,9 @@ mod tests {
 
     #[test]
     fn finds_window_by_process_name() {
-        ensure_dpi_awareness();
+        if !require_interactive("finds_window_by_process_name") {
+            return;
+        }
         let title = unique_title("procname");
         let win = OwnedTestWindow::new(320, 240, &title).expect("create window");
         let wrapped = GameWindow::from_hwnd(win.hwnd).expect("wrap");
