@@ -19,6 +19,19 @@
 
 ---
 
+## 🚀 当前开发方向
+
+**当前稳定能力**仍然是:调度第三方工具 → Route / Task / Plan → Planner → Execution 监控。现有外部工具适配器(BetterGI / March7thAssistant / Fhoe-Rail / ok-wuthering-waves / M9A)**继续受支持**,作为兼容与 fallback。
+
+**主要研发方向**是自研轻量 **Native Vision Controller**(Rust):用普通窗口捕获、计算机视觉与普通 Windows 输入,降低第三方工具对固定分辨率、特殊游戏设置和复杂配置的依赖。Controller 仍处于开发阶段,**以 [ROADMAP.md](ROADMAP.md) 为准**;本文档不把它描述为已完成能力。
+
+安全边界(对 Controller 与外部工具同样生效,详见 [SECURITY.md](SECURITY.md) 与 ROADMAP §7):
+
+- **允许**:普通窗口捕获 / 截图 / 模板匹配 / YOLO / OCR / 状态机 / 普通 Windows 输入 API(SendInput 级)。
+- **禁止**:DLL 或进程注入、游戏内存读写、抓包改包、驱动绕过、反作弊绕过、反检测、隐藏自动化、账号风控绕过。
+
+---
+
 ## ✨ 功能一览
 
 - **四游戏适配器**:原神 / 崩铁 / 鸣潮 / 重返未来1999，各自把任务翻译成对应工具的命令行。
@@ -131,7 +144,7 @@ internal/api        net/http 的 JSON REST + 看板 + SSE 实时流
 internal/vision     截图辅助接口骨架(Detector / Matcher / OCR / FrameSource,纯接口定义,不含任何模型或推理实现,供未来"截图辅助录入 / 诊断"扩展)
 ```
 
-> 🧭 **路线图**:下一阶段主线是自研 Native Vision Controller(Rust,窗口捕获 + CV + 状态机 + 普通 Windows 输入),现有第三方工具适配器转为 legacy/fallback,详见 [ROADMAP.md](ROADMAP.md)。`
+> 🧭 **路线图**:下一阶段主线是自研 Native Vision Controller(Rust,窗口捕获 + CV + 状态机 + 普通 Windows 输入),现有第三方工具适配器转为 legacy/fallback,详见 [ROADMAP.md](ROADMAP.md)。
 
 ### 🕹️ controller/(Native Vision Controller,NC0 已落地)
 
@@ -691,6 +704,7 @@ go vet ./...
 ## 🔒 安全说明
 
 - 本项目**不实现任何**注入/内存读写/抓包/反检测能力;外部工具一律按子进程启动。
+- 自研 Native Controller 同样受此约束:只做普通窗口捕获、CV 与普通 Windows 输入;**禁止** DLL/进程注入、游戏内存读写、抓包改包、驱动/反作弊绕过、反检测、隐藏自动化、风控绕过(完整红线见 [ROADMAP.md](ROADMAP.md) §7)。
 - 任务的 `raw_args` / `exe` 可执行任意命令——这是本工具的**核心用途**(运行你配置的外部工具)。因此:**开启鉴权后**才暴露 API,**令牌不要泄露**;能调用 API 的人即可在本机运行命令。
 - `/screenshots/` 做了路径穿越防护(只接受纯文件名);令牌比较用常量时间;SQL 全部参数化。
 - 漏洞由 `govulncheck`(CI + 定时)与 Dependabot 持续监控。

@@ -15,6 +15,29 @@ open-source automation tools as ordinary local processes.
 > March7thAssistant/Fhoe-Rail, ok-wuthering-waves, M9A) are not bundled — you
 > install and configure them yourself, and point the scheduler at their paths.
 
+## 🚀 Current direction
+
+**Stable today**: orchestrating third-party tools -> Route / Task / Plan ->
+Planner -> execution monitoring. The existing external tool adapters
+(BetterGI / March7thAssistant / Fhoe-Rail / ok-wuthering-waves / M9A) remain
+**supported** as the compatibility and fallback path.
+
+**Primary development focus** is a self-built lightweight **Native Vision
+Controller** (Rust): plain window capture, computer vision and ordinary
+Windows input, to reduce dependence on fixed resolutions, special game
+settings and complex third-party configuration. The controller is still in
+development — **see [ROADMAP.md](ROADMAP.md)**; this README does not describe
+it as a shipped feature.
+
+Safety boundary (applies to the controller and external tools alike, see
+[SECURITY.md](SECURITY.md) and ROADMAP §7):
+
+- **Allowed**: ordinary window capture / screenshots / template matching /
+  YOLO / OCR / state machines / ordinary Windows input APIs (SendInput level).
+- **Forbidden**: DLL or process injection, game memory read/write, packet
+  interception or modification, driver bypass, anti-cheat bypass,
+  anti-detection, hidden automation, risk-control bypass.
+
 ## Supported games & tools
 
 | Game | Adapter key | External tool | Notes |

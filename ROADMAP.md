@@ -14,9 +14,17 @@
 
 现有外部适配器**保留为 legacy adapter / fallback / 迁移期兼容**,不删除(见 [§6 旧外部控制器的定位](#6-旧外部控制器的定位))。
 
-## Next Milestone
+## Current Focus / Current Phase
 
-**NC1 — Vision Runtime(ONNX)**(下一夜班起点,前置见 [§9](#9-nightly-development-记录);NC0 已完成)
+```text
+Current Focus:
+Native Vision Controller
+
+Current Phase:
+NC1 — Vision Runtime (ONNX)
+```
+
+NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`controller/` Rust crate:GameWindow、四坐标系 Transform、SafetyGovernor、捕获后端、dry-run 闭环;详见 §9)。**不要倒退重复实现 NC0。**
 
 ## 状态标记
 
@@ -308,5 +316,5 @@ BetterGI / March7thAssistant / Fhoe-Rail / ok-ww / M9A 的现有适配器:
 
 ## 10. 变更记录
 
-- **2026-09-09**:NC0 标记完成(§3/§9);下一夜班起点更新为 NC1。
+- **2026-09-09**:NC0 标记完成(§3/§9);下一夜班起点更新为 NC1;README(中/英)新增「当前开发方向」章节并明确 Controller 安全边界;NIGHTOPS.yaml 夜间优先级对齐本路线图。
 - **2026-09-08**:全面重写。历史 Go 调度核心/路线/Planner/界面能力标记 ✅(§1);主线改为 **Native Vision Controller**(§2–§3,NC0–NC8);新增数据集生命周期(§4)、性能预算(§5)、旧外部控制器降级为 fallback(§6)、安全红线(§7);明确今晚 NC0 起点(§9)。

@@ -6,7 +6,15 @@ agent: zcode
 
 goal:
   description: |
-    多游戏资源收集与路线调度器：调度引擎与终端交互。
+    多游戏资源收集与路线调度器：以 Go 调度核心编排外部自动化工具（兼容/fallback），
+    同时主攻自研 Native Vision Controller（Rust：窗口捕获 + CV + 状态机 + 普通
+    Windows 输入），降低对固定分辨率与第三方工具配置的依赖。当前研发优先级
+    P0 > P1 > P2 > P3 > P4：
+    P0 构建安全/测试安全/数据安全/回归防护；
+    P1 Native Controller 基础（capture、坐标变换、dry-run、SafetyGovernor、Windows 可靠性）；
+    P2 vision runtime、模板匹配、YOLO 接口、状态机；
+    P3 Planner/Route/看板打磨、打包与文档；
+    P4 高级导航（后期）。
 
 priority: 74
 
@@ -16,8 +24,11 @@ prompt:
   strategy: generated
 
   instructions: |
-    近期工作：终端 rec 防护、非覆盖式 upsert、origin guard。
-    涉及游戏账号的配置夜间只读。
+    当前主线：Native Vision Controller（NC1 起步，NC0 已完成，见 ROADMAP §3/§9）。
+    外部 adapters（BetterGI/MAA 系/ok-ww/M9A）保留为兼容/fallback，不要删除或标记 deprecated。
+    分辨率独立是硬约束：坐标一律走 client/normalized/model/desktop 变换，禁止硬编码绝对像素。
+    性能目标：轻量优先——idle CPU 尽量低、视觉循环低频、capture 与推理分离、模型 nano/small 优先。
+    涉及游戏账号的配置夜间只读；dry-run / mock / fixture 优先；不依赖 GitHub Hosted CI。
 
 ci:
   timeout_minutes: 120
