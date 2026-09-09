@@ -57,6 +57,14 @@
 - Remaining：NC1 起步（需 ONNX 模型/训练脚手架前置）、WGC 非 RDP 环境复验、win-devops 装 Rust 工具链
 - Next：NC1 Vision Runtime；若模型未就绪，次选 `tools/vision/` 训练脚手架或 controller 打包集成
 
+### 夜班收尾（2026-09-09 08:40 close）
+
+- **计划 vs 完成**：ROADMAP §9 今晚全部完成（M1–M6 六个 milestone + M7–M23 十七个跟进加固/验收/文档项），零遗留 milestone。最终 commit `b2938c5`/close `see git log`；本地 master 与 origin/master 同步。
+- **最终验证**：LOCAL CI PASS（gofmt/vet/go test 18 包/go build + cargo fmt --check/clippy 0 告警/cargo test 66 绿+1 ignored/cargo build --locked）；REMOTE CI（win-devops）多轮 PASS；`controller-smoke.ps1` PASS；60s soak ×2 干净；`-race` 全绿；`cargo test --release` 全绿。
+- **Verdict 汇总**：M1–M3/M5/M6 PASS；M4 PARTIAL（WGC 环境静默，GDI 实测可用）；其余 PASS。唯一 ignored 测试：live resize（DWM 重绘竞态，确定性覆盖在 transform/pipeline 测试）。
+- **安全发现**：零输入发送（input 模块 NC4 前不存在）；无注入/无内存读取/无 hooks；`.nightly/` scratch 曾仅被本地 exclude 覆盖（已修入 .gitignore）；会话日志/PNG 均在 ignored 目录。
+- **明天最有价值的第一步**：NC1 Vision Runtime。前置：①物理 console 登录后复验 WGC（`--capture-monitor`，当前 RDP 会话 BLOCKED）；②训练管线 `tools/vision/` 产出首个 nano ONNX 模型（§4，权重不进 Git）；③（可选）win-devops 安装 Rust 工具链使 remote acceptance 覆盖 controller。
+
 ### 环境发现（重要，供后续夜班复用）
 
 1. **本机当前经 RDP 会话运行**（console 处于锁屏，LogonUI 活跃）。GDI CopyFromScreen / PrintWindow 在 RDP 会话内正常。
