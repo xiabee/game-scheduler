@@ -4,6 +4,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -92,6 +93,10 @@ func Load(path string) (Config, error) {
 			return cfg, err
 		}
 		if err == nil {
+			// Tolerate a UTF-8 BOM: Windows editors (Notepad, PowerShell
+			// Set-Content -Encoding UTF8) add one, and json.Unmarshal
+			// rejects it with a baffling first-character error.
+			b = bytes.TrimPrefix(b, []byte{0xEF, 0xBB, 0xBF})
 			if err := json.Unmarshal(b, &cfg); err != nil {
 				return cfg, err
 			}
