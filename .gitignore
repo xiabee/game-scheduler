@@ -49,3 +49,6 @@ runs/
 datasets/images/
 datasets/labels/
 datasets/raw/
+
+# python bytecode (tools/vision scaffolds)
+__pycache__/
