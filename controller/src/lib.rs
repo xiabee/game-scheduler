@@ -22,6 +22,7 @@ pub mod protocol;
 pub mod replay;
 pub mod safety;
 pub mod session;
+pub mod skill;
 pub mod state;
 pub mod template;
 pub mod transform;
