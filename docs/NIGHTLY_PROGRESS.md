@@ -131,3 +131,6 @@
 - `internal/store/planner_import`（单事务 + deferred Rollback + dry_run 计数同逻辑）✅ 与 ROADMAP 声明一致
 - 推荐生命周期终态守卫（`recOpen` + errRecommendationClosed）✅ 代码与测试俱在
 - **发现并修复**：README 中英 controller 章节 `cargo test` 计数漂移（97 → 实际 130）
+### Go 审计完结（03:40 前后，全仓）
+
+覆盖：runner、scheduler、monitor、task-service、api（安全面）、store（Open/migrate/WAL/ensureColumn/去重唯一索引）、planner_store、planner_import、events、cmd/server 生命周期。**结论：零 P0/P1 发现**；graceful shutdown 的 LIFO defers、推荐终态守卫、截图端点防穿越等关键声明全部与代码一致。整夜 Go 零改动。
