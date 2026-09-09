@@ -44,3 +44,8 @@ controller/target/
 *.onnx
 # exception: the tiny hand-built ONNX test fixture (185 bytes, no weights)
 !controller/tests/fixtures/*.onnx
+# NC1 training scaffolds: never commit training runs or dataset images
+runs/
+datasets/images/
+datasets/labels/
+datasets/raw/
