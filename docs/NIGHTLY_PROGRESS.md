@@ -135,3 +135,4 @@
 ### Go 审计完结（03:40 前后，全仓）
 
 覆盖：runner、scheduler、monitor、task-service、api（安全面）、store（Open/migrate/WAL/ensureColumn/去重唯一索引）、planner_store、planner_import、events、cmd/server 生命周期。**结论：零 P0/P1 发现**；graceful shutdown 的 LIFO defers、推荐终态守卫、截图端点防穿越等关键声明全部与代码一致。整夜 Go 零改动。
+| M33 | 一键夜审电池 `scripts/nightly-verify.ps1`（ci-local + controller-smoke + 隔离临时服务器全链路 windows_smoke + 30s ONNX soak，分段判定）；**P1 修复**：PS `Set-Content -Encoding UTF8` 的 BOM 使 config.Load 的 json.Unmarshal 失败、服务器启动即死——Load 剥 BOM + 守护测试（该问题由新电池首次串联时暴露） | PASS | 84c1003 | NIGHTLY VERIFY PASS 实机全段 |
