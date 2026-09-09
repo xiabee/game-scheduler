@@ -135,20 +135,28 @@ impl SessionLogger {
         }
     }
 
-    /// Write the final SUMMARY line (end-state of the session).
+    /// Write the final SUMMARY line (end-state of the session). `extra`
+    /// key=value pairs append as additional tab-separated fields, so a
+    /// reader that only knows the classic four still parses.
     pub fn write_summary(
         &mut self,
         cycles: u32,
         allowed: u32,
         distinct_verdicts: u32,
         outcome: &str,
+        extra: &[(String, String)],
     ) {
         let Some(f) = self.file() else {
             return;
         };
+        let mut extras = String::new();
+        for (k, v) in extra {
+            extras.push_str(&format!("\t{}={}", field(k), field(v)));
+        }
         let record = format!(
-            "SUMMARY\tcycles={cycles}\tallowed={allowed}\tdistinct_verdicts={distinct_verdicts}\toutcome={}\n",
-            field(outcome)
+            "SUMMARY\tcycles={cycles}\tallowed={allowed}\tdistinct_verdicts={distinct_verdicts}\toutcome={}{}\n",
+            field(outcome),
+            extras
         );
         match f.write_all(record.as_bytes()).and_then(|_| f.flush()) {
             Ok(()) => self.written += 1,
@@ -199,7 +207,17 @@ mod tests {
                 skill_state: Some("menu"),
             };
             log.write_cycle(&line);
-            log.write_summary(10, 9, 2, "completed");
+            log.write_summary(
+                10,
+                9,
+                2,
+                "completed",
+                &[
+                    ("inference".to_string(), "3".to_string()),
+                    ("cache_hits".to_string(), "5".to_string()),
+                    ("skill_state".to_string(), "menu".to_string()),
+                ],
+            );
             assert_eq!(log.written, 2);
         }
         let content = std::fs::read_to_string(&path).expect("read back");
@@ -230,9 +248,9 @@ mod tests {
         assert_eq!(cols[8], "menu", "skill_state column appended");
         assert!(
             lines[1].starts_with(
-                "SUMMARY\tcycles=10\tallowed=9\tdistinct_verdicts=2\toutcome=completed"
+                "SUMMARY\tcycles=10\tallowed=9\tdistinct_verdicts=2\toutcome=completed\tinference=3\tcache_hits=5\tskill_state=menu"
             ),
-            "summary: {:?}",
+            "summary with extra fields: {:?}",
             lines[1]
         );
         let _ = std::fs::remove_file(&path);

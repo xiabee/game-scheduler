@@ -852,7 +852,23 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         );
     }
     if let Some(log) = session_log.as_mut() {
-        log.write_summary(cycle, allowed_count, verdict_notes.len() as u32, outcome);
+        let mut extra = vec![
+            (
+                "inference".to_string(),
+                detector.inference_count().to_string(),
+            ),
+            ("cache_hits".to_string(), detector.hits.to_string()),
+        ];
+        if let Some(r) = skill_runner.as_ref() {
+            extra.push(("skill_state".to_string(), r.current().to_string()));
+        }
+        log.write_summary(
+            cycle,
+            allowed_count,
+            verdict_notes.len() as u32,
+            outcome,
+            &extra,
+        );
     }
     for note in &verdict_notes {
         println!("dry-run: verdict {note}");
