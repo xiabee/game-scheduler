@@ -136,14 +136,57 @@ impl OnnxDetector {
         Ok((data, shape))
     }
 
-    /// Decode `[1, N, >=6]` rows of (cx, cy, w, h, conf, class) into
-    /// detections, dropping rows below the manifest threshold.
+    /// Decode model output into detections, auto-detecting the layout:
+    ///
+    /// - channels-first `[1, 4+nc, N]` (YOLOv8 ONNX export style): rows
+    ///   0..3 are (cx, cy, w, h) in letterbox pixels, rows 4.. are class
+    ///   scores; selected when `shape[1] == 4 + labels.len()` exactly.
+    /// - rows-major `[1, N, >=6]`: each row is (cx, cy, w, h, conf,
+    ///   class); the NC1 default contract.
+    ///
+    /// Threshold filtering and class-aware NMS apply to both layouts.
     fn decode(&self, data: &[f32], shape: &[i64]) -> Vec<Detection> {
-        let mut out = Vec::new();
-        if shape.len() != 3 || shape[2] < 6 {
-            return out;
+        if shape.len() != 3 {
+            return Vec::new();
         }
-        let (rows, stride) = (shape[1] as usize, shape[2] as usize);
+        let dets = if shape[1] as usize == 4 + self.labels.len() && shape[2] as usize > 0 {
+            self.decode_channels_first(data, shape[1] as usize, shape[2] as usize)
+        } else if shape[2] >= 6 {
+            self.decode_rows_major(data, shape[1] as usize, shape[2] as usize)
+        } else {
+            Vec::new()
+        };
+        crate::nms::non_max_suppression(dets, 0.45)
+    }
+
+    /// `[1, C, N]` YOLOv8 export layout.
+    fn decode_channels_first(&self, data: &[f32], c: usize, n: usize) -> Vec<Detection> {
+        let mut out = Vec::new();
+        let classes = c - 4;
+        for i in 0..n {
+            let (cx, cy, w, h) = (data[i], data[n + i], data[2 * n + i], data[3 * n + i]);
+            if !(cx.is_finite() && cy.is_finite() && w.is_finite() && h.is_finite()) {
+                continue;
+            }
+            let mut best = (usize::MAX, 0.0f32);
+            for k in 0..classes {
+                let score = data[(4 + k) * n + i];
+                if score.is_finite() && score > best.1 {
+                    best = (k, score);
+                }
+            }
+            let (class_id, conf) = best;
+            if class_id == usize::MAX || !(conf.is_finite() && conf >= self.confidence) {
+                continue;
+            }
+            out.push(self.detection(class_id, conf, cx, cy, w, h));
+        }
+        out
+    }
+
+    /// `[1, N, >=6]` rows layout: (cx, cy, w, h, conf, class).
+    fn decode_rows_major(&self, data: &[f32], rows: usize, stride: usize) -> Vec<Detection> {
+        let mut out = Vec::new();
         for r in 0..rows {
             let row = &data[r * stride..(r + 1) * stride];
             let conf = row[4];
@@ -155,18 +198,22 @@ impl OnnxDetector {
                 continue;
             }
             let class_id = row[5] as usize;
-            let label = self
-                .labels
-                .get(class_id)
-                .cloned()
-                .unwrap_or_else(|| format!("class_{class_id}"));
-            out.push(Detection {
-                label,
-                rect: Rect::new(cx - w / 2.0, cy - h / 2.0, w, h),
-                confidence: conf,
-            });
+            out.push(self.detection(class_id, conf, cx, cy, w, h));
         }
         out
+    }
+
+    fn detection(&self, class_id: usize, conf: f32, cx: f32, cy: f32, w: f32, h: f32) -> Detection {
+        let label = self
+            .labels
+            .get(class_id)
+            .cloned()
+            .unwrap_or_else(|| format!("class_{class_id}"));
+        Detection {
+            label,
+            rect: Rect::new(cx - w / 2.0, cy - h / 2.0, w, h),
+            confidence: conf,
+        }
     }
 }
 

@@ -107,6 +107,25 @@ fn the_same_model_maps_consistently_across_window_sizes() {
 }
 
 #[test]
+fn v8style_channels_first_output_is_decoded_with_class_aware_nms() {
+    let (manifest_path, weights_path) = common::ensure_v8_fixture();
+    let manifest = controller::manifest::load(&manifest_path).expect("v8 fixture manifest");
+    let mut det = controller::onnx::OnnxDetector::open(&manifest, Path::new(&weights_path))
+        .expect("winml session");
+    let dets = det.detect(&controller::frame::Frame::new(64, 64));
+    assert!(det.take_error().is_none());
+    assert_eq!(dets.len(), 2, "both columns survive (disjoint): {dets:?}");
+    // col 0: rect_a @ (20,20) 10x10 conf 0.95
+    assert_eq!(dets[0].label, "rect_a");
+    assert!((dets[0].confidence - 0.95).abs() < 1e-6);
+    assert!((dets[0].rect.x - 15.0).abs() < 1e-5 && (dets[0].rect.y - 15.0).abs() < 1e-5);
+    // col 1: rect_b @ (40,40) 10x10 conf 0.70 (argmax over a=0.60/b=0.70)
+    assert_eq!(dets[1].label, "rect_b", "{dets:?}");
+    assert!((dets[1].confidence - 0.70).abs() < 1e-6);
+    assert!((dets[1].rect.x - 35.0).abs() < 1e-5 && (dets[1].rect.y - 35.0).abs() < 1e-5);
+}
+
+#[test]
 fn resolve_wires_the_onnx_detector_when_weights_exist() {
     let (manifest_path, _w) = ensure_fixture();
     let choice = controller::inference::resolve(&controller::inference::DetectorRequest {
