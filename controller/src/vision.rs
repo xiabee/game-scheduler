@@ -35,6 +35,18 @@ pub trait Detector {
     }
 }
 
+/// Boxed detectors stay detectors: lets callers wrap trait objects in
+/// decorators (e.g. the frame-hash inference cache) without unwrapping.
+impl<T: Detector + ?Sized> Detector for Box<T> {
+    fn detect(&mut self, frame: &Frame) -> Vec<Detection> {
+        (**self).detect(frame)
+    }
+
+    fn take_error(&mut self) -> Option<String> {
+        (**self).take_error()
+    }
+}
+
 /// What color a [`ColorClassDetector`] looks for.
 #[derive(Debug, Clone, Copy)]
 pub struct ColorTarget {

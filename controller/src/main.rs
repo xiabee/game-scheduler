@@ -342,6 +342,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     use controller::capture::FpsLimiter;
     use controller::pipeline::{draw_overlay, run_cycle};
     use controller::safety::{SafetyConfig, SafetyGovernor};
+    use controller::vision::Detector as _;
     use controller::window::{ensure_dpi_awareness, GameWindow, OwnedTestWindow};
 
     ensure_dpi_awareness();
@@ -465,7 +466,9 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         None => None,
     };
 
-    let mut detector = choice.detector;
+    // ROADMAP §5 budget ("YOLO 按需触发,不每帧跑"): identical model frames
+    // skip inference; a forced refresh every 32 cycles bounds staleness.
+    let mut detector = Box::new(controller::cache::CachingDetector::new(choice.detector, 32));
 
     // NC2: optional L0 probe set, evaluated against the raw client frame
     // every cycle (cheap-first: probes cost a handful of pixel reads).
@@ -810,8 +813,10 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     }
 
     println!(
-        "dry-run: finished - cycles={cycle} allowed={allowed_count} distinct_verdicts={}",
-        verdict_notes.len()
+        "dry-run: finished - cycles={cycle} allowed={allowed_count} distinct_verdicts={} inference={} (cache hits={})",
+        verdict_notes.len(),
+        detector.inference_count(),
+        detector.hits
     );
     if let Some(rec) = recorder.as_ref() {
         println!("dry-run: recorded {} frame(s)", rec.written());

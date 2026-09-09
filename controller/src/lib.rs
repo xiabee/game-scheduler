@@ -9,6 +9,7 @@
 //! read/write, no packet interception, no anti-detection. Plain window
 //! capture and plain Win32 only.
 
+pub mod cache;
 pub mod capture;
 pub mod frame;
 pub mod inference;
