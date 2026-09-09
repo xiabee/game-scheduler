@@ -17,6 +17,19 @@
 
 ## Night Runs
 
+### Night 2026-09-09 → 2026-09-10（夜班 agent 记录）
+
+- START_COMMIT: 7e1576e（docs: align project goals with native controller roadmap）
+- 主线：ROADMAP §3 NC1 — Vision Runtime（NC0 已完成，不重复）
+- 计划拆解：真实推理依赖训练管线产出模型（今晚禁下模型/禁 GPU），故按「先运行时地基、再真实推理」推进：
+  M1 manifest+降级链 → M2 真实 ONNX 运行时（WinML/ort 选型 + 微型 fixture 模型）→ M3 `tools/vision/` 训练脚手架
+- Handoff：XNightOps `2026-09-09/game-scheduler` 验证通过（night/project/workspace/dispatch_at=23:38/git_head=7e1576e 全一致）
+
+| M | 内容 | Verdict | Commit | 测试 |
+|---|------|---------|--------|------|
+| M1 | NC1 运行时地基：`manifest.rs` schema-v1 模型 manifest（labels/version/imgsz/confidence/game-profile，严格校验+未知字段前向兼容）；`inference.rs` 检测器解析降级链（模型缺失/坏 JSON/非法值→Mock+告警，manifest imgsz/confidence 生效但 CLI 显式旗标优先）；CLI `--manifest-check`（exit 0/2）+ dry-run `--model-path`（空值显式拒绝）；`models/` 约定文档+示例 manifest；`.gitignore` 全局 `*.onnx`（权重不进 Git，§4） | PASS | 53257c1 | 67→86 测试（manifest 11 / inference 7 / CLI 2 新增）；clippy 0；smoke：合法/缺失/非法 manifest + dry-run 降级路径实测 |
+| M2 | NC1 真实推理：`onnx.rs` OnnxDetector 走 **WinML**（Windows 内建 ONNX 运行时，CPU 设备，零外部下载、零 GPU）；BGRA→RGB NCHW 预处理；`[1,N,≥6]`(cx,cy,w,h,conf,class) 解码 + manifest 置信度门；推理错误 `take_error` 锁存不静默；resolve() 在 manifest 引用的权重存在时自动升级为 Onnx 源；185 字节常量输出 fixture ONNX（手写 protobuf，无 Python/onnx 工具链，tmp+rename 防竞态，入库保证新克隆确定性） | PASS | 88e8034 | 86→92 测试（6 个 ONNX 运行时含实机 WinML）；实机 dry-run：真实推理 conf=0.90 → client (320,80) = 归一化 (0.5,1/6) 逆变换精确；同宽高比跨分辨率归一化位置/框占比不变（NC1 acceptance 确定性形式）；same-point guard 对常量检测正确触发 |
+
 ### Night 2026-09-08 → 2026-09-09（夜班 agent 记录）
 
 - START_COMMIT: 2828d9a（docs: pivot roadmap to native vision controller）
