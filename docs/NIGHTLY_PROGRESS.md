@@ -104,3 +104,5 @@
 | M15 | 示例与文档：`controller/examples/`（probes/skills JSON 示例 + README 双契约文档 + 会话组合示例）；守护测试使示例文件每次测试都被解析验证（防腐化）；README 中英 controller 章节补 NC2/NC3 现状 | PASS | ce19ae9 | 115→117 lib 测试（含 2 个示例守护测试）；clippy 0 |
 | M16 | 性能预算守护测试：100 次 L0+L1 evaluate（320x240、2 探针 + 1 模板 stride4）debug 构建均值 <60ms 断言（release ~50x）——把 NC2「CPU 低于预算」验收落成确定性 CI 形式 | PASS | a23e506 | 新增 1 测试；clippy 0 |
 | M17 | 打包集成：build.ps1 `-IncludeController` 可选段（cargo release --locked 构建入包 controller.exe + MODELS.md + 示例 manifest，无 cargo 诚实 SKIPPED）；**修复打包脚本在无 tag 仓库的潜在 bug**（git describe stderr 触发 PS5.1 Stop 终止错误，版本探测改经 cmd） | PASS | 29ca064 | 实机端到端打包验证：zip 内含 controller 三件套 |
+| M18 | 组合 soak（60s，probes+skill+record 200 帧上限）：762 周期，WS 9.9→10.2MB 平坦、句柄 96-97 无泄漏、exit 0（TSV 留档 `.nightly/session-skill-soak.tsv`） | PASS | （随 M19 批次推送） | 见左 |
+| M19 | L1 模板匹配 × 真实录制帧：录制 GDI 探针窗口真实帧（DWM 过渡帧 warmup——过渡全黑帧会污染模板），letterbox 后切取含红盒边缘的 40x40 纹理模板（纯色区域 NCC 退化），L1 层须在全部录制帧中持续命中且与直接 matcher 调用一致；另含 replay→perception 组成测试 | PASS | 29c0500 | 新增 2 集成测试（真实内容对照合成测试）；全套 122 测试绿 |
