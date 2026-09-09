@@ -151,10 +151,10 @@ fn build_onnx_bytes() -> Vec<u8> {
     push_len_delim(12, &value_info("output", &[1, 2, 6]), &mut graph);
 
     let mut model = Vec::new();
-    push_varint_field(1, 8, &mut model); // ir_version 8
+    push_varint_field(1, 3, &mut model); // ir_version 3: oldest IR every WinML/ORT accepts
     push_len_delim(7, &graph, &mut model);
     let mut opset = Vec::new();
-    push_varint_field(2, 13, &mut opset); // opset 13, domain ""
+    push_varint_field(2, 11, &mut opset); // opset 11, domain "" (Identity is ancient; max compat)
     push_len_delim(8, &opset, &mut model);
     model
 }
