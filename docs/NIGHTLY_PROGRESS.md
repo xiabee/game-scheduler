@@ -111,3 +111,6 @@
 
 静态 GDI 探针场景 20s @15fps：77 周期 → **4 次真实 WinML 推理 / 73 次 cache 命中（94.8%）**，exit 0（TSV：`.nightly/session-cache-soak.tsv`）。§5「YOLO 不每帧跑」在真实捕获路径成立。
 
+### Go 侧聚焦复审（03:00 前后）
+
+`internal/runner`（进程树 kill、KILL_ON_JOB_CLOSE、WaitDelay、有界捕获、超时/取消语义）逐行走读：无 P0/P1 发现，注释与实现一致。Go 侧本夜零改动、零回归。
