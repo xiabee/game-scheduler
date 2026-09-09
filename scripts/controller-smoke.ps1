@@ -36,6 +36,10 @@ Write-Host "== dry-run with REAL ONNX fixture (WinML, 2s) =="
 .\target\debug\controller.exe --dry-run --backend synthetic --fps 10 --duration 2 --model-path tests\fixtures\constant_yolo.manifest.json
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+Write-Host "== dry-run ONNX x real GDI capture (2s) =="
+.\target\debug\controller.exe --dry-run --backend gdi --fps 5 --duration 2 --model-path tests\fixtures\constant_yolo.manifest.json
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 Write-Host "== dry-run (gdi, 3s) =="
 .\target\debug\controller.exe --dry-run --backend gdi --fps 10 --duration 3
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

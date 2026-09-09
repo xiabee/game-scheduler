@@ -430,6 +430,10 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     let mut resized_once = false;
     let mut retry_tracker = controller::pipeline::RetryTracker::new(5);
     let mut inference_error_cycles: u32 = 0;
+    let mut consecutive_inference_errors: u32 = 0;
+    // ~2s of dead inference at the default 15fps: a detector that fails
+    // this persistently ends the session instead of burning the budget.
+    const INFERENCE_DEATH_BUDGET: u32 = 30;
     while t0.elapsed().as_secs_f32() < opts.duration_secs {
         if let Some(after) = opts.emergency_after_secs {
             if t0.elapsed().as_secs_f32() >= after {
@@ -498,9 +502,19 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 // not run must never look like a clean "nothing detected".
                 if let Some(err) = detector.take_error() {
                     inference_error_cycles += 1;
+                    consecutive_inference_errors += 1;
                     if inference_error_cycles <= 3 {
                         eprintln!("dry-run: cycle {cycle}: inference error: {err}");
                     }
+                    if consecutive_inference_errors == INFERENCE_DEATH_BUDGET {
+                        eprintln!(
+                            "dry-run: cycle {cycle}: inference failed {INFERENCE_DEATH_BUDGET} cycles in a row - ending the session"
+                        );
+                        outcome = "inference-degraded";
+                        break;
+                    }
+                } else {
+                    consecutive_inference_errors = 0;
                 }
                 r
             }
@@ -630,7 +644,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         return 1;
     }
     // every cycle failing inference is not an observable session
-    if inference_error_cycles >= cycle {
+    if inference_error_cycles >= cycle || outcome == "inference-degraded" {
         eprintln!("dry-run: inference never produced a usable cycle");
         return 1;
     }
