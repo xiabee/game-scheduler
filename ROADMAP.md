@@ -159,26 +159,28 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Dependencies**:NC0 ✅;训练管线(§4)✅ 脚手架已落地,首个模型待训练。
 - **Out of Scope**:OCR;训练代码本身(在 `tools/vision/`,Python 仓内工具,不属于 controller runtime)。
 
-### NC2 — Perception Stack(分层感知) ⬜
+### NC2 — Perception Stack(分层感知) 🚧(L0/L1 地基已落地)
 
-- **Status**:⬜ Planned
+- **Status**:🚧 In Progress(2026-09-09/10 夜班:骨架+离线验证设施落地;真实 UI 页面的就绪判定待真实数据)。
 - **Objective**:不把所有识别都交给 YOLO;按成本分层,cheap-first。
 - **Scope**:L0 像素/状态检测(取色、进度条、加载判定)→ L1 Template Matching(高频)→ L2 YOLO(button / icon / interaction prompt / dialog / minimap element / resource icon / enemy/UI object,按需低频触发)→ L3 OCR(可选:数字、材料数量、角色名、副本名、弹窗文字)。优先级恒为 `cheap detector → template → YOLO → OCR`。
-- **Deliverables**:分层感知管线与统一 Evidence 输出;各层可独立开关。
-- **Acceptance Criteria**:一个 UI 页面的"是否就绪"判定仅用 L0+L1 即可完成且 CPU 低于预算(§5)。
-- **Tests**:每层独立单测 + 离线帧回放(录制帧 → 断言层输出)。
-- **Dependencies**:NC1。
+- **已落地(2026-09-09/10)**:`perception.rs` 分层骨架(L0 PixelProbe 区域颜色+容差+比例门,统一 Evidence,逐层开关);L1 复用 NCC matcher 并转 Detection 共享通路;`--probes` JSON 配置(校验+示例+守护测试);离线设施:`--record`/`--replay` 帧录制回放 + L1 真实帧跟踪测试;CPU 预算确定性守护测试(100 次 L0+L1 评估 debug 构建 <60ms 均值);帧级推理缓存(§5「YOLO 不每帧跑」)。
+- **Deliverables**:分层感知管线与统一 Evidence 输出;各层可独立开关。(L0/L1 ✅;L2 经 OnnxDetector 独立可用,归入 Evidence 契约的整合待真实模型)
+- **Acceptance Criteria**:一个 UI 页面的"是否就绪"判定仅用 L0+L1 即可完成且 CPU 低于预算(§5)。(结构性部分已测;待真实 UI 页面数据复验)
+- **Tests**:每层独立单测 + 离线帧回放(录制帧 → 断言层输出)。(离线回放设施 ✅)
+- **Dependencies**:NC1 🚧(运行时已落地)。
 - **Out of Scope**:OCR 训练;语义理解。
 
-### NC3 — State Machine / Skill Engine ⬜
+### NC3 — State Machine / Skill Engine 🚧(引擎地基已落地)
 
-- **Status**:⬜ Planned
+- **Status**:🚧 In Progress(2026-09-09/10 夜班:数据驱动定义+纯转移评估器+dry-run 集成落地;真实业务 Skill 待 NC5)。
 - **Objective**:Skill 是状态机,不是 `if sees button: click`。
 - **Scope**:`Skill / State / Evidence / Action / Expectation / Timeout / Retry / Fallback` 类型与执行引擎;每个状态必须定义:进入条件、感知证据、动作、期望结果、超时、重试、fallback、终止条件。示例:`Home → OpenMenu → MenuDetected → OpenDaily → DailyDetected → Claim → ConfirmSuccess → Done`。
-- **Deliverables**:Skill 定义格式(数据驱动,JSON/TOML)+ 引擎 + 执行轨迹日志(与 dry-run overlay 联动)。
-- **Acceptance Criteria**:示例 Skill 在 dry-run 回放中每一步的 evidence/expectation 均可追溯;超时/重试/fallback 路径有测试。
-- **Tests**:状态机引擎单测(用 MockDetector 编排固定帧序列)。
-- **Dependencies**:NC0–NC2。
+- **已落地(2026-09-09/10)**:`skill.rs` 数据驱动 SkillDefinition(严格 JSON 校验:状态名唯一/转移与 fallback 可解析/终态语义);Expectation 两形态(L0 探针触发 / 标签检测+置信度门);SkillRunner 纯转移评估器(Waiting/Transitioned/FellBack/Done/Failed,超时预算+有界重试);dry-run `--skill` 每周期以真实管线证据驱动并记录转移与计划动作(计划只记录——NC4 前无输入);`skill_pipeline` 集成测试 + 示例守护测试。
+- **Deliverables**:Skill 定义格式(数据驱动,JSON/TOML)+ 引擎 + 执行轨迹日志(与 dry-run overlay 联动)。(定义+引擎+轨迹日志 ✅;overlay 联动待打磨)
+- **Acceptance Criteria**:示例 Skill 在 dry-run 回放中每一步的 evidence/expectation 均可追溯;超时/重试/fallback 路径有测试。(超时/重试/fallback 测试 ✅;回放追溯待真实 Skill)
+- **Tests**:状态机引擎单测(用 MockDetector 编排固定帧序列)。(✅ 纯转移评估器 + 管线集成两层)
+- **Dependencies**:NC0–NC2。(NC1 运行时 🚧、NC2 地基 🚧 均已可支撑)
 - **Out of Scope**:真实输入(NC4);具体业务 Skill 内容(NC5)。
 
 ### NC4 — Input Controller ⬜
