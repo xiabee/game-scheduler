@@ -17,9 +17,9 @@ use std::path::Path;
 pub enum DetectorSource {
     /// NC0 default: the synthetic color-class mock, no manifest involved.
     Mock,
-    /// The manifest loaded and validated, but real inference is not wired
-    /// yet (runtime lands with the next NC1 milestone): degraded to the
-    /// mock while honoring the manifest's imgsz/confidence contract.
+    /// The manifest loaded and validated, but no usable weights were
+    /// found next to it: degraded to the mock while honoring the
+    /// manifest's imgsz/confidence contract.
     ManifestPending {
         path: String,
         name: String,
@@ -29,6 +29,9 @@ pub enum DetectorSource {
     /// A model path was requested but could not be used (missing file,
     /// bad JSON, invalid manifest): degraded to the mock with the reason.
     MockFallback { path: String, reason: String },
+    /// The ONNX weights were found and the WinML runtime session came up:
+    /// the pipeline runs REAL inference (CPU device).
+    Onnx { path: String, name: String },
 }
 
 /// The resolved detector plus the geometry/threshold the session runs at.
@@ -94,11 +97,52 @@ pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
         labels,
         input_size,
         default_confidence,
+        weights,
         ..
     } = manifest;
+
+    // Real inference: when the manifest references weights and the file
+    // exists next to it, bring up the WinML ONNX session. Any failure on
+    // that path degrades to the mock loudly (never a hard error).
+    if let Some(weights_ref) = weights.as_deref() {
+        let weights_path = std::path::Path::new(path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join(weights_ref);
+        if weights_path.is_file() {
+            match crate::manifest::load(std::path::Path::new(path)) {
+                Ok(m) => match crate::onnx::OnnxDetector::open(&m, &weights_path) {
+                    Ok(detector) => {
+                        return DetectorChoice {
+                            detector: Box::new(detector),
+                            source: DetectorSource::Onnx {
+                                path: weights_path.display().to_string(),
+                                name: m.name,
+                            },
+                            imgsz: if req.imgsz_explicit {
+                                req.imgsz
+                            } else {
+                                (input_size.width, input_size.height)
+                            },
+                            min_confidence: if req.confidence_explicit {
+                                req.min_confidence
+                            } else {
+                                m.default_confidence
+                            },
+                        };
+                    }
+                    Err(e) => {
+                        return fallback(path, format!("onnx runtime init failed: {e}"), req);
+                    }
+                },
+                Err(e) => return fallback(path, e, req),
+            }
+        }
+    }
+
     DetectorChoice {
-        // Real inference arrives with the NC1 runtime milestone; until
-        // then the manifest contract still governs geometry/threshold.
+        // No usable weights: manifest contract still governs
+        // geometry/threshold, perception stays on the NC0 mock.
         detector: Box::new(MockDetector::synthetic_rect()),
         source: DetectorSource::ManifestPending {
             path: path.to_string(),

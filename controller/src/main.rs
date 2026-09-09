@@ -368,11 +368,14 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             labels,
             ..
         } => println!(
-            "dry-run: detector = mock (manifest {name} v{version}: {labels} label(s), imgsz {}x{}, confidence {:.2} honored; ONNX runtime lands with the next NC1 milestone)",
+            "dry-run: detector = mock (manifest {name} v{version}: {labels} label(s), imgsz {}x{}, confidence {:.2} honored; no usable weights next to the manifest)",
             choice.imgsz.0, choice.imgsz.1, choice.min_confidence
         ),
         controller::inference::DetectorSource::MockFallback { path, reason } => eprintln!(
             "dry-run: WARNING model {path:?} unusable ({reason}) - falling back to the mock detector"
+        ),
+        controller::inference::DetectorSource::Onnx { path, name } => println!(
+            "dry-run: detector = ONNX via WinML (model {name}, weights {path}, CPU device)"
         ),
     }
     let (model_w, model_h) = choice.imgsz;

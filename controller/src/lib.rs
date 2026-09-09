@@ -14,6 +14,7 @@ pub mod frame;
 pub mod inference;
 pub mod input;
 pub mod manifest;
+pub mod onnx;
 pub mod pipeline;
 pub mod protocol;
 pub mod safety;

@@ -42,3 +42,5 @@ controller/target/
 
 # NC1: model weights stay external (ROADMAP §4); only manifests are committed
 *.onnx
+# exception: the tiny hand-built ONNX test fixture (185 bytes, no weights)
+!controller/tests/fixtures/*.onnx
