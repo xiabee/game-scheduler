@@ -91,6 +91,8 @@ pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
             return fallback(path, reason, req);
         }
     };
+    // kept intact for the ONNX session below (the destructure moves fields)
+    let manifest_for_open = manifest.clone();
     let ModelManifest {
         name,
         version,
@@ -110,32 +112,30 @@ pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
             .unwrap_or(std::path::Path::new("."))
             .join(weights_ref);
         if weights_path.is_file() {
-            match crate::manifest::load(std::path::Path::new(path)) {
-                Ok(m) => match crate::onnx::OnnxDetector::open(&m, &weights_path) {
-                    Ok(detector) => {
-                        return DetectorChoice {
-                            detector: Box::new(detector),
-                            source: DetectorSource::Onnx {
-                                path: weights_path.display().to_string(),
-                                name: m.name,
-                            },
-                            imgsz: if req.imgsz_explicit {
-                                req.imgsz
-                            } else {
-                                (input_size.width, input_size.height)
-                            },
-                            min_confidence: if req.confidence_explicit {
-                                req.min_confidence
-                            } else {
-                                m.default_confidence
-                            },
-                        };
-                    }
-                    Err(e) => {
-                        return fallback(path, format!("onnx runtime init failed: {e}"), req);
-                    }
-                },
-                Err(e) => return fallback(path, e, req),
+            match crate::onnx::OnnxDetector::open(&manifest_for_open, &weights_path) {
+                Ok(detector) => {
+                    let m = &manifest_for_open;
+                    return DetectorChoice {
+                        detector: Box::new(detector),
+                        source: DetectorSource::Onnx {
+                            path: weights_path.display().to_string(),
+                            name: m.name.clone(),
+                        },
+                        imgsz: if req.imgsz_explicit {
+                            req.imgsz
+                        } else {
+                            (input_size.width, input_size.height)
+                        },
+                        min_confidence: if req.confidence_explicit {
+                            req.min_confidence
+                        } else {
+                            m.default_confidence
+                        },
+                    };
+                }
+                Err(e) => {
+                    return fallback(path, format!("onnx runtime init failed: {e}"), req);
+                }
             }
         }
     }

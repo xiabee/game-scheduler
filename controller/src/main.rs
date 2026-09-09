@@ -429,6 +429,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     let mut outcome = "completed";
     let mut resized_once = false;
     let mut retry_tracker = controller::pipeline::RetryTracker::new(5);
+    let mut inference_error_cycles: u32 = 0;
     while t0.elapsed().as_secs_f32() < opts.duration_secs {
         if let Some(after) = opts.emergency_after_secs {
             if t0.elapsed().as_secs_f32() >= after {
@@ -493,6 +494,14 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             Ok(r) => {
                 retry_tracker.on_success();
                 last_cycle_duration = std::time::Instant::now().duration_since(cycle_started);
+                // NC1: surface inference failures — a detector that could
+                // not run must never look like a clean "nothing detected".
+                if let Some(err) = detector.take_error() {
+                    inference_error_cycles += 1;
+                    if inference_error_cycles <= 3 {
+                        eprintln!("dry-run: cycle {cycle}: inference error: {err}");
+                    }
+                }
                 r
             }
             Err(controller::ControllerError::WindowGone) => {
@@ -605,6 +614,11 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         "dry-run: finished - cycles={cycle} allowed={allowed_count} distinct_verdicts={}",
         verdict_notes.len()
     );
+    if inference_error_cycles > 0 {
+        eprintln!(
+            "dry-run: WARNING {inference_error_cycles}/{cycle} cycle(s) had inference errors"
+        );
+    }
     if let Some(log) = session_log.as_mut() {
         log.write_summary(cycle, allowed_count, verdict_notes.len() as u32, outcome);
     }
@@ -615,7 +629,12 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         eprintln!("dry-run: no cycles ran");
         return 1;
     }
-    println!("dry-run: OK (no input was sent - NC0 is observation-only)");
+    // every cycle failing inference is not an observable session
+    if inference_error_cycles >= cycle {
+        eprintln!("dry-run: inference never produced a usable cycle");
+        return 1;
+    }
+    println!("dry-run: OK (no input was sent - observation-only dry run)");
     0
 }
 

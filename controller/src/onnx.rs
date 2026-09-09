@@ -30,6 +30,8 @@ pub struct OnnxDetector {
     imgsz: (u32, u32),
     labels: Vec<String>,
     confidence: f32,
+    /// Reused NCHW staging buffer (see `input_tensor`).
+    buffer: Vec<f32>,
     /// First evaluation/inference error, for honest reporting: a silent
     /// empty detection list must be distinguishable from "nothing there".
     last_error: Option<String>,
@@ -85,26 +87,32 @@ impl OnnxDetector {
             imgsz: manifest.imgsz(),
             labels: manifest.labels.clone(),
             confidence: manifest.default_confidence,
+            buffer: Vec::new(),
             last_error: None,
         })
     }
 
-    /// BGRA8 model-space frame → RGB f32/255 NCHW [1,3,h,w].
-    fn input_tensor(&self, frame: &Frame) -> Result<windows::AI::MachineLearning::TensorFloat> {
+    /// BGRA8 model-space frame → RGB f32/255 NCHW [1,3,h,w]. The staging
+    /// buffer lives on the detector: at real imgsz (640 → ~4.9M floats)
+    /// reallocating every cycle would churn tens of MB.
+    fn input_tensor(&mut self, frame: &Frame) -> Result<windows::AI::MachineLearning::TensorFloat> {
         use windows::AI::MachineLearning::TensorFloat;
         let (w, h) = (frame.width, frame.height);
-        let mut data = Vec::with_capacity((3 * w * h) as usize);
+        self.buffer.clear();
+        self.buffer.reserve((3 * w * h) as usize);
         // planes: R, then G, then B (BGRA pixels: [2]=r, [1]=g, [0]=b)
         for plane in [2usize, 1, 0] {
             for y in 0..h {
                 for x in 0..w {
                     let px = frame.pixel(x, y).unwrap_or([0, 0, 0, 255]);
-                    data.push(px[plane] as f32 / 255.0);
+                    self.buffer.push(px[plane] as f32 / 255.0);
                 }
             }
         }
-        let tensor =
-            TensorFloat::CreateFromShapeArrayAndDataArray(&[1, 3, h as i64, w as i64], &data)?;
+        let tensor = TensorFloat::CreateFromShapeArrayAndDataArray(
+            &[1, 3, h as i64, w as i64],
+            &self.buffer,
+        )?;
         Ok(tensor)
     }
 
@@ -126,11 +134,6 @@ impl OnnxDetector {
         let data: Vec<f32> = view.into_iter().collect();
         let shape: Vec<i64> = out.Shape()?.into_iter().collect();
         Ok((data, shape))
-    }
-
-    /// The first recorded inference error, if any (and clear it).
-    pub fn take_error(&mut self) -> Option<String> {
-        self.last_error.take()
     }
 
     /// Decode `[1, N, >=6]` rows of (cx, cy, w, h, conf, class) into
@@ -190,5 +193,9 @@ impl Detector for OnnxDetector {
                 Vec::new()
             }
         }
+    }
+
+    fn take_error(&mut self) -> Option<String> {
+        self.last_error.take()
     }
 }

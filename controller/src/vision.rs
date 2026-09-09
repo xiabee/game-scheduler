@@ -25,6 +25,14 @@ pub struct Detection {
 /// An object detector over BGRA8 frames in model space.
 pub trait Detector {
     fn detect(&mut self, frame: &Frame) -> Vec<Detection>;
+
+    /// The first error since the last call, if any. A detector that
+    /// returns an empty detection list must be distinguishable from one
+    /// that could not run at all (silent empties hide broken inference);
+    /// backends that cannot fail (the NC0 mock) default to `None`.
+    fn take_error(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// What color a [`ColorClassDetector`] looks for.
