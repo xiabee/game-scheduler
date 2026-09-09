@@ -136,3 +136,12 @@
 
 覆盖：runner、scheduler、monitor、task-service、api（安全面）、store（Open/migrate/WAL/ensureColumn/去重唯一索引）、planner_store、planner_import、events、cmd/server 生命周期。**结论：零 P0/P1 发现**；graceful shutdown 的 LIFO defers、推荐终态守卫、截图端点防穿越等关键声明全部与代码一致。整夜 Go 零改动。
 | M33 | 一键夜审电池 `scripts/nightly-verify.ps1`（ci-local + controller-smoke + 隔离临时服务器全链路 windows_smoke + 30s ONNX soak，分段判定）；**P1 修复**：PS `Set-Content -Encoding UTF8` 的 BOM 使 config.Load 的 json.Unmarshal 失败、服务器启动即死——Load 剥 BOM + 守护测试（该问题由新电池首次串联时暴露） | PASS | 84c1003 | NIGHTLY VERIFY PASS 实机全段 |
+
+### 夜班收尾（2026-09-10 04:20 close）
+
+- **计划 vs 完成**：主线 NC1 运行时侧全部落地（ROADMAP §3 NC1 状态 🚧，剩余=首个真实模型）；NC2 L0/L1 地基、NC3 状态机引擎地基提前落地；另交付 tools/vision 训练脚手架、打包集成、nightly-verify 一键电池。共 33 个 milestone 记录，67 个 commit（7e1576e..1dfa956）。
+- **最终验证**：LOCAL CI PASS ×3（gofmt/vet/go test 18 包/go build + cargo fmt --check/clippy 0/cargo test 130 绿/cargo build --locked）；CONTROLLER SMOKE PASS ×2；NIGHTLY VERIFY PASS；REMOTE CI（win-devops）PASS ×6；windows_smoke 11/11；30s/60s/120s soak ×3 零泄漏。
+- **测试**：controller 67→130（+63：manifest 11、inference 7、缓存 4、NMS 4、skill 6、感知 6、回放 4、CLI 6、ONNX 运行时 7、L1 真实帧 2、技能管线 2 等）；Go 18 包全绿无改动。
+- **安全**：零输入发送（input 模块仍为空 stub）；无注入/无内存读写/无抓包/无反检测；新增代码经逐提交安全扫描；config BOM 容错修复反而提升了启动健壮性。
+- **已知问题/Deferred**：①首个真实 nano 模型未训练（白天：采集→标注→train→export）；②WGC 非 RDP 复验仍 BLOCKED；③推理超时线程化（WinML 同步调用不可取消，以连续失败熔断代替）；④`device(provider)` 配置化（当前固定 CPU）；⑤YOLOv8 真实模型端到端对拍待模型就绪。
+- **下一夜班建议**：白天完成首个真实模型后，NC2 用真实 UI 数据补全验收；NC4 输入控制器安全设计评审（SendInput 封装 + governor 硬前置 + dummy window 验证）；NC6 协议草案（docs/controller-protocol-draft.md）评审定稿。
