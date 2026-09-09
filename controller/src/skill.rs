@@ -159,6 +159,23 @@ impl SkillDefinition {
     pub fn state(&self, name: &str) -> Option<&StateDef> {
         self.states.iter().find(|s| s.name == name)
     }
+
+    /// Every probe name the skill's expectations reference (first-use
+    /// order, deduplicated). Callers warn when one of these was never
+    /// configured, because such an expectation can never fire.
+    pub fn referenced_probes(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for s in &self.states {
+            for e in &s.expect {
+                if let Some(p) = &e.probe {
+                    if !out.contains(p) {
+                        out.push(p.clone());
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Where the engine stands after one `step`.

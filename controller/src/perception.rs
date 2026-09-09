@@ -109,6 +109,11 @@ impl LayeredPerception {
         self.probes.push(probe);
     }
 
+    /// Names of all configured probes, registration order.
+    pub fn probe_names(&self) -> Vec<String> {
+        self.probes.iter().map(|p| p.name.clone()).collect()
+    }
+
     /// Parse and validate an L0 probe set from JSON (the `--probes`
     /// config). Schema: `[{ "name", "x", "y", "w", "h", "expected":
     /// [b,g,r], "tolerance", "min_fraction", "step" }]`.

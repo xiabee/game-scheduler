@@ -514,6 +514,23 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             match controller::skill::SkillDefinition::from_json(&text) {
                 Ok(def) => {
                     println!("skill: {:?} started at state {:?}", def.name, def.start);
+                    // a skill expecting a probe nobody configured would
+                    // only ever fail by timeout — say so up front
+                    if let Some(perception) = perception.as_ref() {
+                        let configured = perception.probe_names();
+                        for want in def.referenced_probes() {
+                            if !configured.iter().any(|c| c == &want) {
+                                eprintln!(
+                                    "skill: WARNING expectation references probe {want:?} which is not in --probes; it can never fire"
+                                );
+                            }
+                        }
+                    } else if !def.referenced_probes().is_empty() {
+                        eprintln!(
+                            "skill: WARNING no --probes configured but the skill expects probe(s) {:?}; they can never fire",
+                            def.referenced_probes()
+                        );
+                    }
                     Some(controller::skill::SkillRunner::start(def, 0))
                 }
                 Err(e) => {
