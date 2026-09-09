@@ -114,3 +114,5 @@
 ### Go 侧聚焦复审（03:00 前后）
 
 `internal/runner`（进程树 kill、KILL_ON_JOB_CLOSE、WaitDelay、有界捕获、超时/取消语义）逐行走读：无 P0/P1 发现，注释与实现一致。Go 侧本夜零改动、零回归。
+| M22 | 全表面集成 soak（120s，GDI+ONNX+probes+skill+record+cache）：1493 周期 exit 0，WS 27.8→25.5MB 平坦、句柄 143-144；CPU 轮廓：录制期 ~70% 单核（PNG 编码主导），record 达 300 帧上限后降至 ~4%——§5 运行预算达标（TSV：`.nightly/session-full-surface-soak.tsv`） | PASS | （随 M23 批次推送） | 见左 |
+| M23 | NC3 轨迹联动：skill 当前状态进入 debug PNG 文件名（`cycle_00030_home.png`），调试目录按序浏览即状态时间线（路径净化） | PASS | （下方 commit） | 实机：2 帧导出文件名含状态 |
