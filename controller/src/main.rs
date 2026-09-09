@@ -706,12 +706,7 @@ fn run_gdi_probe() -> i32 {
                         Some(d) => {
                             println!(
                                 "gdi-probe: detect {} rect=({:.0},{:.0} {:.0}x{:.0}) conf={:.2}",
-                                d.label,
-                                d.rect.x,
-                                d.rect.y,
-                                d.rect.w,
-                                d.rect.h,
-                                d.confidence
+                                d.label, d.rect.x, d.rect.y, d.rect.w, d.rect.h, d.confidence
                             );
                             outcome = Some(Ok(format!("OK (attempt {attempt})")));
                         }
