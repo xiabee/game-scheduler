@@ -154,7 +154,7 @@ fn build_onnx_bytes() -> Vec<u8> {
     push_varint_field(1, 3, &mut model); // ir_version 3: oldest IR every WinML/ORT accepts
     push_len_delim(7, &graph, &mut model);
     let mut opset = Vec::new();
-    push_varint_field(2, 11, &mut opset); // opset 11, domain "" (Identity is ancient; max compat)
+    push_varint_field(2, 9, &mut opset); // opset 9: Win10 1809-era WinML floor (Identity@9, ir3)
     push_len_delim(8, &opset, &mut model);
     model
 }
