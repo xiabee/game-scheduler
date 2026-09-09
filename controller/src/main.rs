@@ -673,52 +673,76 @@ fn run_gdi_probe() -> i32 {
             return 1;
         }
     };
-    win.nudge();
-    match cap.capture() {
-        Ok(f) => {
-            let nonzero = f.data.iter().filter(|&&b| b != 0).count();
-            let distinct = f
-                .data
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len();
-            println!(
-                "gdi-probe: frame {}x{} stride={} nonzero={nonzero} distinct_values={distinct}",
-                f.width, f.height, f.stride
-            );
-            println!(
-                "gdi-probe: pixel(10,10)={:?} pixel(280,210)={:?} pixel(399,299)={:?}",
-                f.pixel(10, 10),
-                f.pixel(280, 210),
-                f.pixel(399, 299)
-            );
-            if f.width == 0 || f.height == 0 || nonzero == 0 {
-                eprintln!("gdi-probe: frame is empty or all black");
-                return 1;
-            }
-            // perception sanity: the probe pattern must be detectable
-            let mut detector = controller::vision::MockDetector::synthetic_rect();
-            match controller::pipeline::letterbox_to_model(&f, 256, 256) {
-                Ok(model) => match detector.detect(&model).first() {
-                    Some(d) => println!(
-                        "gdi-probe: detect {} rect=({:.0},{:.0} {:.0}x{:.0}) conf={:.2}",
-                        d.label, d.rect.x, d.rect.y, d.rect.w, d.rect.h, d.confidence
-                    ),
-                    None => {
-                        eprintln!("gdi-probe: WARNING detector found nothing in probe pattern");
-                        return 1;
+    // poll a few cycles: the very first captured surface can still be a
+    // transitional one while DWM composes the freshly painted pattern
+    let mut outcome: Option<Result<String, String>> = None;
+    for attempt in 0..6 {
+        win.nudge();
+        match cap.capture() {
+            Ok(f) => {
+                let nonzero = f.data.iter().filter(|&&b| b != 0).count();
+                if f.width == 0 || f.height == 0 || nonzero == 0 {
+                    outcome = Some(Err("frame is empty or all black".into()));
+                    continue;
+                }
+                let distinct = f
+                    .data
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len();
+                println!(
+                    "gdi-probe: frame {}x{} stride={} nonzero={nonzero} distinct_values={distinct}",
+                    f.width, f.height, f.stride
+                );
+                println!(
+                    "gdi-probe: pixel(10,10)={:?} pixel(280,210)={:?} pixel(399,299)={:?}",
+                    f.pixel(10, 10),
+                    f.pixel(280, 210),
+                    f.pixel(399, 299)
+                );
+                let mut detector = controller::vision::MockDetector::synthetic_rect();
+                match controller::pipeline::letterbox_to_model(&f, 256, 256) {
+                    Ok(model) => match detector.detect(&model).first() {
+                        Some(d) => {
+                            println!(
+                                "gdi-probe: detect {} rect=({:.0},{:.0} {:.0}x{:.0}) conf={:.2}",
+                                d.label,
+                                d.rect.x,
+                                d.rect.y,
+                                d.rect.w,
+                                d.rect.h,
+                                d.confidence
+                            );
+                            outcome = Some(Ok(format!("OK (attempt {attempt})")));
+                        }
+                        None => {
+                            // low-content frame; retry
+                        }
+                    },
+                    Err(e) => {
+                        outcome = Some(Err(format!("letterbox failed: {e}")));
+                        break;
                     }
-                },
-                Err(e) => {
-                    eprintln!("gdi-probe: letterbox failed: {e}");
-                    return 1;
                 }
             }
-            println!("gdi-probe: OK");
+            Err(e) => {
+                outcome = Some(Err(format!("capture failed: {e}")));
+                break;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(120));
+    }
+    match outcome {
+        Some(Ok(msg)) => {
+            println!("gdi-probe: {msg}");
             0
         }
-        Err(e) => {
-            eprintln!("gdi-probe: capture failed: {e}");
+        Some(Err(msg)) => {
+            eprintln!("gdi-probe: {msg}");
+            1
+        }
+        None => {
+            eprintln!("gdi-probe: probe pattern never detected after retries");
             1
         }
     }
