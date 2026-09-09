@@ -104,9 +104,9 @@ internal/vision     screenshot-assist interface skeleton (Detector / Matcher / O
 
 > 🧭 **Roadmap**: the next phase is a self-built Native Vision Controller (Rust; window capture + CV + state machine + plain Windows input). Existing third-party tool adapters become legacy/fallback — see [ROADMAP.md](ROADMAP.md).
 
-### 🕹️ controller/ (Native Vision Controller — NC0 landed)
+### 🕹️ controller/ (Native Vision Controller — NC0 landed, NC1 inference runtime wired)
 
-`controller/` is a standalone Rust crate. NC0 is **observation-only: no
+`controller/` is a standalone Rust crate. It is **observation-only: no
 input is ever sent** — the input module is deliberately empty until NC4.
 
 - **GameWindow**: locate the game window by title/process name; exact
@@ -124,25 +124,41 @@ input is ever sent** — the input module is deliberately empty until NC4.
   frames on this machine's RDP session — see NIGHTLY_PROGRESS) →
   PrintWindow/GDI (works) → synthetic frames, with automatic fallback and
   honest warnings.
-- **Dry-run loop**: window → capture → letterbox → detect → inverse
-  transform → governor verdict → debug PNG (`--debug-dir`).
+- **Model manifests (NC1)**: `models/*.manifest.json` schema v1
+  (labels/version/imgsz/confidence/game-profile) strictly validated;
+  weights never enter Git (`*.onnx` is git-ignored repo-wide).
+- **ONNX inference (NC1)**: runs on **WinML** (the ONNX runtime Windows
+  ships with) on the CPU device — no runtime download, no GPU, no Python.
+  Output layout auto-detection (rows-major `[1,N,>=6]` and YOLOv8-export
+  channels-first `[1,4+nc,N]`), confidence gate + class-aware NMS;
+  missing/broken models degrade to the mock loudly, never silently.
+- **Training scaffold**: `tools/vision/` (prepare_dataset / train /
+  export_onnx) — training happens on the Python side; export writes a
+  schema-v1 manifest aligned with the controller; `datasets/` tracks
+  manifests only, never images.
+- **Dry-run loop**: window → capture → letterbox → detect (ONNX or
+  mock) → inverse transform → governor verdict → debug PNG
+  (`--debug-dir`) → session TSV (`--session-log`).
 
 ```powershell
 cd controller
-cargo test                     # 67+ tests
+cargo test                     # 97 tests (incl. live WinML ONNX runtime tests)
 cargo run -- --self-probe      # window module smoke
 cargo run -- --capture-gdi     # GDI capture + detection smoke
 cargo run -- --list-windows    # enumerate visible windows
+cargo run -- --manifest-check models\example.manifest.json    # manifest validation (exit 0/2)
 cargo run -- --dry-run --backend auto --duration 5 --debug-dir ../_debug
+cargo run -- --dry-run --backend synthetic --model-path tests\fixtures\constant_yolo.manifest.json  # real ONNX when weights exist
 # Note: real throughput is bounded by per-cycle capture cost (PrintWindow
 # forces a DWM flush, ~280ms at 640x480); --fps only paces. High-throughput
-# capture is WGC's job (NC1+ performance path).
+# capture is WGC's job (performance path).
 # options: --window <title|@probe> --backend auto|wgc|gdi|synthetic
 #          --fps N --model N --min-confidence F --require-foreground --emergency-after S
+#          --model-path <manifest.json> (manifest imgsz/confidence win unless the CLI flags are explicit)
 ```
 
-One-command smoke (window lookup -> GDI capture + detection -> dry-run,
-each step's exit code checked):
+One-command smoke (window lookup -> GDI capture + detection -> manifest
+gates -> ONNX dry-run -> plain dry-run, each step's exit code checked):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\controller-smoke.ps1   # prints CONTROLLER SMOKE PASS
