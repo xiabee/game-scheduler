@@ -175,6 +175,7 @@ func (s *Service) executeNative(ctx context.Context, exec store.Execution, execI
 	var trail strings.Builder // bounded event trail surfaced in exec.Stdout
 	for attempt := 0; attempt < attempts; attempt++ {
 		if attempt > 0 {
+			fmt.Fprintf(&trail, "attempt=%d\n", attempt+1)
 			exec.RetryCount = attempt
 			_ = s.store.UpdateExecution(exec)
 			if t.RetryDelaySec > 0 {
