@@ -179,6 +179,8 @@
 
 | M28 | nightly-verify 增设 dashboard JS 语法守卫（78KB 内嵌 JS 为夜班高频编辑面,语法损坏=整 UI 静默失效;node --check 逐 script 块解析）| PASS | e7e29b1 | 守卫实测通过（1 script block OK）|
 
+| M30 | `--device gpu` 实机验证：本机 NVIDIA GPU 上 DirectX provider 会话真实建立,25 次推理 RESULT done;ONNX banner 从硬编码 device=cpu 改为回显实际 provider;READY manifest 回显同场实测生效。smoke 不加 gpu 段（无 GPU 节点经降级链诚实降 Mock,非失败） | PASS | (下方 commit) | 实机 gpu 会话 2s 干净退出;协议流 HELLO/READY(manifest)/RESULT |
+
 
 ### 夜班收尾（2026-09-11 08:40 close）
 
