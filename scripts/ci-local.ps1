@@ -113,7 +113,7 @@ else {
     Write-Host "SKIP gosec: not found in GOPATH\bin (go install github.com/securego/gosec/v2/cmd/gosec@latest)."
 }
 
-Write-Host "== secret scan (git-tracked files) =="
+Write-Host "== secret scan =="
 # High-signal credential shapes only. The sole allowlisted value is the
 # synthetic token inside scripts/nightly-verify.ps1 (throwaway local test
 # server in an isolated temp dir).
@@ -125,13 +125,46 @@ $patterns = @(
     "xox[baprs]-[A-Za-z0-9-]{10,}",
     "(password|secret|api_key|apikey|auth_token)[""']*\s*[:=]\s*[""']*[A-Za-z0-9+/_-]{16,}"
 )
-$grepArgs = @("grep", "-I", "-n")
-foreach ($p in $patterns) { $grepArgs += @("-e", $p) }
-$secretHits = & git @grepArgs | Where-Object { $_ -notmatch "nightly-verify-token" }
-if ($secretHits) {
-    Write-Host "secret scan FAILED:"
-    $secretHits
-    exit 1
+# Inside a real checkout: git grep over tracked files (binaries skipped).
+# On a non-repo snapshot (the CI node's upload strips .git): fall back to a
+# recursive text scan over small source-ish files — announced, because the
+# silent-pass failure mode would leave the node gate weaker than local.
+$inGitRepo = Test-Path (Join-Path (Get-Location) ".git")
+if ($inGitRepo) {
+    Write-Host "secret scan mode: git-tracked files"
+    $grepArgs = @("grep", "-I", "-n")
+    foreach ($p in $patterns) { $grepArgs += @("-e", $p) }
+    $secretHits = & git @grepArgs | Where-Object { $_ -notmatch "nightly-verify-token" }
+    if ($secretHits) {
+        Write-Host "secret scan FAILED:"
+        $secretHits
+        exit 1
+    }
+}
+else {
+    Write-Host "secret scan mode: non-repo snapshot - recursive file scan (no .git)"
+    $exclude = '\\(\.git|\.nightly|target|node_modules|dist|gotmp)\\'
+    $maxBytes = 2MB
+    $secretHits = @()
+    foreach ($f in (Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+            $_.Length -gt 0 -and $_.Length -le $maxBytes -and
+            $_.FullName -notmatch $exclude -and
+            $_.Extension -match '^\.(go|rs|py|ps1|js|ts|json|yaml|yml|md|toml|txt|html|css|sh|bat|cmd|cfg|ini|mod|sum)$'
+        })) {
+        $content = [System.IO.File]::ReadAllText($f.FullName)
+        foreach ($p in $patterns) {
+            if ($content -match $p) {
+                if ($content -match "nightly-verify-token") { continue }
+                $secretHits += "$($f.FullName): pattern $p"
+                break
+            }
+        }
+    }
+    if ($secretHits) {
+        Write-Host "secret scan FAILED:"
+        $secretHits
+        exit 1
+    }
 }
 
 # --- Rust controller gate (NC0) -------------------------------------------
