@@ -36,7 +36,7 @@ pub enum DetectorSource {
 
 /// The resolved detector plus the geometry/threshold the session runs at.
 pub struct DetectorChoice {
-    pub detector: Box<dyn Detector>,
+    pub detector: Box<dyn Detector + Send>,
     pub source: DetectorSource,
     /// Model input size (letterbox target). Manifest value wins over the
     /// CLI default, but an explicit `--model` wins over the manifest.
@@ -78,7 +78,7 @@ impl<'a> DetectorRequest<'a> {
 pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
     let Some(path) = req.model_path.filter(|p| !p.trim().is_empty()) else {
         return DetectorChoice {
-            detector: Box::new(MockDetector::synthetic_rect()),
+            detector: Box::new(MockDetector::synthetic_rect()) as Box<dyn Detector + Send>,
             source: DetectorSource::Mock,
             imgsz: req.imgsz,
             min_confidence: req.min_confidence,
@@ -116,7 +116,7 @@ pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
                 Ok(detector) => {
                     let m = &manifest_for_open;
                     return DetectorChoice {
-                        detector: Box::new(detector),
+                        detector: Box::new(crate::onnx::SendOnnxDetector(detector)),
                         source: DetectorSource::Onnx {
                             path: weights_path.display().to_string(),
                             name: m.name.clone(),
@@ -143,7 +143,7 @@ pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
     DetectorChoice {
         // No usable weights: manifest contract still governs
         // geometry/threshold, perception stays on the NC0 mock.
-        detector: Box::new(MockDetector::synthetic_rect()),
+        detector: Box::new(MockDetector::synthetic_rect()) as Box<dyn Detector + Send>,
         source: DetectorSource::ManifestPending {
             path: path.to_string(),
             name,
@@ -166,7 +166,7 @@ pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
 /// Degrade to the mock with the given reason, keeping CLI geometry.
 fn fallback(path: &str, reason: String, req: &DetectorRequest) -> DetectorChoice {
     DetectorChoice {
-        detector: Box::new(MockDetector::synthetic_rect()),
+        detector: Box::new(MockDetector::synthetic_rect()) as Box<dyn Detector + Send>,
         source: DetectorSource::MockFallback {
             path: path.to_string(),
             reason,

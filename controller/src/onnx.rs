@@ -246,3 +246,36 @@ impl Detector for OnnxDetector {
         self.last_error.take()
     }
 }
+
+/// A hand-off wrapper that lets an [`OnnxDetector`] cross into the
+/// inference worker thread (see `timeout::TimeoutDetector`).
+///
+/// # Why `unsafe impl Send` is sound here
+/// Microsoft documents the WinML surface (LearningModelSession and
+/// friends) as agile: free-threaded, usable from any apartment. On top of
+/// that, the ownership model is exclusive hand-off — exactly one worker
+/// thread owns the detector after construction and no other thread ever
+/// touches it, so there is no concurrent access to serialize.
+pub struct SendOnnxDetector(pub OnnxDetector);
+
+// justification above; do not copy without both halves of the argument
+unsafe impl Send for SendOnnxDetector {}
+
+impl Detector for SendOnnxDetector {
+    fn detect(&mut self, frame: &Frame) -> Vec<Detection> {
+        self.0.detect(frame)
+    }
+
+    fn take_error(&mut self) -> Option<String> {
+        self.0.take_error()
+    }
+}
+
+/// Compile-time statement of the worker-thread contract.
+#[cfg(test)]
+#[test]
+fn onnx_detector_satisfies_send_via_wrapper() {
+    fn assert_send<T: Send>() {}
+    assert_send::<SendOnnxDetector>();
+    assert_send::<Box<dyn Detector + Send>>();
+}

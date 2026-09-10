@@ -169,6 +169,10 @@ struct DryRunOptions {
     /// foreground requirements; refused outright when no interactive
     /// desktop exists.
     allow_input: bool,
+    /// Roadmap deferred item (inference timeout): bound each inference
+    /// wait. The WinML call itself is unkillable, so a timeout surfaces
+    /// via take_error() and feeds the consecutive-failure breaker.
+    infer_timeout_ms: u64,
 }
 
 impl DryRunOptions {
@@ -273,7 +277,16 @@ impl DryRunOptions {
             probes: opt(args, "--probes").filter(|p| !p.trim().is_empty()),
             skill: opt(args, "--skill").filter(|p| !p.trim().is_empty()),
             allow_input: args.iter().any(|a| a == "--allow-input"),
+            infer_timeout_ms: opt(args, "--infer-timeout")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(5000),
         };
+        if opts.infer_timeout_ms == 0 || opts.infer_timeout_ms > 300_000 {
+            return Err(format!(
+                "--infer-timeout must be in 1..=300000 ms, got {}",
+                opts.infer_timeout_ms
+            ));
+        }
         if opts.record.is_some() && opts.replay.is_some() {
             return Err("--record and --replay are mutually exclusive".into());
         }
@@ -494,7 +507,16 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
 
     // ROADMAP §5 budget ("YOLO 按需触发,不每帧跑"): identical model frames
     // skip inference; a forced refresh every 32 cycles bounds staleness.
-    let mut detector = Box::new(controller::cache::CachingDetector::new(choice.detector, 32));
+    // The timeout decorator under the cache bounds each REAL inference —
+    // a hung WinML call degrades to an error cycle instead of freezing
+    // the session (cache hits skip the worker channel entirely).
+    let mut detector = Box::new(controller::cache::CachingDetector::new(
+        Box::new(controller::timeout::TimeoutDetector::new(
+            choice.detector,
+            std::time::Duration::from_millis(opts.infer_timeout_ms),
+        )),
+        32,
+    ));
 
     // NC2: optional L0 probe set, evaluated against the raw client frame
     // every cycle (cheap-first: probes cost a handful of pixel reads).
