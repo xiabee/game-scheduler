@@ -163,9 +163,37 @@ func (s *Service) worker(ctx context.Context, execID, taskID int64) {
 	}
 	defer func() { <-s.sem }()
 
+	// A panic anywhere in the execution path must never orphan the row as
+	// "running" forever: recover, persist an honest failed state, and keep
+	// the server alive. (finishWithError is best-effort here — if IT panics
+	// too, the outer recover has already logged the original cause.)
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error("execution panicked", "exec_id", execID, "task_id", taskID, "panic", r)
+			s.finishExecutePanic(execID, r)
+		}
+	}()
+
 	if err := s.execute(ctx, execID); err != nil {
 		s.log.Error("execution failed to complete", "exec_id", execID, "err", err)
 	}
+}
+
+// finishExecutePanic persists a failed state for an execution whose worker
+// panicked. Best-effort double-guarded: the store itself is the only thing
+// that could panic here, and losing the row write must not re-crash the
+// server.
+func (s *Service) finishExecutePanic(execID int64, cause any) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error("panic while persisting panic state", "exec_id", execID, "err", r)
+		}
+	}()
+	exec, err := s.store.GetExecution(execID)
+	if err != nil {
+		return
+	}
+	_ = s.finishWithError(exec, fmt.Errorf("internal panic: %v", cause))
 }
 
 // Cancel attempts to stop a queued or running execution.

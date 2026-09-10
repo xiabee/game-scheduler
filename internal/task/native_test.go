@@ -14,6 +14,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
+	"github.com/xiabee/game-scheduler/internal/runner"
 	"github.com/xiabee/game-scheduler/internal/store"
 )
 
@@ -217,5 +218,55 @@ func TestDecodeNativeParamsRejectsGarbage(t *testing.T) {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(`{"executor":"native"}`), &raw); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// panicAdapter deterministically panics during command building, driving
+// the worker's panic-recovery path (execution must land failed, never
+// orphaned as "running").
+type panicAdapter struct{}
+
+func (panicAdapter) Key() string               { return "panic" }
+func (panicAdapter) TaskTypes() []string       { return []string{"boom"} }
+func (panicAdapter) Validate(store.Game) error { return nil }
+func (panicAdapter) BuildCommand(store.Game, store.Task) (runner.Spec, error) {
+	panic("boom: deterministic test panic")
+}
+
+func TestWorkerPanicLandsExecutionAsFailed(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := game.NewRegistry(panicAdapter{}, stubAdapter{})
+	cfg := config.Config{MaxConcurrent: 1, DataDir: t.TempDir()}
+	svc := NewService(st, reg, cfg, events.New(), nil)
+	t.Cleanup(func() {
+		ctx, cancel := contextWithTimeout(5 * time.Second)
+		defer cancel()
+		svc.Shutdown(ctx)
+		st.Close()
+	})
+
+	if _, err := st.CreateGame(store.Game{ID: "pgame", Name: "p", Adapter: "panic",
+		ToolPath: os.Args[0], Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	tk, err := st.CreateTask(store.Task{GameID: "pgame", Name: "boom", Type: "boom",
+		TimeoutSec: 5, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// preflight itself also panics the adapter path — the API-layer
+	// preflight does NOT recover; but the worker path must.
+	e, _, err := svc.Enqueue(tk.ID, store.TriggerManual, nil, false)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitStatus(t, st, e.ID, store.StatusFailed, 5*time.Second)
+	got, _ := st.GetExecution(e.ID)
+	if !strings.Contains(got.ErrorMsg, "internal panic") {
+		t.Fatalf("error msg = %q, want internal panic marker", got.ErrorMsg)
 	}
 }
