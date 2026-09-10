@@ -1564,3 +1564,33 @@ func TestStreamHubBroadcastsToAllClients(t *testing.T) {
 		t.Fatal("client B did not receive the updated snapshot")
 	}
 }
+
+// NC6 (D4): type "native" bypasses the adapter TaskTypes check — the
+// game's adapter (here "genshin") does not own a "native" task type, yet
+// creating one must succeed because dispatch keys off params executor.
+func TestCreateTaskAcceptsNativeTypeForAdapterGame(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "g", Adapter: "genshin",
+		ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	c := srv.Client()
+	resp, err := c.Post(srv.URL+"/api/tasks", "application/json",
+		strings.NewReader(`{"game_id":"genshin","name":"native-1","type":"native",`+
+			`"params":"{\"executor\":\"native\",\"skill\":\"x.json\"}"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	var task store.Task
+	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+		t.Fatal(err)
+	}
+	if task.Type != "native" {
+		t.Fatalf("type = %q", task.Type)
+	}
+}
