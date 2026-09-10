@@ -175,6 +175,8 @@
 | M23 | **worker panic 兜底（敌意复审真发现）**：调度 worker goroutine 此前无 recover——执行路径深处任何 panic（native sink/store/映射）都会让 Execution 行永久卡 running；新增恢复路径=行落 failed + `internal panic` 标记（双保险防恢复自身二次 panic，store 失败仅记日志不炸服务器）；panicAdapter 确定性注入测试锁定 | PASS | e5345d6 | panic 注入测试：行落 failed + 标记断言；task/native 全绿 |
 | M24 | 1800s（30 分钟）协议全表面长 soak:25616 周期、governor max_session(30min) 到期→RESULT stopped（安全上限真实生效,端到端验证）;WS/句柄全程平坦（t60/t105/t435 采样）;record 封顶后 CPU 44%→10%。**重大环境发现:隐藏控制台启动 → GDI 捕获黑帧**（录制帧像素级验证:矩形中心 (0,0,0);可见控制台对照=正常 (200,40,16) 且探针即触发）——与 WGC 静默同属 RDP/锁屏环境约束族,已写入 quickstart;探针/检测类验收必须在可见控制台执行 | PASS | (随 M23 批次,终值本轮补记) | 像素级对照证据;governor 30min 上限端到端验证 |
 
+| M25 | 黑帧可观测化：`Frame::is_black_sampled(步长采样)` + 会话循环连续 10 周期全黑→响亮 WARNING（一次性）+ SUMMARY `black_cycles` 计数——把「RDP/隐藏控制台黑帧」从静默失败变成显式告警;隐藏启动 4s 实测告警打印、可见对照无误报 | PASS | (下方 commit) | 单测 2（全黑/含点亮像素/采样间隙语义）;实机双对照 |
+
 
 ### 夜班收尾（2026-09-10 04:20 close）
 
