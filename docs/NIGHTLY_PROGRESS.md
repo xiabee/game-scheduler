@@ -180,6 +180,15 @@
 | M28 | nightly-verify 增设 dashboard JS 语法守卫（78KB 内嵌 JS 为夜班高频编辑面,语法损坏=整 UI 静默失效;node --check 逐 script 块解析）| PASS | e7e29b1 | 守卫实测通过（1 script block OK）|
 
 
+### 夜班收尾（2026-09-11 08:40 close）——骨架（数字以 08:30 终验为准）
+
+- **计划 vs 完成**：夜班主线全部落地并验收——M1 安全扫描接入 CI、M2 NC4 输入层、M3 NC6 协议 schema 冻结、M4/M5 NC9 学习管线最小闭环（含用户插播需求入 ROADMAP）、M6 推理超时线程化、M7/M8 NC6 Go 侧协议镜像+调度分发（D4 定稿）、M9 controller --protocol 线模式、M12 会话 TSV 探针列、M13-M15 30 分钟稳定性/一致性/取消路径验证、M16-M20 可观测性与打包集成、M21-M25 审计修复与黑帧环境发现、M26 RGB 解码修复、M27-M28 测试边界与看板守卫。
+- **Remote acceptance**：`after_local_pass` 策略执行；win-devops 节点两次 FAIL（exit=1,~52s,确定性）——本地全绿、节点侧日志暂不可达,初步判定为节点环境（govulncheck DB 不可达/gosec 版本漂移类）,晨间运维清单含「节点日志调取」条目。LOCAL CI 为验收门槛（含 -Race 定向验证通过）。
+- **安全**：govulncheck 0 可调用漏洞；gosec HIGH×HIGH 门禁 0 发现（G115 双处书面注销,13 项 MEDIUM 审查入档）；secret 扫描零命中（唯一合成 token 显式 allowlist）；零真实游戏输入（--input-selftest 仅实现,留操作者执行）。
+- **已知问题/Deferred**：①首个真实 nano 模型（白天）；②WGC 非实体控制台复验；③黑帧环境发现（隐藏控制台 GDI 全黑,已可观测化告警）；④REMOTE win-devops 失败根因（需节点日志）；⑤NC7 skill 绑定与 auto 模式（待真实技能存在）。
+- **下一夜班建议**：①晨间优先——调取 win-devops 作业日志定位远端失败根因；②白天训练首个真实 nano 模型后走 NC1 收官对拍；③NC9 用真实游戏录屏素材跑学习→转换→回放闭环；④NC7 设计评审（recommendation skill 绑定语义）。
+
+
 ### 夜班收尾（2026-09-10 04:20 close）
 
 - **计划 vs 完成**：主线 NC1 运行时侧全部落地（ROADMAP §3 NC1 状态 🚧，剩余=首个真实模型）；NC2 L0/L1 地基、NC3 状态机引擎地基提前落地；另交付 tools/vision 训练脚手架、打包集成、nightly-verify 一键电池。共 33 个 milestone 记录，67 个 commit（7e1576e..1dfa956）。
