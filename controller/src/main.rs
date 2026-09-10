@@ -471,8 +471,8 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             "dry-run: WARNING model {path:?} unusable ({reason}) - falling back to the mock detector"
         ),
         controller::inference::DetectorSource::Onnx { path, name } => eprintln!(
-            "dry-run: detector = ONNX via WinML (model {name}, weights {path}, device=cpu (soak-covered); gpu opt-in via --device)"
-        ),
+            "dry-run: detector = ONNX via WinML (model {name}, weights {path}, device={})"
+        , opts.device),
     }
     let (model_w, model_h) = choice.imgsz;
 
