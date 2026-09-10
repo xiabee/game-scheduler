@@ -78,3 +78,97 @@ fn protocol_session_stream_conforms() {
         other => panic!("last line must be RESULT, got {other:?}"),
     }
 }
+
+/// D1 gate regression: a skill that reaches its terminal state must emit
+/// EXACTLY ONE EVENT for that terminal transition, even though the engine
+/// keeps returning Done on every later cycle (the 300s soak caught this
+/// flooding before the gate existed). Drives the real probe window scene:
+/// a probe watching the normalized (0.6,0.6)-(0.8,0.8) red anchor fires on
+/// the first cycle, so the skill walks s0 -> done immediately.
+#[test]
+fn terminal_skill_event_emits_once() {
+    use std::io::Read;
+    if !controller::window::interactive_desktop_available() {
+        eprintln!("skipped: no interactive desktop (service context)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("nf_proto_gate_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let probes = dir.join("probes.json");
+    let skill = dir.join("skill.json");
+    std::fs::write(
+        &probes,
+        r#"[{"name":"rect_probe","x":384,"y":288,"w":128,"h":96,"expected":[16,40,200],"tolerance":30,"min_fraction":0.4,"step":4}]"#,
+    )
+    .expect("write probes");
+    std::fs::write(
+        &skill,
+        r#"{"name":"gate_test","start":"s0","states":[
+            {"name":"s0","expect":[{"probe":"rect_probe"}],"actions":["click"],"next":"done","timeout_ms":8000,"max_retries":1,"terminal":false},
+            {"name":"done","expect":[],"actions":[],"next":"done","timeout_ms":1000,"max_retries":1,"terminal":true}]}"#,
+    )
+    .expect("write skill");
+
+    let exe = env!("CARGO_BIN_EXE_controller");
+    let mut child = Command::new(exe)
+        .args([
+            "--dry-run",
+            "--protocol",
+            "--window",
+            "@probe",
+            "--backend",
+            "gdi",
+            "--probes",
+        ])
+        .arg(probes.to_string_lossy().as_ref())
+        .arg("--skill")
+        .arg(skill.to_string_lossy().as_ref())
+        .arg("--duration")
+        .arg("6")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn controller");
+    let mut stdout = String::new();
+    child
+        .stdout
+        .take()
+        .expect("stdout")
+        .read_to_string(&mut stdout)
+        .expect("read");
+    let status = child.wait().expect("wait");
+    assert!(status.success(), "controller exited {status:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let mut done_events = 0;
+    let mut transitions = 0;
+    let mut last_was_result_done = false;
+    for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
+        let msg = controller::protocol::Envelope::parse(line)
+            .unwrap_or_else(|e| panic!("protocol violation: {e} — {line}"));
+        match msg.payload {
+            controller::protocol::Payload::Event(e) => {
+                if e.state == "done" {
+                    done_events += 1;
+                }
+                transitions += 1;
+            }
+            controller::protocol::Payload::Result(r) => {
+                last_was_result_done = r.outcome == controller::protocol::Outcome::Done;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        last_was_result_done,
+        "the probe fires on the anchored rect, so the skill must complete"
+    );
+    assert_eq!(
+        done_events, 1,
+        "terminal 'done' event must be emitted exactly once (D1)"
+    );
+    assert!(
+        transitions <= 2,
+        "s0->done transition + terminal event = at most 2 events, got {transitions}"
+    );
+}

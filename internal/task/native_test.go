@@ -99,6 +99,11 @@ func TestNativeTaskHappyPath(t *testing.T) {
 	if !strings.Contains(got.Command, "exec-") || !strings.Contains(got.Command, "--session-log") {
 		t.Fatalf("command must carry the session log path: %q", got.Command)
 	}
+	// The EVENT trail must be surfaced in the execution's stdout field
+	// (fake emits two semantic events before RESULT).
+	if !strings.Contains(got.Stdout, "state=step_01") {
+		t.Fatalf("stdout trail missing events: %q", got.Stdout)
+	}
 }
 
 func TestNativeTaskFailsFastWithoutControllerConfig(t *testing.T) {
