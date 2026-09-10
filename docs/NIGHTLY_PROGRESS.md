@@ -17,6 +17,18 @@
 
 ## Night Runs
 
+### Night 2026-09-10 → 2026-09-11（夜班 agent 记录）
+
+- START_COMMIT: 6ad2efb（docs(progress): night close 2026-09-10 04:20）
+- Handoff：XNightOps `2026-09-10/game-scheduler` 验证通过（night/project/workspace/dispatch_at=23:38/git_head=6ad2efb 全一致；prompt_hash c6edabc6c244e30b）
+- 主线：昨夜 deferred 项 + ROADMAP §9 建议起点（NC4 输入层 / NC6 协议评审 / 安全扫描接入）；真实模型训练仍属白天工作（夜间禁下载/GPU）
+- 用户插播：NC9 视频学习路线需求已入 ROADMAP（§3/§9/§10，commit 7a9bb14）
+
+| M | 内容 | Verdict | Commit | 测试 |
+|---|------|---------|--------|------|
+| M1 | 安全阶段接入本地 CI（overnight-prompt 强制项）：安装并接线 govulncheck v1.8.0 + gosec（HIGH×HIGH 门禁）+ git 跟踪文件 secret 扫描（工具缺失诚实 SKIP）；x/sys 0.42→0.44（GO-2026-5024，无可调用路径，顺手修复）；runner/kill_windows 两处 G115 以 Windows PID=DWORD 语义书面注销（#nosec）；MEDIUM 13 项审查记录（G202=clamp 后整数 LIMIT 拼接/G204=runner 本职/G304=用户指定路径/G301=单用户本地/G401·G501=B 站 WBI 协议要求 md5——均属设计内，记入 backlog 观察） | PASS | b78f8b7 | LOCAL CI PASS（安全阶段实跑：govulncheck 0 可调用漏洞、gosec HIGH 门 0、secret 扫描 0 命中）；后续 726fe6d 修复扫描器查找路径（GOPATH/bin 而非 GOPATH 根） |
+| M2 | NC4 输入层：`input.rs` 从 6 行 stub 变为完整实现——`InputController` trait（统一 `PlannedInput`：MouseMove/Click/Drag/Scroll/KeyDown/Up/Press）；`SendInputController`（绝对坐标虚拟屏 0..65535 归一化——纯函数可测、按键 scancode 路由+VK 兜底、部分插入即失败）；`NoInput` 默认后端（结构性零输入）；`GovernedInput` 硬前置（HWND IsWindow + foreground + governor 时钟/急停，指针动作另过置信度/频率/同点；`execute_authorized` 防管线重复计数）；探针窗口 CLICK/KEY 计数器 + `pump_pending_messages` + `bring_to_foreground`；CLI `--allow-input`（显式 opt-in、无交互桌面 exit 2、自动强制 foreground 要求）、`--input-selftest`（3 秒倒计时→自有探针窗口真实点击+按键闭环，操作者手动运行）；README 双语 + ROADMAP NC4 状态 🚧 同步。**夜班纪律：本机有交互桌面且用户在场，真实输入 selftest 不无人值守执行** | PASS | b28d5f2 | +9 测试（输入 8 + 窗口计数器 1，全部零真实输入：recording mock 验证 governor 全 verdict 路径、PostMessage 注入验证 wndproc 计数）；controller 143 全绿、clippy 0；实机默认 dry-run 复验 `input_sent=0` + "no input was sent" 契约不变；LOCAL CI PASS |
+
 ### Night 2026-09-09 → 2026-09-10（夜班 agent 记录）
 
 - START_COMMIT: 7e1576e（docs: align project goals with native controller roadmap）
