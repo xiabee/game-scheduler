@@ -158,7 +158,7 @@ AND a per-action SafetyGovernor pass.
 
 ```powershell
 cd controller
-cargo test                     # 130 tests (incl. live WinML ONNX runtime tests)
+cargo test                     # 150+ tests (incl. live WinML ONNX runtime tests)
 cargo run -- --self-probe      # window module smoke
 cargo run -- --capture-gdi     # GDI capture + detection smoke
 cargo run -- --list-windows    # enumerate visible windows

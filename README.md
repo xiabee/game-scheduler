@@ -162,7 +162,7 @@ internal/vision     截图辅助接口骨架(Detector / Matcher / OCR / FrameSou
 
 ```powershell
 cd controller
-cargo test                     # 130 测试(含实机 WinML ONNX 运行时测试)
+cargo test                     # 150+ 测试(含实机 WinML ONNX 运行时测试)
 cargo run -- --self-probe      # 窗口模块冒烟
 cargo run -- --capture-gdi     # GDI 捕获 + 检测冒烟
 cargo run -- --manifest-check models\example.manifest.json    # 模型 manifest 校验(exit 0/2)
