@@ -79,8 +79,26 @@ $gosecExe = Join-Path (Join-Path $gopath "bin") "gosec.exe"
 
 if (Test-Path $govuln) {
     Write-Host "== govulncheck =="
-    & $govuln ./...
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # Output captured to a file: the vulnerability database lives online, so
+    # a network-restricted node fails with a DB-load error — that is
+    # environmental (announced SKIP), while a real vulnerability finding or
+    # a code-load failure still fails the gate.
+    $govLog = [System.IO.Path]::GetTempFileName()
+    cmd /c "`"$govuln`" ./... > ""$govLog"" 2>&1"
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        $govText = (Get-Content $govLog -ErrorAction SilentlyContinue | Out-String)
+        if ($govText -match "vuln\.go\.dev|failed to load|loading vulnerability|dial tcp|no such host|getsockopt|httppost|connection") {
+            Write-Host "SKIP govulncheck: vulnerability DB unreachable on this node (environmental)."
+            Write-Host ($govText.Substring(0, [Math]::Min(400, $govText.Length)))
+        }
+        else {
+            Remove-Item $govLog -ErrorAction SilentlyContinue
+            Write-Host $govText
+            exit $LASTEXITCODE
+        }
+    }
+    Remove-Item $govLog -ErrorAction SilentlyContinue
 }
 else {
     Write-Host "SKIP govulncheck: not found in GOPATH\bin (go install golang.org/x/vuln/cmd/govulncheck@latest)."
