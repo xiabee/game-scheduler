@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -150,3 +151,21 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 }
 
 func (c *cappedBuffer) String() string { return c.buf.String() }
+
+// KillProcessTree terminates the process and all of its descendants. It is
+// the exported seam of the runner's cancel path for consumers that manage
+// their own child processes (e.g. the native controller session) so the
+// taskkill /T + PPID-sweep + job-object guarantees stay in one place.
+func KillProcessTree(p *os.Process) error {
+	if p == nil {
+		return nil
+	}
+	return killProcessTree(p)
+}
+
+// AssignJob puts a freshly started child into a kill-on-close job so a
+// scheduler hard-exit cannot orphan it (no-op where unsupported). Returns
+// the release func the caller must invoke once the child is done.
+func AssignJob(p *os.Process) (release func(), err error) {
+	return assignJob(p)
+}
