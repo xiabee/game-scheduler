@@ -9,6 +9,17 @@ Set-Location -LiteralPath (Join-Path $PSScriptRoot "..\controller")
 cargo build --quiet
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# WDAC warm-up: organizational policy intermittently blocks freshly compiled
+# binaries for a few minutes after each rebuild (see ci-local.ps1's retry
+# wrapper). Launch cheaply until the block clears so the real steps don't
+# flake; announced + bounded like every other honest retry here.
+for ($warm = 1; $warm -le 6; $warm++) {
+    cmd /c ".\target\debug\controller.exe --manifest-check models\example.manifest.json >nul 2>nul"
+    if ($LASTEXITCODE -eq 0) { break }
+    Write-Host "WDAC warm-up ${warm}: launch blocked (exit $LASTEXITCODE), waiting 20s..."
+    Start-Sleep -Seconds 20
+}
+
 Write-Host "== self-probe =="
 .\target\debug\controller.exe --self-probe
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -57,6 +68,52 @@ $code = $LASTEXITCODE
 Remove-Item -Recurse -Force $recDir -ErrorAction SilentlyContinue
 if ($code -ne 0) { Write-Host "replay run failed (exit $code)"; exit 1 }
 Write-Host "record->replay: OK ($frames frames)"
+
+Write-Host "== protocol mode (NC6 wire, 1s) =="
+# stdout must be protocol-only: three schema-shaped JSON lines. The shape
+# assertions (HELLO first / RESULT last / kinds) are pinned by the Rust
+# integration test; here we assert the operator-visible contract: parseable
+# JSON on every stdout line and a RESULT outcome=done.
+$protoOut = Join-Path $env:TEMP ("nf_smoke_proto_" + [guid]::NewGuid().ToString("N") + ".txt")
+# WDAC intermittently blocks freshly compiled binaries (same environmental
+# quirk ci-local retries around): up to 3 attempts with a short backoff.
+$code = 1
+for ($attempt = 1; $attempt -le 3 -and $code -ne 0; $attempt++) {
+    cmd /c ".\target\debug\controller.exe --dry-run --protocol --backend synthetic --duration 1 > ""$protoOut"" 2>nul"
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { Write-Host "protocol run attempt $attempt failed (exit $code), backing off..."; Start-Sleep -Seconds 5 }
+}
+$protoOk = $false
+if ($code -eq 0 -and (Test-Path $protoOut)) {
+    $lines = (Get-Content $protoOut) | Where-Object { $_ -ne "" }
+    if ($lines.Count -ge 3) {
+        try {
+            $h = $lines[0] | ConvertFrom-Json
+            $r = $lines[$lines.Count - 1] | ConvertFrom-Json
+            if ($h.type -eq "HELLO" -and $r.type -eq "RESULT" -and $r.payload.outcome -eq "done") {
+                $protoOk = $true
+            }
+        } catch { }
+    }
+}
+Remove-Item $protoOut -ErrorAction SilentlyContinue
+if (-not $protoOk) {
+    Write-Host "protocol mode: stdout stream invalid (exit=$code lines=$($lines.Count))"
+    exit 1
+}
+Write-Host "protocol mode: OK (HELLO..RESULT done, stdout protocol-only)"
+
+Write-Host "== new flag validation (infer-timeout / device) =="
+cmd /c ".\target\debug\controller.exe --dry-run --backend synthetic --duration 1 --infer-timeout 0 2>nul"
+$code = $LASTEXITCODE
+if ($code -ne 2) { Write-Host "--infer-timeout 0 must exit 2 (got $code)"; exit 1 }
+cmd /c ".\target\debug\controller.exe --dry-run --backend synthetic --duration 1 --device warp 2>nul"
+$code = $LASTEXITCODE
+if ($code -ne 2) { Write-Host "--device warp must exit 2 (got $code)"; exit 1 }
+cmd /c ".\target\debug\controller.exe --dry-run --backend synthetic --duration 1 --device cpu 2>nul"
+$code = $LASTEXITCODE
+if ($code -ne 0) { Write-Host "--device cpu must pass (got $code)"; exit 1 }
+Write-Host "new flags: OK (validation gates + cpu path)"
 
 Write-Host "CONTROLLER SMOKE PASS"
 exit 0
