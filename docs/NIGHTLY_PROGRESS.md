@@ -155,6 +155,9 @@
 
 覆盖：runner、scheduler、monitor、task-service、api（安全面）、store（Open/migrate/WAL/ensureColumn/去重唯一索引）、planner_store、planner_import、events、cmd/server 生命周期。**结论：零 P0/P1 发现**；graceful shutdown 的 LIFO defers、推荐终态守卫、截图端点防穿越等关键声明全部与代码一致。整夜 Go 零改动。
 | M33 | 一键夜审电池 `scripts/nightly-verify.ps1`（ci-local + controller-smoke + 隔离临时服务器全链路 windows_smoke + 30s ONNX soak，分段判定）；**P1 修复**：PS `Set-Content -Encoding UTF8` 的 BOM 使 config.Load 的 json.Unmarshal 失败、服务器启动即死——Load 剥 BOM + 守护测试（该问题由新电池首次串联时暴露） | PASS | 84c1003 | NIGHTLY VERIFY PASS 实机全段 |
+| M10 | NC6 协议 EVENT + manifest 回显：`--protocol` 模式下 skill 状态转移/回退/终态时发射 EVENT（D1 语义=仅语义变化，含 cycle/state/触发探针/client 检测/planned actions）；READY 携带 manifest 摘要（DetectorChoice 新增 ManifestSummary，Onnx 与 ManifestPending 两路均回显）；Go 侧 executeNative 把 EVENT 轨迹（有界 32KB）写进 Execution stdout 字段——调度器侧可观测原生会话时间线；新增协议一致性集成测试（CARGO_BIN_EXE 拉起真实二进制，逐行按 schema 解析断言 HELLO 首行/READY 存在/RESULT 末行 done） | PASS | 239de61 | controller 127 绿 + 协议集成测试 1；Go task/native 全绿；NIGHTLY VERIFY PASS |
+| M11 | README 双语同步：native executor 任务契约（params 示例/启用前提/输入双闸/RESULT 映射/NC9 学习管线指引） | PASS | 207c9b3 | 文档一致性核对 |
+
 
 ### 夜班收尾（2026-09-10 04:20 close）
 
