@@ -398,6 +398,13 @@ func (s *Server) validTaskType(w http.ResponseWriter, t store.Task) bool {
 		writeStoreErr(w, err)
 		return false
 	}
+	// NC6 (draft decision D4): type "native" marks a native-controller
+	// task. No adapter owns it — the dispatch keys off params
+	// "executor":"native" and validates the real prerequisites itself, so
+	// the adapter TaskTypes check does not apply.
+	if t.Type == "native" {
+		return true
+	}
 	ad, err := s.reg.Get(g.Adapter)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
