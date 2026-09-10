@@ -227,6 +227,25 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Scope(届时再细化)**:短距离移动、相机控制、minimap perception、waypoint navigation、战斗状态识别、path recovery、卡死恢复;开放世界导航是后期目标。
 - **Out of Scope**:一切违反 §7 安全红线的能力;开放世界导航在 NC8 内部也排最后。
 
+### NC9 — Route & Skill Learning(视频学习路线) ⬜
+
+- **Status**:⬜ Planned。**学习与模拟侧可先行**(纯离线工作,夜班安全);**实际游戏测试显式 deferred**——待真实游戏控制测试环境可用后再进入(NC5 流程)。
+- **Motivation**:当前没有可安全进行真实游戏控制测试的环境。先从视频内容离线学习"路线与操作"(B 站采集路线、关卡教程、跑图全流程等),把时间投入转化为可执行的 Skill/Route 资产,环境就绪后直接进入实测。
+- **Objective**:自动/半自动地把攻略视频转成结构化 Route / SkillDefinition 草案,并能在捕获窗口或录制帧上以 **dry-run 形式模拟输出**(只记录计划动作,不发送任何真实输入),全程资源轻量。
+- **Scope**:
+  - 视频获取:用户投喂本地视频文件,或经既有 B 站攻略搜索/导入通路(H2,官方 Web 接口)。**不自动下载大体积视频,不绕过任何访问控制**。
+  - 离线学习管线(`tools/` 侧轻量工具):低频抽帧(默认 ≤1fps,CPU 优先)→ 关键帧/场景切换检测 → L2/L3 感知按需(YOLO nano / OCR,复用 NC1/NC2 栈)→ 结合标题/简介/字幕文本 → 产出结构化草案:关键锚点(normalized 坐标)、动作序列、状态转移(对齐 NC3 SkillDefinition schema)。
+  - 模拟输出:学习产物经 NC3 SkillRunner + dry-run 管线回放(录制帧或捕获窗口),逐状态记录"计划动作";不依赖 NC4,不发送任何真实输入。
+  - 资源控制(硬约束):抽帧低频;批处理可中断、可恢复;无 GPU 依赖;不下载大型模型;进程空闲时 0 CPU;学习产物(草案 JSON)进 Git,视频与大帧缓存不进 Git(§4 原则)。
+- **Acceptance Criteria**:
+  - 从一条真实攻略视频(或用户提供的录屏)产出至少一个能通过严格校验、被 SkillRunner 加载的 SkillDefinition 草案;
+  - 该草案在 dry-run 回放中完整走查并输出计划动作轨迹(与 NC3 轨迹日志/TSV 联动);
+  - 学习管线处理 10 分钟视频的资源占用符合 §5 预算(无 GPU、内存 <300MB、可中断恢复);
+  - 实际游戏测试条目保持 deferred 标注,仅在真实环境可用后单独排期。
+- **Tests**:草案 schema 校验;关键帧检测单测(合成帧序列);字幕/文本解析单测;端到端用小体积录制视频夹具(入库,保证 CI 确定性)。
+- **Dependencies**:H2(B 站搜索/导入)✅;NC1 运行时 🚧(可用);NC2 感知 🚧(L0/L1 可用,L2/L3 按需);NC3 SkillDefinition ✅ 地基。
+- **Out of Scope**:真实输入发送(归 NC4,红线内另行评审);绕过视频平台访问控制(红线,永不);大型模型下载/GPU 训练;任何账号风控相关的自动化。
+
 ---
 
 ## 4. 数据集与模型生命周期
@@ -328,7 +347,10 @@ BetterGI / March7thAssistant / Fhoe-Rail / ok-ww / M9A 的现有适配器:
 
 前置:①用 `tools/vision/` 完成首个真实 nano 模型的采集/标注/训练/导出(白天);②NC4 输入控制器的安全设计评审(SendInput 封装 + governor 硬前置, Dummy window 验证);③NC6 协议草案(docs/controller-protocol-draft.md)评审定稿。
 
+夜班安全备选:**NC9 视频学习路线**(纯离线学习 + dry-run 模拟输出,不依赖真实游戏环境;见 §3 NC9)。
+
 ## 10. 变更记录
 
+- **2026-09-10(夜)**:新增 **NC9 Route & Skill Learning(视频学习路线)**(§3)——无真实游戏测试环境期间,从 B 站攻略/教程/跑图视频离线学习操作路线,转结构化 Skill/Route 草案并 dry-run 模拟输出;实际游戏测试 deferred 待环境。
 - **2026-09-09**:NC0 标记完成(§3/§9);下一夜班起点更新为 NC1;README(中/英)新增「当前开发方向」章节并明确 Controller 安全边界;NIGHTOPS.yaml 夜间优先级对齐本路线图。
 - **2026-09-08**:全面重写。历史 Go 调度核心/路线/Planner/界面能力标记 ✅(§1);主线改为 **Native Vision Controller**(§2–§3,NC0–NC8);新增数据集生命周期(§4)、性能预算(§5)、旧外部控制器降级为 fallback(§6)、安全红线(§7);明确今晚 NC0 起点(§9)。
