@@ -183,15 +183,15 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Dependencies**:NC0–NC2。(NC1 运行时 🚧、NC2 地基 🚧 均已可支撑)
 - **Out of Scope**:真实输入(NC4);具体业务 Skill 内容(NC5)。
 
-### NC4 — Input Controller ⬜
+### NC4 — Input Controller 🚧(输入层已接线,实机 selftest 待操作者执行)
 
-- **Status**:⬜ Planned
+- **Status**:🚧 In Progress(2026-09-10/11 夜班:`input.rs` SendInput 级封装落地;默认零输入契约不变)。夜班已实现并单测,gated 实机验证待人工。
 - **Objective**:普通 Windows 输入 API 的干净封装,坐标全部来自检测/锚点/归一化变换。
-- **Scope**:`InputController` trait:`KeyDown / KeyUp / KeyPress / MouseMove / Click / Drag / Scroll`;动作执行前检查:目标 HWND、foreground、SafetyGovernor。
-- **Acceptance Criteria**:注入式输入不可用时,该能力**标记 unsupported**;**明确不做**(见 §7 红线):driver injection、DLL injection、memory manipulation、anti-detection、input bypass。
-- **Tests**:焦点/HWND 校验逻辑单测;真实输入做人工 smoke。
-- **Dependencies**:NC0、NC3;SafetyGovernor 已稳定。
-- **Out of Scope**:任何绕过类技术(红线,永不)。
+- **Scope**:`InputController` trait(`MouseMove / Click / Drag / Scroll / KeyDown / KeyUp / KeyPress`,统一 `PlannedInput`);`SendInputController` 真实后端(绝对坐标走虚拟屏 0..65535 归一化,按键走 scancode);`NoInput` 默认后端(结构性零输入);`GovernedInput` 安全包装——每个动作先过 HWND 身份 + foreground + governor 时钟/急停前置,指针动作另过置信度/频率/同点规则,管线已授权动作走 `execute_authorized` 防止重复计数。CLI:`--allow-input`(显式 opt-in,无交互桌面直接拒绝)、`--input-selftest`(向自有探针窗口发一次真实点击+按键,操作者手动运行)。
+- **Acceptance Criteria**:注入式输入不可用时,该能力**标记 unsupported**(已实现:无交互桌面→Unsupported/拒绝);**明确不做**(见 §7 红线):driver injection、DLL injection、memory manipulation、anti-detection、input bypass(未触碰)。
+- **Tests**:焦点/HWND 校验与 governor 否决路径单测(recording mock,零真实输入);探针窗口输入计数器测试(PostMessage 注入,不碰真实键鼠);真实输入按 ROADMAP 做人工 smoke(`--input-selftest`)。
+- **Dependencies**:NC0、NC3;SafetyGovernor 已稳定。✅
+- **Out of Scope**:任何绕过类技术(红线,永不);无人值守真实输入(夜班纪律);拖拽/滚动的管线级执行(当前管线只执行 click,其余 trait 能力就绪待 NC5 消费)。
 
 ### NC5 — 第一个真实 Skill ⬜
 

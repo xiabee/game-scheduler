@@ -106,8 +106,10 @@ internal/vision     screenshot-assist interface skeleton (Detector / Matcher / O
 
 ### 🕹️ controller/ (Native Vision Controller — NC0 landed, NC1 inference runtime wired)
 
-`controller/` is a standalone Rust crate. It is **observation-only: no
-input is ever sent** — the input module is deliberately empty until NC4.
+`controller/` is a standalone Rust crate. By default it is
+**observation-only: zero input**. Since NC4 it also ships a SendInput-level
+input layer, but nothing is ever sent without an explicit operator opt-in
+AND a per-action SafetyGovernor pass.
 
 - **GameWindow**: locate the game window by title/process name; exact
   client rect; per-monitor-v2 DPI; ClientToScreen; foreground check;
@@ -137,8 +139,15 @@ input is ever sent** — the input module is deliberately empty until NC4.
   reported every dry-run cycle; `--skill` drives a data-driven state machine
   (expectations = probe fired or label detection) with timeout/retry/
   fallback/terminal semantics; `--record`/`--replay` reproduce any session
-  offline. Planned actions are LOGGED only — input sending does not exist
-  before NC4. See `controller/examples/`.
+  offline. Planned actions are LOGGED only by default. The NC4 input layer
+  (`--allow-input` / `--input-selftest`) wraps plain SendInput synthesis
+  (click/drag/scroll/keys — coordinates always come from the desktop
+  transform chain) behind a hard gate: every action re-verifies HWND
+  identity + foreground + clock rules, pointer actions additionally pass
+  the confidence/rate/same-point rules, and missing interactive desktops
+  report `unsupported` honestly. `--input-selftest` sends one real click +
+  keypress into an OWNED probe window for end-to-end validation
+  (operator-run only). See `controller/examples/`.
 - **Training scaffold**: `tools/vision/` (prepare_dataset / train /
   export_onnx) — training happens on the Python side; export writes a
   schema-v1 manifest aligned with the controller; `datasets/` tracks

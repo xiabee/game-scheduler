@@ -1,6 +1,7 @@
-//! native-controller CLI (NC0). The only mode that exists today is
-//! `--self-probe` (GameWindow smoke) and the dry-run skeleton. The dry-run
-//! mode NEVER sends input: the input module does not exist yet by design.
+//! native-controller CLI (NC0–NC4). Modes: --self-probe, --list-windows,
+//! capture probes, --manifest-check, the dry-run loop, and --input-selftest
+//! (NC4, real SendInput into an owned probe window — operator-run only).
+//! The dry-run NEVER sends input unless `--allow-input` is passed.
 
 fn main() {
     controller::window::ensure_dpi_awareness();
@@ -32,6 +33,9 @@ fn main() {
         let needle = args.get(pos + 1).cloned().unwrap_or_default();
         std::process::exit(run_foreign_probe(&needle));
     }
+    if args.iter().any(|a| a == "--input-selftest") {
+        std::process::exit(run_input_selftest());
+    }
     if args.iter().any(|a| a == "--dry-run") {
         let opts = match DryRunOptions::parse(&args) {
             Ok(o) => o,
@@ -43,7 +47,7 @@ fn main() {
         std::process::exit(run_dry_run(&opts));
     }
     println!(
-        "native-controller (NC1): use --list-windows | --self-probe | --capture-gdi | --manifest-check | --dry-run"
+        "native-controller (NC4): use --list-windows | --self-probe | --capture-gdi | --manifest-check | --dry-run | --input-selftest"
     );
 }
 
@@ -114,8 +118,11 @@ fn run_list_windows() -> i32 {
     }
 }
 
-/// Options for the dry-run pipeline loop. The dry-run NEVER sends input:
-/// it observes, detects, plans and logs — that is its whole purpose.
+/// Options for the dry-run pipeline loop. By default the dry-run NEVER
+/// sends input: it observes, detects, plans and logs — that is its whole
+/// purpose. `--allow-input` is the single NC4 opt-in that switches
+/// authorized detections from "log the plan" to "execute the plan" through
+/// GovernedInput over SendInput.
 #[derive(Debug, Clone)]
 struct DryRunOptions {
     /// Window title substring; `@probe` creates an owned probe window so
@@ -158,6 +165,10 @@ struct DryRunOptions {
     /// each cycle from live evidence and logs transitions/plans. It never
     /// sends input.
     skill: Option<String>,
+    /// NC4 opt-in: execute authorized detections via SendInput. Implies
+    /// foreground requirements; refused outright when no interactive
+    /// desktop exists.
+    allow_input: bool,
 }
 
 impl DryRunOptions {
@@ -261,6 +272,7 @@ impl DryRunOptions {
             replay: opt(args, "--replay").filter(|p| !p.trim().is_empty()),
             probes: opt(args, "--probes").filter(|p| !p.trim().is_empty()),
             skill: opt(args, "--skill").filter(|p| !p.trim().is_empty()),
+            allow_input: args.iter().any(|a| a == "--allow-input"),
         };
         if opts.record.is_some() && opts.replay.is_some() {
             return Err("--record and --replay are mutually exclusive".into());
@@ -346,6 +358,20 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     use controller::window::{ensure_dpi_awareness, GameWindow, OwnedTestWindow};
 
     ensure_dpi_awareness();
+
+    // NC4 opt-in gate: real input needs an interactive desktop AND a loud
+    // banner. A silent downgrade here would be dishonest — refuse instead.
+    if opts.allow_input {
+        if !controller::input::SendInputController::available() {
+            eprintln!(
+                "dry-run: --allow-input requested but no interactive desktop is available - real input is UNSUPPORTED here"
+            );
+            return 2;
+        }
+        eprintln!(
+            "dry-run: *** REAL INPUT ENABLED (--allow-input): authorized detections will be executed via SendInput ***"
+        );
+    }
 
     // --- window: @probe creates our own window; otherwise find by title ---
     let (target_hwnd, _owned_probe, mut calibrated) = if opts.window == "@probe" {
@@ -579,6 +605,8 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     let mut retry_tracker = controller::pipeline::RetryTracker::new(5);
     let mut inference_error_cycles: u32 = 0;
     let mut consecutive_inference_errors: u32 = 0;
+    let mut input_executed: u32 = 0;
+    let mut input_vetoed: u32 = 0;
     // ~2s of dead inference at the default 15fps: a detector that fails
     // this persistently ends the session instead of burning the budget.
     const INFERENCE_DEATH_BUDGET: u32 = 30;
@@ -621,7 +649,10 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 break;
             }
         };
-        let foreground = if opts.require_foreground {
+        let foreground = if opts.require_foreground || opts.allow_input {
+            // NC4: real input ALWAYS requires foreground — the governor's
+            // stop-class rule would veto every action otherwise, so make
+            // the cycle-level observation honest from the start.
             GameWindow::from_hwnd(target_hwnd)
                 .and_then(|g| g.is_foreground())
                 .unwrap_or(false)
@@ -735,6 +766,53 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             }
         }
 
+        // NC4: execute authorized plans when the operator opted in.
+        // run_cycle already consumed the governor's pointer rules for these
+        // detections, so execute_authorized re-verifies ONLY the
+        // preconditions (HWND identity + foreground + clock rules) and
+        // never double-counts the authorization budget. Desktop points are
+        // the transform chain's output — nothing here hardcodes pixels.
+        if opts.allow_input && report.allowed() {
+            let mut input_backend = controller::input::SendInputController;
+            let mut exec = controller::input::GovernedInput::new(
+                &mut input_backend,
+                target_hwnd,
+                &mut governor,
+            );
+            let mut blocked: Option<String> = None;
+            for (d, dp) in report
+                .client_detections
+                .iter()
+                .zip(report.desktop_points.iter())
+            {
+                let action = controller::input::PlannedInput::Click {
+                    x: dp.0.round() as i32,
+                    y: dp.1.round() as i32,
+                };
+                match exec.execute_authorized(now, action) {
+                    Ok(()) => input_executed += 1,
+                    Err(controller::input::InputError::Blocked(reason)) => {
+                        blocked = Some(reason);
+                        break;
+                    }
+                    Err(e) => {
+                        input_vetoed += 1;
+                        if input_vetoed <= 3 {
+                            eprintln!("dry-run: cycle {cycle}: input vetoed: {e}");
+                        }
+                    }
+                }
+                let _ = d; // paired with desktop_points only for ordering
+            }
+            if let Some(reason) = blocked {
+                println!("dry-run: input blocked after cycle {cycle}: {reason} - ending session");
+                outcome = "input-blocked";
+            }
+        }
+        if outcome == "input-blocked" {
+            break;
+        }
+
         // Geometry drift (Pause from check_geometry): recalibrate NOW —
         // re-anchor the calibration to the fresh layout and rebuild the
         // backend so its buffers match the new size. Without this the loop
@@ -838,7 +916,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     }
 
     println!(
-        "dry-run: finished - cycles={cycle} allowed={allowed_count} distinct_verdicts={} inference={} (cache hits={})",
+        "dry-run: finished - cycles={cycle} allowed={allowed_count} distinct_verdicts={} inference={} (cache hits={}) input_sent={input_executed} input_vetoed={input_vetoed}",
         verdict_notes.len(),
         detector.inference_count(),
         detector.hits
@@ -862,6 +940,9 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         if let Some(r) = skill_runner.as_ref() {
             extra.push(("skill_state".to_string(), r.current().to_string()));
         }
+        if opts.allow_input {
+            extra.push(("input_sent".to_string(), input_executed.to_string()));
+        }
         log.write_summary(
             cycle,
             allowed_count,
@@ -882,7 +963,13 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         eprintln!("dry-run: inference never produced a usable cycle");
         return 1;
     }
-    println!("dry-run: OK (no input was sent - observation-only dry run)");
+    if opts.allow_input {
+        println!(
+            "dry-run: OK (allow-input session: {input_executed} action(s) sent, {input_vetoed} vetoed, outcome={outcome})"
+        );
+    } else {
+        println!("dry-run: OK (no input was sent - observation-only dry run)");
+    }
     0
 }
 
@@ -1224,6 +1311,160 @@ fn run_self_probe() -> i32 {
             1
         }
     }
+}
+
+/// NC4 real-input validation, OPERATOR-RUN ONLY: one real click + one real
+/// keypress into an owned probe window on this machine. The governor path
+/// is the production one (authorize_and_execute over SendInput), the
+/// target is our own window, and a 3-second printed countdown gives the
+/// operator a window to abort before anything moves.
+fn run_input_selftest() -> i32 {
+    use controller::input::{
+        GovernedInput, InputError, PlannedInput, SendInputController, VirtualKey,
+    };
+    use controller::safety::{SafetyConfig, SafetyGovernor};
+    use controller::transform::Transform;
+    use controller::window::{
+        probe_click_count, probe_key_count, pump_pending_messages, GameWindow, OwnedTestWindow,
+    };
+    use std::time::{Duration, Instant};
+
+    println!("input-selftest: will move the real cursor and send one real click + one real");
+    println!(
+        "input-selftest: key into an OWNED probe window on this machine. Nothing else is touched."
+    );
+    for remaining in (1..=3).rev() {
+        println!("input-selftest: starting in {remaining}s - Ctrl+C to abort");
+        std::thread::sleep(Duration::from_secs(1));
+    }
+
+    if !SendInputController::available() {
+        eprintln!(
+            "input-selftest: no interactive desktop - real input is UNSUPPORTED here (honest skip)"
+        );
+        return 0;
+    }
+    let title = format!("NFCTRL-INPUTSELFTEST-{}", std::process::id());
+    let probe = match OwnedTestWindow::new(640, 480, &title) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("input-selftest: probe window failed: {e}");
+            return 1;
+        }
+    };
+    pump_pending_messages();
+    if !probe.bring_to_foreground() {
+        eprintln!("input-selftest: could not focus the probe window - aborting");
+        return 1;
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    pump_pending_messages();
+
+    let window = match GameWindow::from_hwnd(probe.hwnd) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("input-selftest: probe window unusable: {e}");
+            return 1;
+        }
+    };
+    let layout = match window.layout() {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("input-selftest: probe layout failed: {e}");
+            return 1;
+        }
+    };
+    if !window.is_foreground().unwrap_or(false) {
+        eprintln!("input-selftest: probe window did not become foreground - aborting (the governor would block every action anyway)");
+        return 1;
+    }
+
+    let t0 = Instant::now();
+    let mut governor = match SafetyGovernor::new(SafetyConfig::default(), t0) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("input-selftest: governor config failed: {e}");
+            return 1;
+        }
+    };
+    let mut backend = SendInputController;
+    let mut exec = GovernedInput::new(&mut backend, probe.hwnd, &mut governor);
+
+    // The click point comes from the standard transform chain: client
+    // center -> desktop coordinates. No hardcoded pixels anywhere.
+    let (cw, ch) = layout.client_size;
+    let client_center = (cw as f32 / 2.0, ch as f32 / 2.0);
+    let transform = match Transform::new(&layout, 320, 240) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("input-selftest: transform failed: {e}");
+            return 1;
+        }
+    };
+    let desktop = match transform.client_to_desktop(client_center.0, client_center.1) {
+        Ok(d) => (d.0.round() as i32, d.1.round() as i32),
+        Err(e) => {
+            eprintln!("input-selftest: client->desktop failed: {e}");
+            return 1;
+        }
+    };
+
+    let clicks_before = probe_click_count();
+    if let Err(e) = exec.authorize_and_execute(
+        Instant::now(),
+        1.0,
+        client_center,
+        PlannedInput::Click {
+            x: desktop.0,
+            y: desktop.1,
+        },
+    ) {
+        eprintln!("input-selftest: click refused: {e}");
+        return 1;
+    }
+    let click_ok = poll_until(
+        || probe_click_count() > clicks_before,
+        Duration::from_secs(2),
+    );
+
+    let keys_before = probe_key_count();
+    let key_result = exec.execute_authorized(Instant::now(), PlannedInput::KeyPress(VirtualKey::A));
+    let key_ok = match key_result {
+        Ok(()) => poll_until(|| probe_key_count() > keys_before, Duration::from_secs(2)),
+        Err(InputError::Unsupported(reason)) => {
+            println!("input-selftest: key synthesis unsupported here ({reason}) - click path only");
+            false
+        }
+        Err(e) => {
+            eprintln!("input-selftest: key refused: {e}");
+            return 1;
+        }
+    };
+
+    println!(
+        "input-selftest: click={click_ok} key={key_ok} (executed={} vetoed={})",
+        exec.executed, exec.vetoed
+    );
+    if click_ok && key_ok {
+        println!("input-selftest: PASS - real SendInput reached the probe window under full governor control");
+        0
+    } else {
+        eprintln!("input-selftest: FAIL - events did not reach the probe window");
+        1
+    }
+}
+
+fn poll_until(mut check: impl FnMut() -> bool, budget: std::time::Duration) -> bool {
+    let start = std::time::Instant::now();
+    while start.elapsed() < budget {
+        controller::window::pump_pending_messages();
+        if check() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    controller::window::pump_pending_messages();
+    check()
 }
 
 #[cfg(test)]

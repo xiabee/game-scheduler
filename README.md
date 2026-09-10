@@ -146,9 +146,9 @@ internal/vision     截图辅助接口骨架(Detector / Matcher / OCR / FrameSou
 
 > 🧭 **路线图**:下一阶段主线是自研 Native Vision Controller(Rust,窗口捕获 + CV + 状态机 + 普通 Windows 输入),现有第三方工具适配器转为 legacy/fallback,详见 [ROADMAP.md](ROADMAP.md)。
 
-### 🕹️ controller/(Native Vision Controller,NC0 已落地,NC1 推理运行时已接入)
+### 🕹️ controller/(Native Vision Controller,NC0–NC1 已落地,NC4 输入层已接线——默认零输入)
 
-`controller/` 是独立 Rust crate(**纯观察,不发送任何输入**——input 模块在 NC4 之前刻意为空):
+`controller/` 是独立 Rust crate(默认**纯观察,零输入**;NC4 起提供 SendInput 级输入层,但仅在显式 opt-in 且 SafetyGovernor 逐动作放行时才会执行):
 
 - **GameWindow**:按标题/进程名找游戏窗口;精确 client rect;per-monitor-v2 DPI;ClientToScreen;foreground 检查;布局变化检测。
 - **Transform**:client / normalized / model / desktop 四坐标系互转,letterbox 等比缩放 + 居中 padding 及精确逆变换(1080p↔1440p 分辨率无关性有对拍测试;禁止任何硬编码绝对像素)。
@@ -156,7 +156,7 @@ internal/vision     截图辅助接口骨架(Detector / Matcher / OCR / FrameSou
 - **捕获后端**:Windows Graphics Capture(本机 RDP 会话下静默,见 NIGHTLY_PROGRESS)→ PrintWindow(GDI,默认可用)→ 合成帧,自动回退并如实告警。
 - **模型 manifest(NC1)**:`models/*.manifest.json` schema-v1(labels/version/imgsz/confidence/game-profile)严格校验;权重不进 Git(`*.onnx` 全局 ignore)。
 - **ONNX 推理(NC1)**:经 **WinML**(Windows 内建 ONNX 运行时)在 CPU 设备上执行——运行时零下载、不用 GPU、无 Python 依赖;输出布局自动识别(rows-major `[1,N,≥6]` 与 YOLOv8 导出的 channels-first `[1,4+nc,N]`),置信度门 + class-aware NMS;模型缺失/坏 manifest 如实告警并降级 Mock,绝不静默。
-- **分层感知与技能（NC2/NC3 地基）**：L0 像素探针（`--probes`，区域颜色+容差+比例门）随每个 dry-run 周期评估并汇报触发状态；`--skill` 驱动数据驱动状态机（期望=探针触发或标签检测），超时/重试/回退/终态全链路可测；`--record`/`--replay` 离线复现任意会话。计划动作只记录——输入发送在 NC4 之前不存在。示例见 `controller/examples/`。
+- **分层感知与技能（NC2/NC3 地基）**：L0 像素探针（`--probes`，区域颜色+容差+比例门）随每个 dry-run 周期评估并汇报触发状态；`--skill` 驱动数据驱动状态机（期望=探针触发或标签检测），超时/重试/回退/终态全链路可测；`--record`/`--replay` 离线复现任意会话。计划动作默认只记录。NC4 输入层（`--allow-input` / `--input-selftest`）：SendInput 级键鼠封装（点击/拖拽/滚动/按键，坐标一律来自 desktop 变换链），每个动作先过 governor 硬前置（HWND 身份 + foreground + 时钟/急停），指针动作另过置信度/频率/同点规则；无交互桌面时如实上报 unsupported。`--input-selftest` 向自有探针窗口发送一次真实点击+按键做闭环验证（需操作者手动运行）。示例见 `controller/examples/`。
 - **训练脚手架**:`tools/vision/`(prepare_dataset / train / export_onnx)——训练在 Python 侧完成,导出时生成与 controller 对齐的 schema-v1 manifest;`datasets/` 只进清单不进图片。
 - **dry-run 闭环**:窗口 → 捕获 → letterbox → 检测(ONNX 或 Mock)→ 逆变换 → governor 判定 → debug PNG(`--debug-dir`)→ 会话 TSV(`--session-log`)。
 

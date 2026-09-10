@@ -1,9 +1,13 @@
-//! Native vision controller for game-scheduler (ROADMAP NC0).
+//! Native vision controller for game-scheduler (ROADMAP NC0–NC4).
 //!
-//! Scope of this phase: window discovery, capture abstraction, coordinate
-//! transforms, mock perception, a safety governor and a `--dry-run` mode
-//! that never sends any input. The input module is intentionally a stub:
-//! no key/mouse synthesis exists in this codebase yet.
+//! Scope so far: window discovery, capture abstraction, coordinate
+//! transforms, perception (L0 probes / L1 template / L2 ONNX), a skill
+//! state machine, a safety governor and a `--dry-run` mode. The input
+//! module (NC4) exists but is inert by default: the dry-run executor is
+//! `NoInput`, and real SendInput synthesis requires BOTH an interactive
+//! desktop AND an explicit operator opt-in (`--allow-input` /
+//! `--input-selftest`), with the SafetyGovernor consulted before every
+//! action.
 //!
 //! Safety red lines (ROADMAP §7): no DLL/process injection, no game memory
 //! read/write, no packet interception, no anti-detection. Plain window

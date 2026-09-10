@@ -21,11 +21,13 @@ use windows::Win32::UI::HiDpi::{
     GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, GetClientRect,
-    GetForegroundWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
-    GetWindowThreadProcessId, IsWindow, IsWindowVisible, RegisterClassExW, SetWindowPos,
-    GWL_EXSTYLE, HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+    EnumWindows, GetClientRect, GetForegroundWindow, GetWindowLongPtrW, GetWindowTextLengthW,
+    GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible, PeekMessageW,
+    RegisterClassExW, SetForegroundWindow, SetWindowPos, TranslateMessage, GWL_EXSTYLE,
+    HWND_BOTTOM, MSG, PM_REMOVE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_CHAR, WM_LBUTTONDOWN, WNDCLASSEXW, WS_EX_TOOLWINDOW,
+    WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 
 /// Client-area geometry in the coordinate systems the pipeline uses.
@@ -388,6 +390,14 @@ impl OwnedTestWindow {
             .as_bool()
         }
     }
+
+    /// Try to make this probe window the foreground window (input selftest
+    /// precondition). Own-process windows may be focused directly; there is
+    /// no guarantee the OS grants it, so callers must verify with
+    /// `GameWindow::is_foreground`.
+    pub fn bring_to_foreground(&self) -> bool {
+        unsafe { SetForegroundWindow(self.hwnd) }.as_bool()
+    }
 }
 
 impl Drop for OwnedTestWindow {
@@ -454,6 +464,10 @@ fn register_probe_class() -> u16 {
 /// for capture-timing questions: "did my forced repaint run at all?").
 static PAINT_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static PRINT_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// NC4 input selftest counters: real (or PostMessage-injected) input events
+/// the probe windows actually received in this process.
+static CLICK_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static KEY_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Resize ANY window's client area to exactly WxH (used by the dry-run's
 /// `--resize-after` probe harness on its own window).
@@ -490,6 +504,30 @@ pub fn probe_print_count() -> u32 {
     PRINT_COUNT.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Mouse clicks (WM_LBUTTONDOWN) received by probe windows in this process.
+pub fn probe_click_count() -> u32 {
+    CLICK_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Character messages (WM_CHAR) received by probe windows in this process.
+pub fn probe_key_count() -> u32 {
+    KEY_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Drain this thread's message queue once ( TranslateMessage +
+/// DispatchMessageW). Input events (SendInput or PostMessage) only reach a
+/// wndproc when dispatched, so the input selftest pumps between the send
+/// and the counter poll.
+pub fn pump_pending_messages() {
+    unsafe {
+        let mut msg = MSG::default();
+        while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+            let _ = TranslateMessage(&msg);
+            let _ = DispatchMessageW(&msg);
+        }
+    }
+}
+
 unsafe extern "system" fn probe_wnd_proc(
     hwnd: HWND,
     msg: u32,
@@ -514,6 +552,12 @@ unsafe extern "system" fn probe_wnd_proc(
         draw_probe_scene(hwnd, hdc);
         let _ = unsafe { EndPaint(hwnd, &ps) };
         return windows::Win32::Foundation::LRESULT(0);
+    }
+    if msg == WM_LBUTTONDOWN {
+        CLICK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    if msg == WM_CHAR {
+        KEY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
@@ -550,7 +594,7 @@ unsafe fn draw_probe_scene(hwnd: HWND, hdc: HDC) {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::{Mutex, MutexGuard};
     use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
@@ -561,7 +605,7 @@ mod tests {
     /// scaled client rect (a 2x flake once test counts grew). Holding this
     /// lock across ensure_dpi_awareness + create + measure keeps each test's
     /// observations internally consistent.
-    fn window_test_lock() -> MutexGuard<'static, ()> {
+    pub(crate) fn window_test_lock() -> MutexGuard<'static, ()> {
         static LOCK: Mutex<()> = Mutex::new(());
         LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -572,6 +616,48 @@ mod tests {
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
         let pid = std::process::id();
         format!("NFCTRL-{tag}-{pid}-{n}")
+    }
+
+    /// The input selftest's assertion path: a posted click/key reaches the
+    /// probe wndproc once the message queue is pumped, and the process
+    /// counters reflect it. PostMessage (not SendInput) keeps the test
+    /// free of real cursor/keyboard synthesis.
+    #[test]
+    fn probe_window_counts_posted_input_events() {
+        use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
+        let _lock = window_test_lock();
+        let probe = OwnedTestWindow::new(320, 240, &unique_title("INPUTCNT")).expect("probe");
+        let clicks_before = probe_click_count();
+        let keys_before = probe_key_count();
+        unsafe {
+            assert!(PostMessageW(
+                Some(probe.hwnd),
+                WM_LBUTTONDOWN,
+                Default::default(),
+                Default::default()
+            )
+            .is_ok());
+            assert!(PostMessageW(
+                Some(probe.hwnd),
+                WM_CHAR,
+                Default::default(),
+                Default::default()
+            )
+            .is_ok());
+        }
+        pump_pending_messages();
+        assert!(
+            probe_click_count() > clicks_before,
+            "click counter must advance: {} -> {}",
+            clicks_before,
+            probe_click_count()
+        );
+        assert!(
+            probe_key_count() > keys_before,
+            "key counter must advance: {} -> {}",
+            keys_before,
+            probe_key_count()
+        );
     }
 
     /// True when the process can talk to an interactive desktop. CI nodes
