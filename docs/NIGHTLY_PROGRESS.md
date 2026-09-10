@@ -180,13 +180,21 @@
 | M28 | nightly-verify 增设 dashboard JS 语法守卫（78KB 内嵌 JS 为夜班高频编辑面,语法损坏=整 UI 静默失效;node --check 逐 script 块解析）| PASS | e7e29b1 | 守卫实测通过（1 script block OK）|
 
 
-### 夜班收尾（2026-09-11 08:40 close）——骨架（数字以 08:30 终验为准）
+### 夜班收尾（2026-09-11 08:40 close）
 
-- **计划 vs 完成**：夜班主线全部落地并验收——M1 安全扫描接入 CI、M2 NC4 输入层、M3 NC6 协议 schema 冻结、M4/M5 NC9 学习管线最小闭环（含用户插播需求入 ROADMAP）、M6 推理超时线程化、M7/M8 NC6 Go 侧协议镜像+调度分发（D4 定稿）、M9 controller --protocol 线模式、M12 会话 TSV 探针列、M13-M15 30 分钟稳定性/一致性/取消路径验证、M16-M20 可观测性与打包集成、M21-M25 审计修复与黑帧环境发现、M26 RGB 解码修复、M27-M28 测试边界与看板守卫。
-- **Remote acceptance**：`after_local_pass` 策略执行；win-devops 节点两次 FAIL（exit=1,~52s,确定性）——本地全绿、节点侧日志暂不可达,初步判定为节点环境（govulncheck DB 不可达/gosec 版本漂移类）,晨间运维清单含「节点日志调取」条目。LOCAL CI 为验收门槛（含 -Race 定向验证通过）。
-- **安全**：govulncheck 0 可调用漏洞；gosec HIGH×HIGH 门禁 0 发现（G115 双处书面注销,13 项 MEDIUM 审查入档）；secret 扫描零命中（唯一合成 token 显式 allowlist）；零真实游戏输入（--input-selftest 仅实现,留操作者执行）。
-- **已知问题/Deferred**：①首个真实 nano 模型（白天）；②WGC 非实体控制台复验；③黑帧环境发现（隐藏控制台 GDI 全黑,已可观测化告警）；④REMOTE win-devops 失败根因（需节点日志）；⑤NC7 skill 绑定与 auto 模式（待真实技能存在）。
-- **下一夜班建议**：①晨间优先——调取 win-devops 作业日志定位远端失败根因；②白天训练首个真实 nano 模型后走 NC1 收官对拍；③NC9 用真实游戏录屏素材跑学习→转换→回放闭环；④NC7 设计评审（recommendation skill 绑定语义）。
+- **计划 vs 完成**：夜班主线全部落地并验收（M1-M28,零遗留 milestone）——
+  - **M1 安全**：govulncheck+gosec+secret 扫描接入本地 CI（M21 节点环境分类修正）;
+  - **M2/M13-M14 NC4 输入层**：SendInput 封装+governor 硬前置+双闸,真实输入 selftest 留操作者;
+  - **M3/M7/M9/M13 协议**：schema v1 冻结（Rust serde+Go 镜像双向锁定）、--protocol 线模式、RESULT 闩锁语义;
+  - **M4/M5/M26 NC9 学习管线**：帧→场景切分→归一化锚点→draft→probes/skill→回放 DONE 最小闭环全通（含 quickstart 文档逐字真值测试）;
+  - **M6**：推理超时线程化（独占 worker+预算,挂死不再冻结会话）;
+  - **M7/M8 NC6 调度集成**：Go 协议镜像+流式会话执行器+native 任务分发+config 双闸+RESULT→Execution 映射+fake/real controller 双验证;
+  - **M15**：native 会话中途取消=进程树击杀+cancelled 落库（smoke 步骤锁定）;
+  - **M20-M28 审计修复**：drag 步数上界、终态 EVENT 门控（soak 抓出的每周期重复）、worker panic 兜底、RGB PNG 解码 panic 修复、黑帧环境发现可观测化、dashboard native 表单（params 覆盖 footgun）、RFC3339 已知日期断言。
+- **Remote acceptance**：`after_local_pass` 策略执行;win-devops 节点 3 次 FAIL（exit=1,~52s,确定性,本地全绿同码）——节点侧日志暂不可达,候选根因=节点 gosec 版本漂移或 DB 不可达类环境项;晨间运维清单含「调取节点作业日志」条目。LOCAL CI（含 -Race 定向）为验收门槛。
+- **安全**：govulncheck 0 可调用漏洞;gosec HIGH×HIGH 门禁 0 发现（G115 双处书面注销,13 项 MEDIUM 审查入档）;secret 扫描零命中（唯一合成 token 显式 allowlist）;**零真实游戏输入**（--input-selftest 仅实现未执行——本机有交互桌面且操作者在场,无人值守发送真实输入违反夜班纪律）。
+- **已知问题/Deferred**：①首个真实 nano 模型未训练（白天:采集→标注→train→export）;②WGC 非实体控制台复验 BLOCKED（同前）;③**黑帧环境发现**：隐藏控制台启动→GDI 全黑捕获（像素级验证）,已由黑帧看门狗可观测化,规避=可见控制台运行宿主;④REMOTE win-devops 失败根因（需节点日志）;⑤NC7 skill 绑定与 auto 模式（待真实技能存在,分发层已就绪）。
+- **下一夜班建议**：①晨间优先——调取 win-devops 作业日志定位远端失败根因（疑似 gosec 版本漂移/DB 不可达类）;②白天训练首个真实 nano 模型后走 NC1 收官对拍（`tools/vision/` 全链路已就绪）;③NC9 用真实游戏录屏素材跑学习→转换→回放闭环（管线已验证）;④NC7 设计评审（recommendation skill 绑定语义,分发层已就绪）。
 
 
 ### 夜班收尾（2026-09-10 04:20 close）
