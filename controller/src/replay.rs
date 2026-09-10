@@ -33,11 +33,30 @@ pub fn encode_png_bytes(frame: &Frame) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Decode RGBA PNG bytes into a frame.
+/// Decode RGBA or RGB PNG bytes into a frame. RGB is the format ffmpeg's
+/// default frame extraction produces, so replay must not assume the
+/// recorder's RGBA; anything else (16-bit, palette, interlaced, gray)
+/// is rejected with a clear message instead of panicking on indexing.
 pub fn decode_png_bytes(bytes: &[u8]) -> Result<Frame> {
     let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     let mut reader = decoder.read_info().map_err(png_decode_err)?;
-    let (width, height) = (reader.info().width, reader.info().height);
+    let info = reader.info();
+    if info.bit_depth != png::BitDepth::Eight {
+        return Err(ControllerError::InvalidInput(format!(
+            "png: unsupported bit depth {:?} (only 8)",
+            info.bit_depth
+        )));
+    }
+    let channels: usize = match info.color_type {
+        png::ColorType::Rgba => 4,
+        png::ColorType::Rgb => 3,
+        other => {
+            return Err(ControllerError::InvalidInput(format!(
+                "png: unsupported color type {other:?} (only RGB/RGBA)"
+            )))
+        }
+    };
+    let (width, height) = (info.width, info.height);
     let mut buf = vec![
         0u8;
         reader.output_buffer_size().ok_or_else(|| {
@@ -48,8 +67,9 @@ pub fn decode_png_bytes(bytes: &[u8]) -> Result<Frame> {
     let mut frame = Frame::new(width, height);
     for y in 0..height.min(info.height) {
         for x in 0..width.min(info.width) {
-            let i = (y as usize * info.width as usize + x as usize) * 4;
-            let (r, g, b, a) = (buf[i], buf[i + 1], buf[i + 2], buf[i + 3]);
+            let i = (y as usize * info.width as usize + x as usize) * channels;
+            let (r, g, b) = (buf[i], buf[i + 1], buf[i + 2]);
+            let a = if channels == 4 { buf[i + 3] } else { 255 };
             frame.set_pixel(x, y, [b, g, r, a]);
         }
     }
