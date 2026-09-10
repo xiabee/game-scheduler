@@ -1049,10 +1049,27 @@ async function submitGame(ev){
 // The adapter schemas from /api/meta drive a graphical form: pick a task type
 // from a dropdown, fill typed fields (text/number/checkbox), no JSON required.
 // The 高级 JSON textarea remains as an escape hatch; once hand-edited it wins.
+// NC6: the native-controller task type is available for every game — it
+// bypasses adapter command building entirely (dispatch keys off params
+// "executor":"native").
+const NATIVE_TASK_TYPE={type:"native",label:"Native Controller(自研,默认 dry-run)",
+  desc:"自研 Rust controller 会话:观察+规划,真实输入需 params/config 双闸。坐标一律归一化。",
+  fields:[
+    {key:"skill",type:"text",label:"Skill JSON 路径(NC3 契约)"},
+    {key:"probes",type:"text",label:"L0 探针 JSON 路径"},
+    {key:"window",type:"text",label:"窗口标题子串(@probe=自带探针窗口)"},
+    {key:"backend",type:"text",label:"捕获后端 auto|wgc|gdi|synthetic"},
+    {key:"model",type:"text",label:"模型 manifest 路径(可选)"},
+    {key:"device",type:"text",label:"推理设备 cpu|gpu(默认 cpu)"},
+    {key:"dry_run",type:"bool",label:"Dry-run(只观察,默认开)"},
+    {key:"allow_input",type:"bool",label:"允许真实输入(还需 config 总闸)"},
+    {key:"duration_sec",type:"number",label:"时长(秒,默认 30)"}
+  ]};
 function taskTypesFor(form){
   const sel=form.game_id.selectedOptions[0];
   const a=(meta.adapters||[]).find(x=>x.key===(sel?sel.getAttribute("data-adapter"):""));
-  return a? (a.task_types||[]) : [];
+  const adapterTypes=a? (a.task_types||[]) : [];
+  return [...adapterTypes, NATIVE_TASK_TYPE];
 }
 function fieldInput(f, val){
   const v = val!==undefined? val : (f.default!==undefined? f.default : "");
