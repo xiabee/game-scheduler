@@ -158,6 +158,10 @@ func RunSession(ctx context.Context, cfg SessionConfig, onEvent EventSink) Sessi
 				if res.Outcome == "" {
 					res.Outcome = outcomeFromPayload(msg.Result)
 				}
+				// RESULT is the in-band terminal line (draft §lifecycle):
+				// stop parsing. Anything after it is protocol noise and is
+				// drained, not interpreted.
+				lastErr = io.EOF // sentinel: reuse the clean-exit drain path
 			case msg.Event != nil:
 				res.State = msg.Event.State
 				res.Cycles = msg.Event.Cycle
@@ -181,6 +185,9 @@ func RunSession(ctx context.Context, cfg SessionConfig, onEvent EventSink) Sessi
 		onEvent(ev)
 	}
 	readErr := <-readDone
+	if errors.Is(readErr, io.EOF) {
+		readErr = nil // RESULT-latched sentinel: clean in-band end
+	}
 	if readErr != nil && cancel != nil {
 		// The peer violated the protocol — stop trusting it and kill the
 		// tree now instead of waiting out its natural lifetime.

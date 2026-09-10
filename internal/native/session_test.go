@@ -63,6 +63,13 @@ func runFakeController(script string) {
 		say(helloLine())
 		say(readyLine())
 		time.Sleep(60 * time.Second)
+	case "postresultjunk":
+		say(helloLine())
+		say(eventLine(2, 1, "step_00"))
+		say(resultLine("done"))
+		// protocol noise AFTER the terminal line must be drained, never parsed
+		say(eventLine(9, 99, "hijack"))
+		say(`{not json`)
 	case "noresult":
 		say(helloLine())
 		say(readyLine())
@@ -172,6 +179,30 @@ func TestRunSessionTimeout(t *testing.T) {
 	res := runSession(t, "hang", SessionConfig{Timeout: 300 * time.Millisecond}, nil)
 	if res.Outcome != SessionTimeout {
 		t.Fatalf("outcome = %v, want timeout (err %v)", res.Outcome, res.Err)
+	}
+}
+
+// Lines after RESULT must be drained and ignored — the session verdict is
+// the latched RESULT, and post-terminal junk (even unparseable) cannot
+// change it or kill the session.
+func TestRunSessionIgnoresPostResultLines(t *testing.T) {
+	var eventsAfter int
+	res := runSession(t, "postresultjunk", SessionConfig{}, func(msg *Message) {
+		if msg.Event != nil {
+			eventsAfter++
+			if msg.Event.Cycle == 99 {
+				t.Errorf("post-RESULT event was delivered")
+			}
+		}
+	})
+	if res.Outcome != SessionDone {
+		t.Fatalf("outcome = %v (err %v), want done", res.Outcome, res.Err)
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("exit = %d, want 0", res.ExitCode)
+	}
+	if eventsAfter != 1 {
+		t.Fatalf("events delivered = %d, want exactly the pre-RESULT one", eventsAfter)
 	}
 }
 
