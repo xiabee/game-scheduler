@@ -187,6 +187,7 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 | M28 | nightly-verify 增设 dashboard JS 语法守卫（78KB 内嵌 JS 为夜班高频编辑面,语法损坏=整 UI 静默失效;node --check 逐 script 块解析）| PASS | e7e29b1 | 守卫实测通过（1 script block OK）|
 
 | M30 | `--device gpu` 实机验证：本机 NVIDIA GPU 上 DirectX provider 会话真实建立,25 次推理 RESULT done;ONNX banner 从硬编码 device=cpu 改为回显实际 provider;READY manifest 回显同场实测生效。smoke 不加 gpu 段（无 GPU 节点经降级链诚实降 Mock,非失败） | PASS | (下方 commit) | 实机 gpu 会话 2s 干净退出;协议流 HELLO/READY(manifest)/RESULT |
+| M30b | GPU provider 30s 持续 soak:290 周期/250 次 DirectX 真实推理零失败,RESULT done——gpu 路径从「实现+单测」升级为「实机持续验证」;CPU/GPU 双 provider 均已覆盖 | PASS | (随 M30) | soak TSV 留档 |
 
 | M31 | secret 扫描快照回退：节点快照若剥离 .git,git grep 会「静默零扫描」——门禁弱化;新增非仓库回退=递归文本扫描（≤2MB、排除 .git/target/.nightly/dist、源码扩展名白名单）+ 显式模式公告;仓库内路径行为不变 | PASS | 425e51b | 本地仓库模式实测 PASS;回退路径为节点设计 |
 | M31b | REMOTE CI 诊断:win-devops 3 连 FAIL（exit=1,52-94s,确定性;本地同码全绿）——节点侧日志不可达（agent 无日志端点,SSH publickey 拒绝）,候选根因=节点 gosec 版本漂移或 govulncheck DB 环境;晨间运维清单#1=调取节点作业日志。LOCAL CI 为验收门槛（dispatcher 规则）,不以远端环境失败伪装代码失败 | PARTIAL | 425e51b | 远端 3 数据点;nightly-verify PASS ×2 复验 |
