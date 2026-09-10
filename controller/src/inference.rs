@@ -35,9 +35,22 @@ pub enum DetectorSource {
 }
 
 /// The resolved detector plus the geometry/threshold the session runs at.
+/// Model manifest summary carried on [`DetectorChoice`] for the NC6
+/// READY payload (name/version/imgsz/labels — the display subset).
+#[derive(Debug, Clone)]
+pub struct ManifestSummary {
+    pub name: String,
+    pub version: String,
+    pub imgsz: (u32, u32),
+    pub labels: Vec<String>,
+}
+
 pub struct DetectorChoice {
     pub detector: Box<dyn Detector + Send>,
     pub source: DetectorSource,
+    /// Manifest summary for the NC6 READY line when a manifest actually
+    /// drove this session (None for the plain mock).
+    pub manifest: Option<ManifestSummary>,
     /// Model input size (letterbox target). Manifest value wins over the
     /// CLI default, but an explicit `--model` wins over the manifest.
     pub imgsz: (u32, u32),
@@ -80,6 +93,7 @@ pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
         return DetectorChoice {
             detector: Box::new(MockDetector::synthetic_rect()) as Box<dyn Detector + Send>,
             source: DetectorSource::Mock,
+            manifest: None,
             imgsz: req.imgsz,
             min_confidence: req.min_confidence,
         };
@@ -121,6 +135,12 @@ pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
                             path: weights_path.display().to_string(),
                             name: m.name.clone(),
                         },
+                        manifest: Some(ManifestSummary {
+                            name: m.name.clone(),
+                            version: m.version.clone(),
+                            imgsz: (input_size.width, input_size.height),
+                            labels: m.labels.clone(),
+                        }),
                         imgsz: if req.imgsz_explicit {
                             req.imgsz
                         } else {
@@ -146,10 +166,16 @@ pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
         detector: Box::new(MockDetector::synthetic_rect()) as Box<dyn Detector + Send>,
         source: DetectorSource::ManifestPending {
             path: path.to_string(),
-            name,
-            version,
+            name: name.clone(),
+            version: version.clone(),
             labels: labels.len(),
         },
+        manifest: Some(ManifestSummary {
+            name,
+            version,
+            imgsz: (input_size.width, input_size.height),
+            labels,
+        }),
         imgsz: if req.imgsz_explicit {
             req.imgsz
         } else {
@@ -171,6 +197,7 @@ fn fallback(path: &str, reason: String, req: &DetectorRequest) -> DetectorChoice
             path: path.to_string(),
             reason,
         },
+        manifest: None,
         imgsz: req.imgsz,
         min_confidence: req.min_confidence,
     }

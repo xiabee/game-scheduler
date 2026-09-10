@@ -460,7 +460,11 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     }
     let (model_w, model_h) = choice.imgsz;
 
-    proto.ready(opts.skill.as_deref(), opts.backend.as_str());
+    proto.ready(
+        opts.skill.as_deref(),
+        opts.backend.as_str(),
+        choice.manifest.as_ref(),
+    );
 
     eprintln!(
         "dry-run: window {:?} layout={calibrated:?} backend={} model={model_w}x{model_h} fps={} duration={}s",
@@ -786,16 +790,43 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 .map(|d| (d.label.clone(), d.confidence))
                 .collect();
             let now_ms = t0.elapsed().as_millis() as u64;
+            let fired_names: Vec<String> = report
+                .evidence
+                .probes
+                .iter()
+                .filter(|p| p.fired)
+                .map(|p| p.name.clone())
+                .collect();
             match runner.step(now_ms, &fired, &dets) {
                 controller::skill::StepOutcome::Waiting => {}
                 controller::skill::StepOutcome::Transitioned { to, planned } => {
                     eprintln!("skill: -> {to} (planned: {})", planned.join(", "));
+                    proto.event(
+                        cycle,
+                        &to,
+                        &fired_names,
+                        &report.client_detections,
+                        &planned,
+                    );
                 }
                 controller::skill::StepOutcome::FellBack { to } => {
                     eprintln!("skill: fallback -> {to}");
+                    proto.event(cycle, &to, &fired_names, &report.client_detections, &[]);
                 }
-                controller::skill::StepOutcome::Done => eprintln!("skill: DONE"),
-                controller::skill::StepOutcome::Failed => eprintln!("skill: FAILED"),
+                controller::skill::StepOutcome::Done => {
+                    eprintln!("skill: DONE");
+                    proto.event(cycle, "done", &fired_names, &report.client_detections, &[]);
+                }
+                controller::skill::StepOutcome::Failed => {
+                    eprintln!("skill: FAILED");
+                    proto.event(
+                        cycle,
+                        "failed",
+                        &fired_names,
+                        &report.client_detections,
+                        &[],
+                    );
+                }
             }
         }
 
@@ -1406,15 +1437,59 @@ impl ProtocolEmitter {
         ));
     }
 
-    fn ready(&mut self, skill: Option<&str>, backend: &str) {
+    fn ready(
+        &mut self,
+        skill: Option<&str>,
+        backend: &str,
+        manifest: Option<&controller::inference::ManifestSummary>,
+    ) {
         self.emit(controller::protocol::Payload::Ready(
             controller::protocol::ReadyPayload {
                 session_id: format!("dryrun-{}", std::process::id()),
                 skill: skill.map(|s| s.to_string()),
-                // manifest echo needs the loaded manifest to survive resolve();
-                // today only the detector source name survives — leave None
-                manifest: None,
+                manifest: manifest.map(|m| controller::protocol::ManifestInfo {
+                    name: m.name.clone(),
+                    version: m.version.clone(),
+                    imgsz: [m.imgsz.0, m.imgsz.1],
+                    labels: m.labels.clone(),
+                }),
                 backend: backend.to_string(),
+            },
+        ));
+    }
+
+    /// D1 semantics: an EVENT per semantic state change (skill transition),
+    /// never per cycle. Detections ride along in client coordinates.
+    #[allow(clippy::too_many_arguments)]
+    fn event(
+        &mut self,
+        cycle: u32,
+        state: &str,
+        probes_fired: &[String],
+        detections: &[controller::vision::Detection],
+        planned: &[String],
+    ) {
+        let dets = detections
+            .iter()
+            .map(|d| {
+                let c = d.rect.center();
+                controller::protocol::DetectionMsg {
+                    label: d.label.clone(),
+                    cx: c.0,
+                    cy: c.1,
+                    w: d.rect.w,
+                    h: d.rect.h,
+                    conf: d.confidence,
+                }
+            })
+            .collect();
+        self.emit(controller::protocol::Payload::Event(
+            controller::protocol::EventPayload {
+                cycle,
+                state: state.to_string(),
+                probes_fired: probes_fired.to_vec(),
+                detections: dets,
+                planned_actions: planned.to_vec(),
             },
         ));
     }

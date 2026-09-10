@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/xiabee/game-scheduler/internal/config"
@@ -162,6 +163,7 @@ func (s *Service) executeNative(ctx context.Context, exec store.Execution, execI
 
 	attempts := t.MaxRetries + 1
 	var res native.SessionResult
+	var trail strings.Builder // bounded event trail surfaced in exec.Stdout
 	for attempt := 0; attempt < attempts; attempt++ {
 		if attempt > 0 {
 			exec.RetryCount = attempt
@@ -174,12 +176,17 @@ func (s *Service) executeNative(ctx context.Context, exec store.Execution, execI
 			}
 		}
 		s.log.Info("running native task", "exec_id", execID, "task", t.Name,
-			"attempt", attempt+1, "cmd", session.ControllerPath)
+			"attempt", attempt+1, "cmd", session.CommandLine())
 		res = native.RunSession(ctx, session, func(msg *native.Message) {
-			if msg.Event != nil {
-				s.log.Info("native event", "exec_id", execID,
-					"cycle", msg.Event.Cycle, "state", msg.Event.State,
-					"probes", msg.Event.ProbesFired)
+			if msg.Event == nil {
+				return
+			}
+			s.log.Info("native event", "exec_id", execID,
+				"cycle", msg.Event.Cycle, "state", msg.Event.State,
+				"probes", msg.Event.ProbesFired)
+			if trail.Len() < 32*1024 {
+				fmt.Fprintf(&trail, "cycle=%d state=%s planned=%v\n",
+					msg.Event.Cycle, msg.Event.State, msg.Event.PlannedActions)
 			}
 		})
 		// A session that ended in-band (RESULT present) or via cancel is
@@ -190,6 +197,9 @@ func (s *Service) executeNative(ctx context.Context, exec store.Execution, execI
 		if ctx.Err() != nil {
 			break
 		}
+	}
+	if trail.Len() > 0 {
+		exec.Stdout = trail.String()
 	}
 
 	end := time.Now().UTC()
