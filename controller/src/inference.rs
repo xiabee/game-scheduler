@@ -70,6 +70,8 @@ pub struct DetectorRequest<'a> {
     pub min_confidence: f32,
     /// True when the operator explicitly passed `--min-confidence`.
     pub confidence_explicit: bool,
+    /// Which provider the ONNX session should run on (default Cpu).
+    pub device: crate::onnx::DeviceProvider,
 }
 
 impl<'a> DetectorRequest<'a> {
@@ -78,6 +80,7 @@ impl<'a> DetectorRequest<'a> {
         DetectorRequest {
             model_path: None,
             imgsz,
+            device: crate::onnx::DeviceProvider::Cpu,
             imgsz_explicit: true,
             min_confidence,
             confidence_explicit: true,
@@ -126,7 +129,7 @@ pub fn resolve(req: &DetectorRequest) -> DetectorChoice {
             .unwrap_or(std::path::Path::new("."))
             .join(weights_ref);
         if weights_path.is_file() {
-            match crate::onnx::OnnxDetector::open(&manifest_for_open, &weights_path) {
+            match crate::onnx::OnnxDetector::open(&manifest_for_open, &weights_path, req.device) {
                 Ok(detector) => {
                     let m = &manifest_for_open;
                     return DetectorChoice {
@@ -235,6 +238,7 @@ mod tests {
         DetectorRequest {
             model_path,
             imgsz: (256, 256),
+            device: crate::onnx::DeviceProvider::Cpu,
             imgsz_explicit,
             min_confidence: 0.6,
             confidence_explicit,

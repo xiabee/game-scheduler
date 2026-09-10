@@ -169,6 +169,9 @@ struct DryRunOptions {
     /// foreground requirements; refused outright when no interactive
     /// desktop exists.
     allow_input: bool,
+    /// NC1 deferred item: which provider inference runs on (cpu|gpu).
+    /// cpu is the default and the only soak-covered path.
+    device: String,
     /// Roadmap deferred item (inference timeout): bound each inference
     /// wait. The WinML call itself is unkillable, so a timeout surfaces
     /// via take_error() and feeds the consecutive-failure breaker.
@@ -285,7 +288,11 @@ impl DryRunOptions {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(5000),
             protocol: args.iter().any(|a| a == "--protocol"),
+            device: opt(args, "--device").unwrap_or_else(|| "cpu".into()),
         };
+        if !matches!(opts.device.as_str(), "cpu" | "gpu") {
+            return Err(format!("--device must be cpu|gpu, got {:?}", opts.device));
+        }
         if opts.infer_timeout_ms == 0 || opts.infer_timeout_ms > 300_000 {
             return Err(format!(
                 "--infer-timeout must be in 1..=300000 ms, got {}",
@@ -433,8 +440,17 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     // NC1: resolve the detector (and the effective imgsz/confidence) from
     // the optional --model-path manifest. Any unusable model degrades to
     // the NC0 mock loudly instead of failing the session.
+    let device = match opts.device.as_str() {
+        "cpu" => controller::onnx::DeviceProvider::Cpu,
+        "gpu" => controller::onnx::DeviceProvider::Gpu,
+        other => {
+            eprintln!("dry-run: --device must be cpu|gpu, got {other:?}");
+            return 2;
+        }
+    };
     let choice = controller::inference::resolve(&controller::inference::DetectorRequest {
         model_path: opts.model_path.as_deref(),
+        device,
         imgsz: (opts.model, opts.model),
         imgsz_explicit: opts.imgsz_explicit,
         min_confidence: opts.min_confidence,
@@ -455,7 +471,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             "dry-run: WARNING model {path:?} unusable ({reason}) - falling back to the mock detector"
         ),
         controller::inference::DetectorSource::Onnx { path, name } => eprintln!(
-            "dry-run: detector = ONNX via WinML (model {name}, weights {path}, CPU device)"
+            "dry-run: detector = ONNX via WinML (model {name}, weights {path}, device=cpu (soak-covered); gpu opt-in via --device)"
         ),
     }
     let (model_w, model_h) = choice.imgsz;

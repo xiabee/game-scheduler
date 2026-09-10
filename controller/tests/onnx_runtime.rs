@@ -14,8 +14,12 @@ use std::path::Path;
 fn open_detector() -> (controller::onnx::OnnxDetector, std::path::PathBuf) {
     let (manifest_path, weights_path) = ensure_fixture();
     let manifest = controller::manifest::load(&manifest_path).expect("fixture manifest");
-    let det = controller::onnx::OnnxDetector::open(&manifest, Path::new(&weights_path))
-        .expect("winml session");
+    let det = controller::onnx::OnnxDetector::open(
+        &manifest,
+        Path::new(&weights_path),
+        controller::onnx::DeviceProvider::Cpu,
+    )
+    .expect("winml session");
     (det, weights_path)
 }
 
@@ -57,8 +61,12 @@ fn confidence_gate_follows_the_manifest_value() {
     let alt_path = common::fixtures_dir().join("constant_yolo_low_gate.manifest.json");
     std::fs::write(&alt_path, &text).expect("write alt manifest");
     let manifest = controller::manifest::load(&alt_path).expect("alt manifest");
-    let mut det = controller::onnx::OnnxDetector::open(&manifest, Path::new(&weights_path))
-        .expect("winml session");
+    let mut det = controller::onnx::OnnxDetector::open(
+        &manifest,
+        Path::new(&weights_path),
+        controller::onnx::DeviceProvider::Cpu,
+    )
+    .expect("winml session");
     let dets = det.detect(&controller::frame::Frame::new(64, 64));
     assert!(det.take_error().is_none());
     assert_eq!(dets.len(), 2, "both rows visible at 0.3: {dets:?}");
@@ -110,8 +118,12 @@ fn the_same_model_maps_consistently_across_window_sizes() {
 fn v8style_channels_first_output_is_decoded_with_class_aware_nms() {
     let (manifest_path, weights_path) = common::ensure_v8_fixture();
     let manifest = controller::manifest::load(&manifest_path).expect("v8 fixture manifest");
-    let mut det = controller::onnx::OnnxDetector::open(&manifest, Path::new(&weights_path))
-        .expect("winml session");
+    let mut det = controller::onnx::OnnxDetector::open(
+        &manifest,
+        Path::new(&weights_path),
+        controller::onnx::DeviceProvider::Cpu,
+    )
+    .expect("winml session");
     let dets = det.detect(&controller::frame::Frame::new(64, 64));
     assert!(det.take_error().is_none());
     assert_eq!(dets.len(), 2, "both columns survive (disjoint): {dets:?}");
@@ -129,6 +141,7 @@ fn v8style_channels_first_output_is_decoded_with_class_aware_nms() {
 fn resolve_wires_the_onnx_detector_when_weights_exist() {
     let (manifest_path, _w) = ensure_fixture();
     let choice = controller::inference::resolve(&controller::inference::DetectorRequest {
+        device: controller::onnx::DeviceProvider::Cpu,
         model_path: Some(manifest_path.to_str().expect("utf8")),
         imgsz: (256, 256),
         imgsz_explicit: false,
@@ -154,8 +167,12 @@ fn onnx_detector_flows_through_a_full_dry_run_cycle() {
 
     let (_manifest_path, weights_path) = ensure_fixture();
     let manifest = controller::manifest::load(&common::manifest_path()).expect("manifest");
-    let mut detector =
-        controller::onnx::OnnxDetector::open(&manifest, Path::new(&weights_path)).expect("winml");
+    let mut detector = controller::onnx::OnnxDetector::open(
+        &manifest,
+        Path::new(&weights_path),
+        controller::onnx::DeviceProvider::Cpu,
+    )
+    .expect("winml");
     let mut backend = SyntheticCapture::new(320, 240).expect("capture");
     let mut governor =
         SafetyGovernor::new(SafetyConfig::default(), Instant::now()).expect("governor");

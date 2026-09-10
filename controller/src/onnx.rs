@@ -37,11 +37,25 @@ pub struct OnnxDetector {
     last_error: Option<String>,
 }
 
+/// Which provider the session runs on. Cpu is the default and the only
+/// path with soak coverage; Gpu creates a DirectX device and is expected
+/// to fail honestly in service/RDP sessions (the resolve() degrade chain
+/// then falls back to the mock with the reason printed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceProvider {
+    Cpu,
+    Gpu,
+}
+
 impl OnnxDetector {
-    /// Load `weights_path` as an ONNX model and build a CPU session.
-    /// `manifest` supplies labels/imgsz/threshold — the model must match
-    /// the manifest's imgsz or binding will fail loudly.
-    pub fn open(manifest: &ModelManifest, weights_path: &Path) -> Result<OnnxDetector> {
+    /// Load `weights_path` as an ONNX model and build a session on
+    /// `provider`. `manifest` supplies labels/imgsz/threshold — the model
+    /// must match the manifest's imgsz or binding will fail loudly.
+    pub fn open(
+        manifest: &ModelManifest,
+        weights_path: &Path,
+        provider: DeviceProvider,
+    ) -> Result<OnnxDetector> {
         use windows::AI::MachineLearning::{
             LearningModel, LearningModelDevice, LearningModelDeviceKind, LearningModelSession,
         };
@@ -52,8 +66,13 @@ impl OnnxDetector {
         let path_h = HSTRING::from(canonical.as_os_str().to_string_lossy().as_ref());
         let model = LearningModel::LoadFromFilePath(&path_h)?;
 
-        // CPU device on purpose: deterministic, RDP-safe, GPU left alone.
-        let device = LearningModelDevice::Create(LearningModelDeviceKind::Cpu)?;
+        // Cpu on purpose by default: deterministic, RDP-safe, GPU left
+        // alone (ROADMAP §5). Gpu is an explicit operator opt-in.
+        let kind = match provider {
+            DeviceProvider::Cpu => LearningModelDeviceKind::Cpu,
+            DeviceProvider::Gpu => LearningModelDeviceKind::DirectX,
+        };
+        let device = LearningModelDevice::Create(kind)?;
         let session = LearningModelSession::CreateFromModelOnDevice(&model, &device)?;
 
         let input_names = model

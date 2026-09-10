@@ -41,6 +41,7 @@ type nativeParams struct {
 	Window      string  `json:"window"`
 	Backend     string  `json:"backend"`
 	Model       string  `json:"model"`
+	Device      string  `json:"device"` // cpu|gpu; cpu default (soak-covered)
 	DryRun      *bool   `json:"dry_run"`
 	AllowInput  bool    `json:"allow_input"`
 	DurationSec float64 `json:"duration_sec"`
@@ -111,6 +112,14 @@ func buildNativeSession(cfg config.Config, execID int64, t store.Task, p nativeP
 	}
 	if p.Model != "" {
 		args = append(args, "--model-path", p.Model)
+	}
+	switch p.Device {
+	case "", "cpu":
+		args = append(args, "--device", "cpu")
+	case "gpu":
+		args = append(args, "--device", "gpu")
+	default:
+		return native.SessionConfig{}, fmt.Errorf("native params device must be cpu|gpu, got %q", p.Device)
 	}
 	if p.DurationSec > 0 {
 		args = append(args, "--duration", fmt.Sprintf("%.1f", p.DurationSec))
