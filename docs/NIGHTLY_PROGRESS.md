@@ -158,6 +158,11 @@
 | M10 | NC6 协议 EVENT + manifest 回显：`--protocol` 模式下 skill 状态转移/回退/终态时发射 EVENT（D1 语义=仅语义变化，含 cycle/state/触发探针/client 检测/planned actions）；READY 携带 manifest 摘要（DetectorChoice 新增 ManifestSummary，Onnx 与 ManifestPending 两路均回显）；Go 侧 executeNative 把 EVENT 轨迹（有界 32KB）写进 Execution stdout 字段——调度器侧可观测原生会话时间线；新增协议一致性集成测试（CARGO_BIN_EXE 拉起真实二进制，逐行按 schema 解析断言 HELLO 首行/READY 存在/RESULT 末行 done） | PASS | 239de61 | controller 127 绿 + 协议集成测试 1；Go task/native 全绿；NIGHTLY VERIFY PASS |
 | M11 | README 双语同步：native executor 任务契约（params 示例/启用前提/输入双闸/RESULT 映射/NC9 学习管线指引） | PASS | 207c9b3 | 文档一致性核对 |
 
+| M12 | 会话 TSV 探针列：`probes_fired` 尾随列（逗号连接的触发探针名；配置未触发=空，未配置=列不存在——与 skill_state 相同的 append-only 兼容模式），NC9 离线分析可联合对齐 探针触发×检测×状态 三时间线 | PASS | e4ee0c1 | 10 列/8 列双向断言；实机 TSV 验证 |
+| M13 | 60s 全表面协议 soak（GDI 真实捕获+probes+skill+record200+缓存+协议流）：780 周期零泄漏（WS 12.4→9.7MB、句柄 111）、缓存命中 755/780=96.8%、退出干净。**soak 抓出真 bug：终态 skill（Done/Failed）EVENT 每周期重复发射（574 条 failed）**——违反 D1；修复=终态事件门控只发首次 | PASS | 8a60cb7 | 修复后事件流 = HELLO/READY/EVENT×2（语义转移）/RESULT，符合 D1 |
+| M14 | device(provider) 配置化（NC1 最后一个 deferred 项）：`--device cpu|gpu` + native params `device` 透传；GPU=DirectX provider，在服务/RDP 会话经既有降级链诚实失败（open 失败→Mock+原因打印），CPU 路径 soak 覆盖不变 | PASS | dd64c65 | 全部 ONNX 测试经 Cpu 路径回归；parse 校验测试；NIGHTLY VERIFY PASS |
+| M15 | native 会话取消路径验收：windows_smoke 新增 [15] 中途 cancel 步骤——controller 进程树被杀、Execution 落 cancelled、无孤儿 | PASS | (见下方 commit) | NIGHTLY VERIFY PASS 全 15 步 |
+
 
 ### 夜班收尾（2026-09-10 04:20 close）
 
