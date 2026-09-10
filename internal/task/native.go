@@ -88,7 +88,10 @@ func buildNativeSession(cfg config.Config, execID int64, t store.Task, p nativeP
 	if p.DryRun != nil {
 		dryRun = *p.DryRun
 	}
-	args := []string{"--dry-run"}
+	// NC6 wire mode: stdout carries only protocol lines; human output goes
+	// to stderr (captured nowhere today, shown on console). Required for
+	// the session reader to parse reliably.
+	args := []string{"--dry-run", "--protocol"}
 	window := p.Window
 	if window == "" {
 		window = "@probe"

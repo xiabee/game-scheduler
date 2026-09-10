@@ -38,14 +38,19 @@ $work = Join-Path $env:TEMP ("nf_nightly_" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 # forward slashes: backslashes would be invalid JSON escapes
 $dataDir = (Join-Path $work "data") -replace "\\", "/"
+# NC6 native steps: point the temp server at the controller binary that
+# ci-local's cargo build just produced (it exists whenever Rust ran).
+$controllerExe = Join-Path $repo "controller\target\debug\controller.exe"
+$nativePath = ""
+if (Test-Path $controllerExe) { $nativePath = $controllerExe -replace "\\", "/" }
+$cfgBody = @{
+    addr                   = "127.0.0.1:18765"
+    data_dir               = $dataDir
+    auth_token             = "nightly-verify-token"
+    native_controller_path = $nativePath
+} | ConvertTo-Json -Compress
 $cfg = Join-Path $work "config.json"
-@'
-{
-  "addr": "127.0.0.1:18765",
-  "data_dir": "PLACEHOLDER",
-  "auth_token": "nightly-verify-token"
-}
-'@ -replace "PLACEHOLDER", $dataDir | Set-Content -Path $cfg -Encoding UTF8
+Set-Content -Path $cfg -Value $cfgBody -Encoding UTF8
 # The token above is a synthetic placeholder for the throwaway local test
 # server in this battery (isolated temp dir); scripts/ci-local.ps1 secret
 # scan allowlists this exact value.
@@ -63,7 +68,7 @@ if ($p.HasExited) {
 } else {
     & powershell -NoProfile -ExecutionPolicy Bypass -File examples\windows_smoke.ps1 `
         -Server "http://127.0.0.1:18765" -Token "nightly-verify-token" `
-        -Ctl (Join-Path $work "gs-ctl.exe")
+        -Ctl (Join-Path $work "gs-ctl.exe") -Controller $controllerExe
     if ($LASTEXITCODE -ne 0) { $script:failed += "windows-smoke" }
 }
 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue

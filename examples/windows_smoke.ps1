@@ -15,7 +15,11 @@
 param(
     [string]$Server = $(if ($env:GS_SERVER) { $env:GS_SERVER } else { "http://127.0.0.1:8080" }),
     [string]$Token = $(if ($env:GS_TOKEN) { $env:GS_TOKEN } else { "" }),
-    [string]$Ctl = "ctl"
+    [string]$Ctl = "ctl",
+    # Native (NC6) section: path to the Rust controller executable. When
+    # empty or missing, the native steps are announced and skipped
+    # honestly (a Go-only node still gets full coverage of its surface).
+    [string]$Controller = $(if ($env:GS_SMOKE_CONTROLLER) { $env:GS_SMOKE_CONTROLLER } else { "" })
 )
 
 $ErrorActionPreference = "Stop"
@@ -182,6 +186,41 @@ try {
         $left = Invoke-Ctl -ResourceArgs @("execs") -Flags @("-task", "$($script:task.id)")
         if ($null -ne $left -and @($left).Count -gt 0) { throw "execution rows survived the cascade" }
     }
+
+    # ---- 9. native (NC6) full chain: real controller, zero input ----------
+    $nativeReady = ($Controller -ne "") -and (Test-Path $Controller)
+    if (-not $nativeReady) {
+        Write-Host "SKIP native steps: controller executable not provided (set -Controller)."
+    }
+    else {
+        $probeFile = Join-Path $work "probes-smoke.json"
+        Set-Content -Path $probeFile -Value '[{"name":"smoke_probe","x":10,"y":10,"w":8,"h":8,"expected":[200,40,16],"tolerance":24,"min_fraction":0.4,"step":2}]' -Encoding UTF8
+        Step "native: create task (executor=native, dry-run synthetic)" {
+            $params = @{ executor = "native"; probes = $probeFile; window = "@probe";
+                         backend = "synthetic"; duration_sec = 2 } | ConvertTo-Json -Compress
+            $body = @{ game_id = $gameId; name = "smoke-native"; type = "native";
+                       params = $params; enabled = $true } | ConvertTo-Json -Compress -Depth 4
+            $script:nativeTask = Invoke-Ctl -ResourceArgs @("tasks", "add") -JsonBody $body
+            if (-not $script:nativeTask.id) { throw "native task add returned no id" }
+        }
+        Step "native: preflight ready (controller + probes file)" {
+            $pf = Invoke-Ctl -ResourceArgs @("tasks", "preflight", "$($script:nativeTask.id)")
+            if ($pf.validation_error) { throw "validation_error: $($pf.validation_error)" }
+            if ($pf.missing.Count -gt 0) { throw "missing: $($pf.missing -join '; ')" }
+            if (-not $pf.ready) { throw "preflight not ready" }
+        }
+        Step "native: run real controller session (RESULT done -> success)" {
+            $exec = Invoke-Ctl -ResourceArgs @("tasks", "run", "$($script:nativeTask.id)")
+            $deadline = (Get-Date).AddSeconds(60)
+            do {
+                Start-Sleep -Milliseconds 500
+                $e = Invoke-Ctl -ResourceArgs @("execs", "get", "$($exec.id)")
+                if ((Get-Date) -gt $deadline) { throw "native execution did not finish in 60s (status=$($e.status))" }
+            } while ($e.status -in @("pending", "running"))
+            if ($e.status -ne "success") { throw "status=$($e.status) error=$($e.error_msg)" }
+            if ($e.exit_code -ne 0) { throw "exit_code=$($e.exit_code)" }
+        }
+    }
 } finally {
     # ---- 8. cleanup (delete game cascades tasks/routes/executions) ----
     try { $null = Invoke-Ctl -ResourceArgs @("games", "delete", $gameId) } catch { }
@@ -194,6 +233,10 @@ if ($script:Failures.Count -gt 0) {
     $script:Failures | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
     exit 1
 }
-Write-Host ""
-Write-Host "SMOKE PASS - all 11 steps OK (discover/game/route/task/preflight/execution/log/stats/running-delete)." -ForegroundColor Green
+if ($nativeReady) {
+    Write-Host "SMOKE PASS - all steps OK (discover/game/route/task/preflight/execution/log/stats/running-delete/native)." -ForegroundColor Green
+}
+else {
+    Write-Host "SMOKE PASS - all steps OK except native (controller not provided)." -ForegroundColor Green
+}
 exit 0

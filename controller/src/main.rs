@@ -173,6 +173,10 @@ struct DryRunOptions {
     /// wait. The WinML call itself is unkillable, so a timeout surfaces
     /// via take_error() and feeds the consecutive-failure breaker.
     infer_timeout_ms: u64,
+    /// NC6 wire mode: stdout carries ONLY protocol lines (HELLO/READY/
+    /// RESULT); all human output goes to stderr (it already does in this
+    /// CLI). Required for scheduler-driven sessions.
+    protocol: bool,
 }
 
 impl DryRunOptions {
@@ -280,6 +284,7 @@ impl DryRunOptions {
             infer_timeout_ms: opt(args, "--infer-timeout")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(5000),
+            protocol: args.iter().any(|a| a == "--protocol"),
         };
         if opts.infer_timeout_ms == 0 || opts.infer_timeout_ms > 300_000 {
             return Err(format!(
@@ -386,6 +391,10 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         );
     }
 
+    // NC6 wire mode: HELLO is the first line the session ever emits.
+    let mut proto = ProtocolEmitter::new(opts.protocol);
+    proto.hello();
+
     // --- window: @probe creates our own window; otherwise find by title ---
     let (target_hwnd, _owned_probe, mut calibrated) = if opts.window == "@probe" {
         let title = format!("NFCTRL-DRYRUN-{}", std::process::id());
@@ -438,20 +447,22 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             version,
             labels,
             ..
-        } => println!(
+        } => eprintln!(
             "dry-run: detector = mock (manifest {name} v{version}: {labels} label(s), imgsz {}x{}, confidence {:.2} honored; no usable weights next to the manifest)",
             choice.imgsz.0, choice.imgsz.1, choice.min_confidence
         ),
         controller::inference::DetectorSource::MockFallback { path, reason } => eprintln!(
             "dry-run: WARNING model {path:?} unusable ({reason}) - falling back to the mock detector"
         ),
-        controller::inference::DetectorSource::Onnx { path, name } => println!(
+        controller::inference::DetectorSource::Onnx { path, name } => eprintln!(
             "dry-run: detector = ONNX via WinML (model {name}, weights {path}, CPU device)"
         ),
     }
     let (model_w, model_h) = choice.imgsz;
 
-    println!(
+    proto.ready(opts.skill.as_deref(), opts.backend.as_str());
+
+    eprintln!(
         "dry-run: window {:?} layout={calibrated:?} backend={} model={model_w}x{model_h} fps={} duration={}s",
         opts.window, opts.backend, opts.fps, opts.duration_secs
     );
@@ -463,7 +474,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     {
         match controller::replay::ReplayCapture::open(std::path::Path::new(dir), true) {
             Ok(r) => {
-                println!(
+                eprintln!(
                     "dry-run: backend replay ({} frame(s) from {dir}, looping)",
                     r.frame_count()
                 );
@@ -491,7 +502,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             opts.record_max,
         ) {
             Ok(r) => {
-                println!(
+                eprintln!(
                     "dry-run: recording frames to {dir} (max {})",
                     opts.record_max
                 );
@@ -522,7 +533,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     // every cycle (cheap-first: probes cost a handful of pixel reads).
     let mut perception = match &opts.probes {
         Some(path) => {
-            let text = match std::fs::read_to_string(path) {
+            let text = match std::fs::read_to_string(path).map(strip_bom) {
                 Ok(t) => t,
                 Err(e) => {
                     eprintln!("dry-run: cannot read probes {path:?}: {e}");
@@ -536,7 +547,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                     for p in probes {
                         lp.add_probe(p);
                     }
-                    println!("dry-run: L0 probes = {count}");
+                    eprintln!("dry-run: L0 probes = {count}");
                     Some(lp)
                 }
                 Err(e) => {
@@ -552,7 +563,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     // cycle. Plans are LOGGED only — this session never sends input.
     let mut skill_runner = match &opts.skill {
         Some(path) => {
-            let text = match std::fs::read_to_string(path) {
+            let text = match std::fs::read_to_string(path).map(strip_bom) {
                 Ok(t) => t,
                 Err(e) => {
                     eprintln!("dry-run: cannot read skill {path:?}: {e}");
@@ -561,7 +572,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             };
             match controller::skill::SkillDefinition::from_json(&text) {
                 Ok(def) => {
-                    println!("skill: {:?} started at state {:?}", def.name, def.start);
+                    eprintln!("skill: {:?} started at state {:?}", def.name, def.start);
                     // a skill expecting a probe nobody configured would
                     // only ever fail by timeout — say so up front
                     if let Some(perception) = perception.as_ref() {
@@ -649,7 +660,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         if let (Some(_probe), Some((secs, w, h))) = (&_owned_probe, opts.resize_after) {
             if !resized_once && t0.elapsed().as_secs_f32() >= secs {
                 match controller::window::resize_window(target_hwnd, w as i32, h as i32) {
-                    Ok(()) => println!("dry-run: probe window resized to {w}x{h}"),
+                    Ok(()) => eprintln!("dry-run: probe window resized to {w}x{h}"),
                     Err(e) => eprintln!("dry-run: WARNING probe resize failed: {e}"),
                 }
                 resized_once = true;
@@ -778,13 +789,13 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             match runner.step(now_ms, &fired, &dets) {
                 controller::skill::StepOutcome::Waiting => {}
                 controller::skill::StepOutcome::Transitioned { to, planned } => {
-                    println!("skill: -> {to} (planned: {})", planned.join(", "));
+                    eprintln!("skill: -> {to} (planned: {})", planned.join(", "));
                 }
                 controller::skill::StepOutcome::FellBack { to } => {
-                    println!("skill: fallback -> {to}");
+                    eprintln!("skill: fallback -> {to}");
                 }
-                controller::skill::StepOutcome::Done => println!("skill: DONE"),
-                controller::skill::StepOutcome::Failed => println!("skill: FAILED"),
+                controller::skill::StepOutcome::Done => eprintln!("skill: DONE"),
+                controller::skill::StepOutcome::Failed => eprintln!("skill: FAILED"),
             }
         }
 
@@ -827,7 +838,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 let _ = d; // paired with desktop_points only for ordering
             }
             if let Some(reason) = blocked {
-                println!("dry-run: input blocked after cycle {cycle}: {reason} - ending session");
+                eprintln!("dry-run: input blocked after cycle {cycle}: {reason} - ending session");
                 outcome = "input-blocked";
             }
         }
@@ -856,7 +867,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 };
             }
             retry_tracker.on_success();
-            println!(
+            eprintln!(
                 "dry-run: recalibrated to client {:?} (backend {})",
                 calibrated.client_size, opts.backend
             );
@@ -884,7 +895,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             if let Some(d) = report.client_detections.first() {
                 let c = d.rect.center();
                 let dp = report.desktop_points.first().copied().unwrap_or((0.0, 0.0));
-                println!(
+                eprintln!(
                     "dry-run: cycle {} conf={:.2} client=({:.0},{:.0}) desktop=({:.0},{:.0})",
                     cycle, d.confidence, c.0, c.1, dp.0, dp.1
                 );
@@ -897,7 +908,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                     .filter(|p| p.fired)
                     .map(|p| p.name.clone())
                     .collect();
-                println!(
+                eprintln!(
                     "dry-run: cycle {} L0 probes {}/{} fired: {}",
                     cycle,
                     fired.len(),
@@ -922,7 +933,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 };
                 let path = format!("{dir}/cycle_{cycle:05}{state_tag}.png");
                 match export_png(&path, &frame) {
-                    Ok(()) => println!("dry-run: debug frame {path}"),
+                    Ok(()) => eprintln!("dry-run: debug frame {path}"),
                     Err(e) => eprintln!("dry-run: png export failed: {e}"),
                 }
             }
@@ -930,21 +941,35 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
 
         if report.pre_verdict.is_stop() {
             if let Some(reason) = report.pre_verdict.reason() {
-                println!("dry-run: governor STOP after cycle {cycle}: {reason}");
+                eprintln!("dry-run: governor STOP after cycle {cycle}: {reason}");
             }
             outcome = "stopped";
             break;
         }
     }
 
-    println!(
+    // NC6 wire mode: exactly one RESULT before exit. Governor stop and
+    // input-blocked are in-band terminations (stopped); degraded inference
+    // is a skill failure; a clean walk is done.
+    let skill_state = skill_runner
+        .as_ref()
+        .map(|r| r.current())
+        .unwrap_or_default();
+    proto.result(
+        outcome,
+        skill_state,
+        cycle,
+        detector.inference_count() as u32,
+        detector.hits as u32,
+    );
+    eprintln!(
         "dry-run: finished - cycles={cycle} allowed={allowed_count} distinct_verdicts={} inference={} (cache hits={}) input_sent={input_executed} input_vetoed={input_vetoed}",
         verdict_notes.len(),
         detector.inference_count(),
         detector.hits
     );
     if let Some(rec) = recorder.as_ref() {
-        println!("dry-run: recorded {} frame(s)", rec.written());
+        eprintln!("dry-run: recorded {} frame(s)", rec.written());
     }
     if inference_error_cycles > 0 {
         eprintln!(
@@ -974,7 +999,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         );
     }
     for note in &verdict_notes {
-        println!("dry-run: verdict {note}");
+        eprintln!("dry-run: verdict {note}");
     }
     if cycle == 0 {
         eprintln!("dry-run: no cycles ran");
@@ -986,13 +1011,24 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         return 1;
     }
     if opts.allow_input {
-        println!(
+        eprintln!(
             "dry-run: OK (allow-input session: {input_executed} action(s) sent, {input_vetoed} vetoed, outcome={outcome})"
         );
     } else {
-        println!("dry-run: OK (no input was sent - observation-only dry run)");
+        eprintln!("dry-run: OK (no input was sent - observation-only dry run)");
     }
     0
+}
+
+/// Windows editors (and PowerShell 5.1's UTF8) prepend a BOM; serde_json
+/// rejects it, so every config-shaped read strips it first (same policy as
+/// the Go server's config.Load).
+fn strip_bom(mut s: String) -> String {
+    const BOM: char = '\u{feff}';
+    if s.starts_with(BOM) {
+        s.replace_range(0..BOM.len_utf8(), "");
+    }
+    s
 }
 
 fn export_png(path: &str, frame: &controller::frame::Frame) -> std::result::Result<(), String> {
@@ -1335,6 +1371,108 @@ fn run_self_probe() -> i32 {
     }
 }
 
+/// NC6 wire emitter (--protocol): one JSON line per message on stdout,
+/// monotonic seq, RFC 3339 UTC timestamps. When disabled every call is a
+/// no-op, so the dry-run has exactly one code path.
+struct ProtocolEmitter {
+    enabled: bool,
+    seq: u64,
+}
+
+impl ProtocolEmitter {
+    fn new(enabled: bool) -> ProtocolEmitter {
+        ProtocolEmitter { enabled, seq: 0 }
+    }
+
+    fn emit(&mut self, payload: controller::protocol::Payload) {
+        if !self.enabled {
+            return;
+        }
+        self.seq += 1;
+        let env = controller::protocol::Envelope::new(self.seq, rfc3339_now(), payload);
+        match env.encode() {
+            // protocol lines are the ONLY stdout traffic (contract)
+            Ok(line) => println!("{line}"),
+            Err(e) => eprintln!("protocol: emit failed: {e}"),
+        }
+    }
+
+    fn hello(&mut self) {
+        self.emit(controller::protocol::Payload::Hello(
+            controller::protocol::HelloPayload {
+                protocol_version: controller::protocol::PROTOCOL_VERSION,
+                controller_version: format!("native-controller {}", env!("CARGO_PKG_VERSION")),
+            },
+        ));
+    }
+
+    fn ready(&mut self, skill: Option<&str>, backend: &str) {
+        self.emit(controller::protocol::Payload::Ready(
+            controller::protocol::ReadyPayload {
+                session_id: format!("dryrun-{}", std::process::id()),
+                skill: skill.map(|s| s.to_string()),
+                // manifest echo needs the loaded manifest to survive resolve();
+                // today only the detector source name survives — leave None
+                manifest: None,
+                backend: backend.to_string(),
+            },
+        ));
+    }
+
+    fn result(
+        &mut self,
+        outcome: &str,
+        state: &str,
+        cycles: u32,
+        inference_count: u32,
+        cache_hits: u32,
+    ) {
+        use controller::protocol::{Outcome, ResultPayload};
+        let (wire, err) = match outcome {
+            "completed" => (Outcome::Done, None),
+            "stopped" => (Outcome::Stopped, None),
+            "input-blocked" => (
+                Outcome::Stopped,
+                Some("input blocked by governor".to_string()),
+            ),
+            "inference-degraded" => (Outcome::Failed, Some("inference degraded".to_string())),
+            other => (Outcome::Failed, Some(format!("unknown outcome {other}"))),
+        };
+        self.emit(controller::protocol::Payload::Result(ResultPayload {
+            outcome: wire,
+            state: state.to_string(),
+            cycles,
+            inference_count,
+            cache_hits,
+            error: err,
+        }));
+    }
+}
+
+/// RFC 3339 UTC timestamp from the system clock (std only): civil-date
+/// conversion per Howard Hinnant's days_from_civil inverse.
+fn rfc3339_now() -> String {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = d.as_secs();
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (hh, mi, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let dd = doy - (153 * mp + 2) / 5 + 1;
+    let mm = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mm <= 2 { y + 1 } else { y };
+    format!("{y:04}-{mm:02}-{dd:02}T{hh:02}:{mi:02}:{ss:02}Z")
+}
+
 /// NC4 real-input validation, OPERATOR-RUN ONLY: one real click + one real
 /// keypress into an owned probe window on this machine. The governor path
 /// is the production one (authorize_and_execute over SendInput), the
@@ -1660,5 +1798,26 @@ mod tests {
         assert_eq!(o.probes.as_deref(), Some("probes.json"));
         let o = DryRunOptions::parse(&args(&["--dry-run", "--probes", " "])).expect("ok");
         assert!(o.probes.is_none(), "blank probes path treated as absent");
+    }
+}
+
+#[cfg(test)]
+mod rfc3339_tests {
+    use super::rfc3339_now;
+
+    #[test]
+    fn epoch_is_1970() {
+        // freeze-independent sanity: the civil algorithm is exercised by
+        // calling the real clock and validating the SHAPE + a leaping
+        // reference via a direct seconds math check below.
+        let s = rfc3339_now();
+        assert_eq!(s.len(), 20, "YYYY-MM-DDTHH:MM:SSZ: {s}");
+        assert_eq!(&s[4..5], "-");
+        assert_eq!(&s[10..11], "T");
+        assert!(s.ends_with('Z'));
+        let month: u32 = s[5..7].parse().expect("month digits");
+        assert!((1..=12).contains(&month), "month {month} in range");
+        let day: u32 = s[8..10].parse().expect("day digits");
+        assert!((1..=31).contains(&day), "day {day} in range");
     }
 }

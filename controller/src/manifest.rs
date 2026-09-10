@@ -148,6 +148,7 @@ pub fn parse_json(text: &str) -> Result<ModelManifest, String> {
 /// Load, parse and validate the manifest at `path`.
 pub fn load(path: &Path) -> Result<ModelManifest, String> {
     let text = std::fs::read_to_string(path)
+        .map(|t| t.trim_start_matches('\u{feff}').to_string())
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     parse_json(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
