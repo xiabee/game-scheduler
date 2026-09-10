@@ -170,6 +170,8 @@
 | M20 | 稳定性验证轮：①定向 `-race`（internal/native+task,新并发面）干净;②`cargo test --release` 157 绿（新浮点/时序代码 opt 下无回归）;③300s 协议全表面 soak:4008 周期、WS 12.4→9.9MB 平坦、句柄 110→111、缓存 96.9%、协议流恰 4 行（HELLO/READY/EVENT×1/RESULT done）——事件门控正确。**异常记录（诚实）**:该轮探针未触发（skill 10s 超时 failed）,与随后 30s 同参复跑（即触发,expected 行为）矛盾,判定为夜机负载瞬态;引擎超时/重试语义有单测背书,留观察 | PASS | (本轮无代码变更,+2 测试) | -race 干净;release 157 绿;see 左 |
 | M20b | 敌意复审今晚 Rust 新增面:发现 **Drag steps 无上界**（u32::MAX → 巨量 SendInput 事件分配）——clamp(1,64)+镜像测试;README 测试计数漂移改 150+ 写法 | PASS | 0c712a7 | clamp 断言测试;clippy 0 |
 
+| M21 | controller-smoke 扩容:协议模式段（stdout 逐行可解析+HELLO 首行+RESULT done 终行）+ 新旗标校验段（--infer-timeout 0→2、--device warp→2、cpu→0）+ WDAC 预热重试环（环境性拦截,与 ci-local 同源策略）。**过程教训（诚实记录）**:调试中 python 补丁把 `	` 展开成真实 TAB 损坏 4 处 `.	arget` 路径（症状=exit 1 无输出,与 WDAC 混淆）——已修复并把此类补丁改走 Edit 工具/明确转义 | PASS | 19733b2 | NIGHTLY VERIFY PASS 全段;CONTROLLER SMOKE PASS 含 2 新段 |
+
 
 ### 夜班收尾（2026-09-10 04:20 close）
 
