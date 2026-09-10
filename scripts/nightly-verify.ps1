@@ -93,6 +93,31 @@ python draft_to_skill.py --selftest
 if ($LASTEXITCODE -ne 0) { $script:failed += "draft-to-skill-selftest" }
 Set-Location -LiteralPath $repo
 
+# ---------- [5b] dashboard JS syntax guard ----------
+# index.html carries ~1500 lines of embedded JS edited by night agents; a
+# syntax break silently kills the whole dashboard. Node parses it the same
+# way a browser would (structure only, no DOM).
+if (Get-Command node -ErrorAction SilentlyContinue) {
+    Write-Host "== [5/5] dashboard JS syntax =="
+    $htmlPath = Join-Path $repo "internal/api/web/index.html"
+    $html = [System.IO.File]::ReadAllText($htmlPath)
+    $m = [regex]::Matches($html, "(?s)<script>(.*?)</script>")
+    $i = 0
+    $jsBad = $false
+    foreach ($mm in $m) {
+        $jsFile = Join-Path $env:TEMP ("nf_dash_" + $i + ".js")
+        [System.IO.File]::WriteAllText($jsFile, $mm.Groups[1].Value)
+        node --check $jsFile
+        if ($LASTEXITCODE -ne 0) { $script:failed += "dashboard-js-$i"; $jsBad = $true }
+        Remove-Item $jsFile -ErrorAction SilentlyContinue
+        $i++
+    }
+    if (-not $jsBad) { Write-Host "dashboard JS: OK ($($m.Count) script block(s))" }
+}
+else {
+    Write-Host "SKIP dashboard JS check: node not found."
+}
+
 # ---------- verdict ----------
 if ($script:failed.Count -gt 0) {
     Write-Host ("NIGHTLY VERIFY FAIL: " + ($script:failed -join ", "))
