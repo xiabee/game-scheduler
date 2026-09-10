@@ -184,6 +184,8 @@
 | M31 | secret 扫描快照回退：节点快照若剥离 .git,git grep 会「静默零扫描」——门禁弱化;新增非仓库回退=递归文本扫描（≤2MB、排除 .git/target/.nightly/dist、源码扩展名白名单）+ 显式模式公告;仓库内路径行为不变 | PASS | 425e51b | 本地仓库模式实测 PASS;回退路径为节点设计 |
 | M31b | REMOTE CI 诊断:win-devops 3 连 FAIL（exit=1,52-94s,确定性;本地同码全绿）——节点侧日志不可达（agent 无日志端点,SSH publickey 拒绝）,候选根因=节点 gosec 版本漂移或 govulncheck DB 环境;晨间运维清单#1=调取节点作业日志。LOCAL CI 为验收门槛（dispatcher 规则）,不以远端环境失败伪装代码失败 | PARTIAL | 425e51b | 远端 3 数据点;nightly-verify PASS ×2 复验 |
 
+| M32 | 1800s→7200s 长 soak 尝试（隐藏控制台,3fps+probes+skill）：20.3 分钟处探针窗口被外部销毁（IsWindow=false）→ 循环诚实停止（"window gone"→SUMMARY completed,1216s/3644 周期）——窗口消失检测与干净退出路径得到长会话验证；黑帧（隐藏控制台）导致 skill 超时 failed 属预期（探针无内容可匹配）。终止原因系外部销毁而非代码缺陷,与 M24 黑帧发现同族 | PASS | (本轮无代码变更) | TSV 全程解析;3644 周期零异常;SUMMARY completed |
+
 
 ### 夜班收尾（2026-09-11 08:40 close）
 
