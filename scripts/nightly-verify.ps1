@@ -78,7 +78,7 @@ Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 Note "== [4/5] ONNX soak (30s) =="
 $soakLog = Join-Path $env:TEMP ("nf_nightly_soak_" + [guid]::NewGuid().ToString("N") + ".tsv")
 Set-Location -LiteralPath (Join-Path $repo "controller")
-cmd /c ".\target\debug\controller.exe --dry-run --duration 30 --fps 15 --backend synthetic --model-path tests\fixtures\constant_yolo.manifest.json --session-log $soakLog 2>nul"
+cmd /c ".\target\debug\controller.exe --dry-run --protocol --duration 30 --fps 15 --backend synthetic --model-path tests\fixtures\constant_yolo.manifest.json --session-log $soakLog 2>nul"
 $code = $LASTEXITCODE
 if ($code -ne 0) { $script:failed += "onnx-soak" }
 if (Test-Path $soakLog) { Remove-Item $soakLog -ErrorAction SilentlyContinue }
