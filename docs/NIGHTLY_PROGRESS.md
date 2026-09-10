@@ -181,6 +181,9 @@
 
 | M30 | `--device gpu` 实机验证：本机 NVIDIA GPU 上 DirectX provider 会话真实建立,25 次推理 RESULT done;ONNX banner 从硬编码 device=cpu 改为回显实际 provider;READY manifest 回显同场实测生效。smoke 不加 gpu 段（无 GPU 节点经降级链诚实降 Mock,非失败） | PASS | (下方 commit) | 实机 gpu 会话 2s 干净退出;协议流 HELLO/READY(manifest)/RESULT |
 
+| M31 | secret 扫描快照回退：节点快照若剥离 .git,git grep 会「静默零扫描」——门禁弱化;新增非仓库回退=递归文本扫描（≤2MB、排除 .git/target/.nightly/dist、源码扩展名白名单）+ 显式模式公告;仓库内路径行为不变 | PASS | 425e51b | 本地仓库模式实测 PASS;回退路径为节点设计 |
+| M31b | REMOTE CI 诊断:win-devops 3 连 FAIL（exit=1,52-94s,确定性;本地同码全绿）——节点侧日志不可达（agent 无日志端点,SSH publickey 拒绝）,候选根因=节点 gosec 版本漂移或 govulncheck DB 环境;晨间运维清单#1=调取节点作业日志。LOCAL CI 为验收门槛（dispatcher 规则）,不以远端环境失败伪装代码失败 | PARTIAL | 425e51b | 远端 3 数据点;nightly-verify PASS ×2 复验 |
+
 
 ### 夜班收尾（2026-09-11 08:40 close）
 
