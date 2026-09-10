@@ -1591,10 +1591,15 @@ impl ProtocolEmitter {
 /// RFC 3339 UTC timestamp from the system clock (std only): civil-date
 /// conversion per Howard Hinnant's days_from_civil inverse.
 fn rfc3339_now() -> String {
-    let d = std::time::SystemTime::now()
+    let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = d.as_secs();
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    rfc3339_from_unix(secs)
+}
+
+/// Pure conversion, unix seconds -> `YYYY-MM-DDTHH:MM:SSZ`.
+fn rfc3339_from_unix(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let (hh, mi, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
@@ -1942,7 +1947,19 @@ mod tests {
 
 #[cfg(test)]
 mod rfc3339_tests {
-    use super::rfc3339_now;
+    use super::{rfc3339_from_unix, rfc3339_now};
+
+    #[test]
+    fn known_timestamps_convert_exactly() {
+        assert_eq!(rfc3339_from_unix(0), "1970-01-01T00:00:00Z");
+        assert_eq!(
+            rfc3339_from_unix(951_782_400),
+            "2000-02-29T00:00:00Z",
+            "leap day"
+        );
+        assert_eq!(rfc3339_from_unix(1_700_000_000), "2023-11-14T22:13:20Z");
+        assert_eq!(rfc3339_from_unix(1_767_225_600), "2026-01-01T00:00:00Z");
+    }
 
     #[test]
     fn epoch_is_1970() {
