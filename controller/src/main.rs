@@ -619,6 +619,9 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             return 1;
         }
     };
+    // D1: terminal skill outcomes (Done/Failed) repeat every cycle from the
+    // engine, but only the FIRST one is a semantic change worth an EVENT.
+    let mut skill_terminal_emitted = false;
     let mut limiter = match FpsLimiter::new(opts.fps, std::time::Instant::now) {
         Ok(l) => l,
         Err(e) => {
@@ -830,17 +833,23 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 }
                 controller::skill::StepOutcome::Done => {
                     eprintln!("skill: DONE");
-                    proto.event(cycle, "done", &fired_names, &report.client_detections, &[]);
+                    if !skill_terminal_emitted {
+                        proto.event(cycle, "done", &fired_names, &report.client_detections, &[]);
+                        skill_terminal_emitted = true;
+                    }
                 }
                 controller::skill::StepOutcome::Failed => {
                     eprintln!("skill: FAILED");
-                    proto.event(
-                        cycle,
-                        "failed",
-                        &fired_names,
-                        &report.client_detections,
-                        &[],
-                    );
+                    if !skill_terminal_emitted {
+                        proto.event(
+                            cycle,
+                            "failed",
+                            &fired_names,
+                            &report.client_detections,
+                            &[],
+                        );
+                        skill_terminal_emitted = true;
+                    }
                 }
             }
         }
