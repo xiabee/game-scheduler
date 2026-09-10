@@ -177,6 +177,8 @@
 
 | M25 | 黑帧可观测化：`Frame::is_black_sampled(步长采样)` + 会话循环连续 10 周期全黑→响亮 WARNING（一次性）+ SUMMARY `black_cycles` 计数——把「RDP/隐藏控制台黑帧」从静默失败变成显式告警;隐藏启动 4s 实测告警打印、可见对照无误报 | PASS | (下方 commit) | 单测 2（全黑/含点亮像素/采样间隙语义）;实机双对照 |
 
+| M28 | nightly-verify 增设 dashboard JS 语法守卫（78KB 内嵌 JS 为夜班高频编辑面,语法损坏=整 UI 静默失效;node --check 逐 script 块解析）| PASS | e7e29b1 | 守卫实测通过（1 script block OK）|
+
 
 ### 夜班收尾（2026-09-10 04:20 close）
 
