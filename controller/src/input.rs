@@ -143,7 +143,10 @@ impl InputController for SendInputController {
                 ]
             }
             PlannedInput::Drag { from, to, steps } => {
-                let steps = steps.max(1);
+                // hostile-input defense: the trajectory is interpolated
+                // in-memory, so an unbounded step count would allocate
+                // unbounded SendInput events
+                let steps = steps.clamp(1, 64);
                 let mut v = Vec::with_capacity(steps as usize + 3);
                 v.push(mouse_move_input(from.0, from.1));
                 v.push(mouse_flag_input(MOUSEEVENTF_LEFTDOWN, 0));
@@ -681,5 +684,20 @@ mod tests {
         assert!(InputError::Blocked("not foreground".into())
             .to_string()
             .contains("blocked"));
+    }
+}
+
+#[cfg(test)]
+mod drag_bounds_tests {
+    // The executor interpolates a drag trajectory in memory: the step count
+    // must clamp (1..=64) so a hostile step count cannot allocate unbounded
+    // SendInput events. Mirrors the clamp in SendInputController::execute.
+    #[test]
+    fn drag_step_count_is_capped() {
+        let clamp = |steps: u32| -> usize { steps.clamp(1, 64) as usize + 3 };
+        assert_eq!(clamp(0), 4, "steps 0 clamps to 1 -> 4 events");
+        assert_eq!(clamp(1), 4);
+        assert_eq!(clamp(64), 67);
+        assert_eq!(clamp(u32::MAX), 67, "hostile step count stays bounded");
     }
 }
