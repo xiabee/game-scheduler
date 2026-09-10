@@ -115,6 +115,35 @@ def anchor_between(gw: int, gh: int, a: bytes, b: bytes, blocks: int) -> dict | 
     }
 
 
+def dominant_color(frame_path: Path, anchor: dict) -> list[int] | None:
+    """Average RGB inside the anchor region of one frame (normalized coords
+    → pixels). Gives the probe layer a concrete color target for this step."""
+    try:
+        w, h, ch, pix = pnglite.read_png(frame_path)
+    except Exception:
+        return None
+    if ch < 3:
+        return None
+    x0 = max(0, int(anchor["x"] * w))
+    y0 = max(0, int(anchor["y"] * h))
+    x1 = min(w, max(x0 + 1, int((anchor["x"] + anchor["w"]) * w)))
+    y1 = min(h, max(y0 + 1, int((anchor["y"] + anchor["h"]) * h)))
+    step = max(1, (x1 - x0) * (y1 - y0) // 4096)
+    rs = gs = bs = n = 0
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            if step > 1 and (x * 31 + y * 17) % step != 0:
+                continue
+            o = (y * w + x) * ch
+            rs += pix[o]
+            gs += pix[o + 1]
+            bs += pix[o + 2]
+            n += 1
+    if n == 0:
+        return None
+    return [rs // n, gs // n, bs // n]
+
+
 def learn(frames_dir: Path, max_side: int, threshold: float, block_threshold: float) -> dict:
     frames = sorted(p for p in frames_dir.iterdir()
                     if p.is_file() and p.suffix.lower() == ".png")
@@ -159,6 +188,13 @@ def learn(frames_dir: Path, max_side: int, threshold: float, block_threshold: fl
         if start > 0:
             prev_rep = grids[start - 1][-1]
             anchor = anchor_between(gw, gh, prev_rep, rep, DEFAULT_BLOCK) or {}
+            if anchor:
+                # The probe layer needs a concrete color to watch for: sample
+                # the CURRENT segment's look at that region (re-reads only
+                # this segment's representative PNG).
+                color = dominant_color(frames[end - 1], anchor)
+                if color:
+                    anchor["dominant_rgb"] = color
         else:
             anchor = {}
         mean_at_entry, peak_at_entry = pair_stats[start - 1] if start > 0 else (0.0, 0.0)

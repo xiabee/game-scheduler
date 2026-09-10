@@ -14,6 +14,8 @@ tools/vision/
   pnglite.py               stdlib-only PNG 读写(8-bit RGB/RGBA, NC9 学习管线底座)
   learn_route.py           NC9: 帧序列 → 场景切分 + 归一化锚点 → route-learning
                            draft JSON (纯离线, 无模型/无 GPU/无 ffmpeg 依赖)
+  draft_to_skill.py        NC9→NC3 桥: draft → probes.json + skill.json
+                           (controller --dry-run --replay 可直接走查)
 ```
 
 采集→训练闭环：`controller --record` 录帧 → `frames_to_dataset.py` 转
@@ -28,9 +30,20 @@ tools/vision/
 做相邻帧差分，按「全局均值 or 峰值块变化」切分场景段，并输出每段进入
 时变化区域的**归一化锚点**（0..1，分辨率无关硬约束同样约束学习产物）。
 
-- 产物 `route-draft.json`（schema_version 1）是 NC9→NC3 的桥：后续
-  milestone 把段+锚点标注成 SkillDefinition 草案（供 SkillRunner dry-run
-  回放），本脚本只负责结构发现。
+- 产物 `route-draft.json`（schema_version 1）经 `draft_to_skill.py` 转成
+  controller 可直接消费的 `probes.json` + `skill.json`（NC3
+  SkillDefinition 契约）：每段一个 L0 探针（锚点区域 + 学习到的主色，
+  归一化按录制帧尺寸烙定为 client 像素——注意探针 expected 为 BGRA 通道
+  序，转换器已处理），状态机 step_00→…→done 线性走查。端到端验证：
+
+  ```text
+  controller --dry-run --replay <frames_dir> \
+      --probes <out>/probes.json --skill <out>/skill.json
+  # 期望轨迹: skill: -> step_01 (planned: ...) → -> done → DONE
+  ```
+
+  已在合成两场景序列上实测走查至 DONE（计划动作携带归一化锚点坐标，
+  零真实输入）。
 - 指标敏感性：全局均值抓整屏切换，峰值块阈值抓局部 UI 变化（弹窗/
   菜单展开只占画面几个百分点，全局均值会把它稀释掉——恰是 NC9 要抓
   的事件）。两阈值均可 CLI 调。
