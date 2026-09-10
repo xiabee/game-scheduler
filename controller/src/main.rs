@@ -663,6 +663,13 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     let mut consecutive_inference_errors: u32 = 0;
     let mut input_executed: u32 = 0;
     let mut input_vetoed: u32 = 0;
+    // RDP/hidden-console black-capture watchdog: consecutive uniformly-black
+    // captures make every detector and probe silently blind. The synthetic
+    // and probe scenes always contain lit pixels, so blackness here means
+    // the CAPTURE is broken, not the scene.
+    const BLACK_WARN_AFTER: u32 = 10;
+    let mut black_run: u32 = 0;
+    let mut black_warned = false;
     // ~2s of dead inference at the default 15fps: a detector that fails
     // this persistently ends the session instead of burning the budget.
     const INFERENCE_DEATH_BUDGET: u32 = 30;
@@ -780,6 +787,20 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 }
             },
         };
+
+        if let Some(frame) = report.frame.as_ref() {
+            if frame.is_black_sampled(16) {
+                black_run += 1;
+                if black_run == BLACK_WARN_AFTER {
+                    eprintln!(
+                        "dry-run: WARNING {black_run} consecutive uniformly-black captures - the capture is broken (RDP/hidden-console family), not the scene"
+                    );
+                    black_warned = true;
+                }
+            } else {
+                black_run = 0;
+            }
+        }
 
         if let Some(log) = session_log.as_mut() {
             let skill_state = skill_runner.as_ref().map(|r| r.current());
@@ -1060,6 +1081,9 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         }
         if opts.allow_input {
             extra.push(("input_sent".to_string(), input_executed.to_string()));
+        }
+        if black_warned {
+            extra.push(("black_cycles".to_string(), black_run.to_string()));
         }
         log.write_summary(
             cycle,

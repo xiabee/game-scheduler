@@ -84,6 +84,28 @@ impl Frame {
 
     /// Write a BGRA value; silently ignored when out of bounds so overlay
     /// drawing can paint near edges without range checks at call sites.
+    /// True when a strided sample of the frame is uniformly black. The
+    /// RDP/hidden-console capture family yields exactly this signature
+    /// (see NIGHTLY_PROGRESS environment findings), and detecting it turns
+    /// a silent "nothing detected" session into an explicit warning.
+    pub fn is_black_sampled(&self, step: u32) -> bool {
+        let step = step.max(1);
+        let mut y = 0u32;
+        while y < self.height {
+            let mut x = 0u32;
+            while x < self.width {
+                if let Some([b, g, r, _a]) = self.pixel(x, y) {
+                    if b != 0 || g != 0 || r != 0 {
+                        return false;
+                    }
+                }
+                x += step;
+            }
+            y += step;
+        }
+        true
+    }
+
     pub fn set_pixel(&mut self, x: u32, y: u32, bgra: [u8; 4]) {
         if x >= self.width || y >= self.height {
             return;
@@ -149,5 +171,26 @@ mod tests {
         let f = Frame::new(4, 4);
         assert_eq!(f.row(0).unwrap().len(), 16);
         assert!(f.row(4).is_none());
+    }
+}
+
+#[cfg(test)]
+mod black_tests {
+    use super::*;
+
+    #[test]
+    fn black_detection_matches_sampled_content() {
+        let mut f = Frame::new(64, 48);
+        assert!(f.is_black_sampled(4), "all-zero frame is black");
+
+        // a single lit sampled pixel breaks blackness
+        f.set_pixel(32, 24, [16, 40, 200, 255]);
+        assert!(!f.is_black_sampled(4));
+
+        // lit pixel BETWEEN samples is invisible to the sampler: documented
+        // sampling trade-off, not a bug
+        let mut g = Frame::new(64, 48);
+        g.set_pixel(33, 25, [16, 40, 200, 255]);
+        assert!(g.is_black_sampled(4));
     }
 }
