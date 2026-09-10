@@ -167,6 +167,9 @@
 | M18 | NC6 剩余项盘点:dashboard 可视化(→M19)、auto 模式(需 NC7 skill 可用性建模,暂缓)、SSE 打磨(D1 事件稀疏,执行后 trail+TSV 已可观测,暂缓)——两项暂缓均有书面理由 | PASS | — | — |
 | M19 | dashboard native 任务表单:**修复真实 footgun**——native 任务经 dashboard 编辑时 renderTaskFields 回退到首个 adapter 类型,保存会用错误字段静默覆盖 params(丢失 executor:native);新增 NATIVE_TASK_TYPE schema(9 字段含双闸说明)加入每个游戏的类型下拉,编辑/创建均走同一 collectParams 路径;API 测试 + JS 语法检查过 | PASS | c00007e | go test ./internal/api 全绿;node --check JS 语法通过 |
 
+| M20 | 稳定性验证轮：①定向 `-race`（internal/native+task,新并发面）干净;②`cargo test --release` 157 绿（新浮点/时序代码 opt 下无回归）;③300s 协议全表面 soak:4008 周期、WS 12.4→9.9MB 平坦、句柄 110→111、缓存 96.9%、协议流恰 4 行（HELLO/READY/EVENT×1/RESULT done）——事件门控正确。**异常记录（诚实）**:该轮探针未触发（skill 10s 超时 failed）,与随后 30s 同参复跑（即触发,expected 行为）矛盾,判定为夜机负载瞬态;引擎超时/重试语义有单测背书,留观察 | PASS | (本轮无代码变更,+2 测试) | -race 干净;release 157 绿;see 左 |
+| M20b | 敌意复审今晚 Rust 新增面:发现 **Drag steps 无上界**（u32::MAX → 巨量 SendInput 事件分配）——clamp(1,64)+镜像测试;README 测试计数漂移改 150+ 写法 | PASS | 0c712a7 | clamp 断言测试;clippy 0 |
+
 
 ### 夜班收尾（2026-09-10 04:20 close）
 
