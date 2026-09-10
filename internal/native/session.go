@@ -51,6 +51,18 @@ type SessionResult struct {
 	Err      error
 }
 
+// CommandLine renders the invocation for logging/storage — informational
+// only, never re-parsed. Same quoting rules as runner.Spec.CommandLine.
+func (c SessionConfig) CommandLine() string {
+	parts := append([]string{c.ControllerPath}, c.Args...)
+	for i, p := range parts {
+		if strings.ContainsAny(p, " \t\"") {
+			parts[i] = fmt.Sprintf("%q", p)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 // EventSink receives EVENT messages as they arrive, on the session's
 // dispatch goroutine, in wire order. Keep handlers quick or forward to a
 // channel — a slow sink delays the session loop.

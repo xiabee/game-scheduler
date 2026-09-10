@@ -98,8 +98,23 @@ Go                                  controller
   不做长驻复用。理由:与现有 timeout/cancel/进程树清理语义零冲突;
   WinML session 建立开销为百毫秒级,长驻复用引入的状态隔离复杂度
   不值得。
-- **D4 `executor = native | external | auto` 配置进入点:保持开放,**
-  在 NC6 实施(Go 侧 config schema、任务模型、dashboard 暴露一起定)。
+- **D4 `executor` 进入点 = 任务 Params 字段(2026-09-11 定稿)。**
+  任务 Params JSON 增加 `"executor":"native"`(缺省/其他值=既有
+  external 路径,零迁移成本);配套契约与双保险如下——
+  - config:`native_controller_path`(空=native 执行器不可用,任务
+    fail-fast 且报错明确)、`native_allow_input`(真实输入的配置级
+    总闸,默认 false);
+  - 任务 params:`skill`/`probes`/`window`(默认 @probe)/`backend`/
+    `model`/`dry_run`(默认 true)/`allow_input`(默认 false)/
+    `duration_sec`;
+  - 真实输入需要 params.allow_input ∧ !dry_run ∧ config.native_allow_input
+    三者同时成立,控制器侧 SafetyGovernor 仍是逐动作最终裁决;
+  - RESULT→Execution 映射:done→success,failed/stopped→failed
+    (governor stop 属业务终态),cancelled→cancelled,timeout→failed;
+    仅进程级故障(SessionError)参与 MaxRetries 重试。
+  - Go 侧落地:`internal/native`(协议镜像+会话执行器)、
+    `internal/task/native.go`(params 契约+分发)、`cmd/fake-controller`
+    (无游戏测试缝)。
 
 ## 复用现有 runner 基建
 

@@ -58,6 +58,19 @@ type Config struct {
 	// toast via BurntToast, or just a log): see README. Empty disables it.
 	NotifyCmd string `json:"notify_cmd"`
 
+	// NativeControllerPath is the executable path of the Rust native
+	// controller (ROADMAP NC6, draft decision D4). When set, tasks whose
+	// params declare "executor":"native" run through the NC6 session
+	// protocol; when empty, such tasks fail fast with a clear message
+	// (native executor is opt-in infrastructure).
+	NativeControllerPath string `json:"native_controller_path"`
+
+	// NativeAllowInput is the config-level gate for real input synthesis:
+	// a native task only passes --allow-input when BOTH the task params
+	// (allow_input:true) and this switch are on. Dry-run observation never
+	// needs it. Default false — night work must not send input.
+	NativeAllowInput bool `json:"native_allow_input"`
+
 	// ExecutionRetentionDays prunes finished executions older than this many
 	// days on startup and every 6 hours (default 30). At least the newest 1000
 	// rows are always kept, and pending/running rows are never deleted.

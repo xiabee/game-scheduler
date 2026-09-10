@@ -11,5 +11,7 @@
   "monitor_interval_sec": 3,
   "overload_policy": "alert",
   "notify_cmd": "",
-  "execution_retention_days": 30
+  "execution_retention_days": 30,
+  "native_controller_path": "",
+  "native_allow_input": false
 }

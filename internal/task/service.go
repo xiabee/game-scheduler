@@ -280,6 +280,10 @@ func (s *Service) Preflight(taskID int64) (Preflight, error) {
 	if err != nil {
 		return Preflight{}, err
 	}
+	// NC6: native tasks preflight against the controller + declared files.
+	if isNativeTask(t) {
+		return s.nativePreflight(t)
+	}
 	g, err := s.store.GetGame(t.GameID)
 	if err != nil {
 		return Preflight{}, err
@@ -437,6 +441,11 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	t, err := s.store.GetTask(exec.TaskID)
 	if err != nil {
 		return s.finishWithError(exec, fmt.Errorf("load task: %w", err))
+	}
+	// NC6: native-executor tasks bypass the external-adapter path
+	// entirely — no adapter command line, no game tool layout checks.
+	if isNativeTask(t) {
+		return s.executeNative(ctx, exec, execID, t)
 	}
 	g, err := s.store.GetGame(t.GameID)
 	if err != nil {
