@@ -1782,6 +1782,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_infertimeout_and_device_flags() {
+        let o = DryRunOptions::parse(&args(&["--dry-run", "--infer-timeout", "250"])).expect("ok");
+        assert_eq!(o.infer_timeout_ms, 250);
+        assert!(!o.protocol);
+        assert!(!o.allow_input);
+        let e = DryRunOptions::parse(&args(&["--dry-run", "--infer-timeout", "0"])).unwrap_err();
+        assert!(e.contains("--infer-timeout"), "{e}");
+        let e =
+            DryRunOptions::parse(&args(&["--dry-run", "--infer-timeout", "300001"])).unwrap_err();
+        assert!(e.contains("300000"), "{e}");
+        let o = DryRunOptions::parse(&args(&["--dry-run", "--protocol"])).expect("protocol flag");
+        assert!(o.protocol);
+    }
+
+    #[test]
     fn parse_defaults_without_flags() {
         let o = DryRunOptions::parse(&args(&["--dry-run"])).expect("ok");
         assert_eq!(o.window, "@probe");
