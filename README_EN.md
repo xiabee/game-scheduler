@@ -271,7 +271,8 @@ EVENT trail is stored in the execution's stdout field.
 
 Learning pipeline (NC9): `tools/vision/learn_route.py` +
 `draft_to_skill.py` produce skill/probe drafts offline from recorded frames
-(see tools/vision/README.md).
+(see tools/vision/README.md). Full operator path:
+[docs/native-quickstart.md](docs/native-quickstart.md).
 
 ---
 
