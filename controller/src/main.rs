@@ -764,6 +764,20 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
 
         if let Some(log) = session_log.as_mut() {
             let skill_state = skill_runner.as_ref().map(|r| r.current());
+            // NC2/NC9: fired-probe names as a trailing TSV column (only
+            // when probes are configured — classic sessions stay intact).
+            let probes_col = if report.evidence.probes.is_empty() {
+                None
+            } else {
+                let names: Vec<String> = report
+                    .evidence
+                    .probes
+                    .iter()
+                    .filter(|p| p.fired)
+                    .map(|p| p.name.clone())
+                    .collect();
+                Some(names.join(","))
+            };
             log.write_cycle(&controller::session::SessionLine {
                 cycle,
                 elapsed_ms: t0.elapsed().as_millis(),
@@ -771,6 +785,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                 backend: &opts.backend,
                 report: &report,
                 skill_state,
+                probes_fired: probes_col,
             });
         }
 

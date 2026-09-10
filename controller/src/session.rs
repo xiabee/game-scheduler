@@ -21,6 +21,11 @@ pub struct SessionLine<'a> {
     /// (rendered as a trailing `skill_state` column; `None` keeps the
     /// classic column count for sessions without a skill).
     pub skill_state: Option<&'a str>,
+    /// NC2/NC9: comma-joined FIRED probe names when probes are configured
+    /// (rendered as a trailing column after `skill_state`; `None` keeps
+    /// the column count unchanged for sessions without probes). An empty
+    /// string means "configured, none fired this cycle".
+    pub probes_fired: Option<String>,
 }
 
 /// Sanitize a field for TSV: newlines/tabs become spaces so a record is
@@ -114,12 +119,18 @@ impl SessionLogger {
         };
         // the skill column exists only when a skill drives the session, so
         // classic sessions keep their exact historical column count
+        // trailing columns exist only for the features a session actually
+        // uses, so classic sessions keep their exact historical column count
         let skill_col = match line.skill_state {
             Some(state) => format!("\t{}", field(state)),
             None => String::new(),
         };
+        let probes_col = match &line.probes_fired {
+            Some(names) => format!("\t{}", field(names)),
+            None => String::new(),
+        };
         let record = format!(
-            "CYCLE\t{}\t{}\t{:?}\t{}\t{}\t{}\t{}{}\n",
+            "CYCLE\t{}\t{}\t{:?}\t{}\t{}\t{}\t{}{}{}\n",
             line.cycle,
             line.elapsed_ms,
             line.cycle_duration,
@@ -127,7 +138,8 @@ impl SessionLogger {
             verdict_tag(&line.report.pre_verdict),
             verdict,
             det_summary.join(";"),
-            skill_col
+            skill_col,
+            probes_col
         );
         match f.write_all(record.as_bytes()).and_then(|_| f.flush()) {
             Ok(()) => self.written += 1,
@@ -205,6 +217,7 @@ mod tests {
                 backend: "gdi",
                 report: &report,
                 skill_state: Some("menu"),
+                probes_fired: Some("daily_banner".into()),
             };
             log.write_cycle(&line);
             log.write_summary(
@@ -231,8 +244,8 @@ mod tests {
         let cols: Vec<&str> = lines[0].split('\t').collect();
         assert_eq!(
             cols.len(),
-            9,
-            "8 classic columns + trailing skill_state, got {:?}",
+            10,
+            "8 classic + skill_state + probes_fired, got {:?}",
             cols
         );
         assert!(
@@ -246,6 +259,7 @@ mod tests {
             cols[7]
         );
         assert_eq!(cols[8], "menu", "skill_state column appended");
+        assert_eq!(cols[9], "daily_banner", "probes_fired column appended");
         assert!(
             lines[1].starts_with(
                 "SUMMARY\tcycles=10\tallowed=9\tdistinct_verdicts=2\toutcome=completed\tinference=3\tcache_hits=5\tskill_state=menu"
@@ -271,6 +285,7 @@ mod tests {
                 backend: "synthetic",
                 report: &report,
                 skill_state: None,
+                probes_fired: None,
             };
             log.write_cycle(&line);
         }
