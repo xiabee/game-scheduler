@@ -237,6 +237,44 @@ Execution logs are pruned automatically: finished executions older than
 and every 6 hours; the newest 1000 rows are always kept and pending/running
 rows are never touched, so the database stays bounded over long runs.
 
+## 🎮 Native Controller tasks (executor=native, NC6)
+
+The self-hosted Rust controller is wired into the scheduler: a task whose
+params declare `"executor":"native"` runs over the NC6 session protocol
+(process stdin/stdout JSON lines) — no external tool required.
+
+```json
+{
+  "executor": "native",
+  "skill": "skills/daily.json",
+  "probes": "skills/probes.json",
+  "window": "@probe",
+  "backend": "auto",
+  "dry_run": true,
+  "duration_sec": 30
+}
+```
+
+**Enable it** by pointing `native_controller_path` at controller.exe in the
+config (empty = native executor disabled; such tasks fail fast with a clear
+message).
+
+**Input double gate**: real key/mouse synthesis requires task params
+`allow_input:true` AND `dry_run:false` AND config `native_allow_input:true`.
+The SafetyGovernor stays the per-action authority (HWND identity, foreground,
+rate, same-point guard). Night/unattended work keeps everything off.
+
+**RESULT → execution mapping**: done → success; failed/stopped → failed
+(a governor stop is an in-band termination); cancel/timeout match the
+external-task semantics. Session TSVs land under `<data_dir>/native/`, the
+EVENT trail is stored in the execution's stdout field.
+
+Learning pipeline (NC9): `tools/vision/learn_route.py` +
+`draft_to_skill.py` produce skill/probe drafts offline from recorded frames
+(see tools/vision/README.md).
+
+---
+
 > 🤖 **One-command smoke test (no game involved)**:
 > [examples/windows_smoke.ps1](examples/windows_smoke.ps1) walks the whole chain
 > with a harmless fake tool (a copied cmd.exe) — `discover → create game →

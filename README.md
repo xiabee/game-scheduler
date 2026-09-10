@@ -557,6 +557,32 @@ Get-Content backup_request.json | ctl -server $S -data - planner import
 
 ---
 
+## 🎮 Native Controller 任务(executor=native,NC6)
+
+自研 Rust controller 已接入调度器:任务 Params 里声明 `"executor":"native"` 即走原生会话协议(进程 stdin/stdout JSON lines),无需外部工具。
+
+```json
+{
+  "executor": "native",
+  "skill": "skills/daily.json",      // 可选,SkillDefinition(NC3 契约)
+  "probes": "skills/probes.json",    // 可选,L0 探针定义
+  "window": "@probe",                // 窗口标题子串;@probe=自带探针窗口
+  "backend": "auto",                 // auto|wgc|gdi|synthetic
+  "dry_run": true,                   // 默认 true:只观察+记录计划动作
+  "duration_sec": 30
+}
+```
+
+**启用前提**:config 里 `native_controller_path` 指向 controller.exe(空=native 执行器关闭,任务 fail-fast 并明确报错)。
+
+**输入双闸**:真实键鼠输入需要 任务参数 `allow_input:true` **且** `dry_run:false` **且** config `native_allow_input:true` 三者同时成立;SafetyGovernor 仍是逐动作最终裁决(HWND 身份/前台/频率/同点连击)。夜班与无人值守场景默认全关。
+
+**RESULT→执行状态映射**:done→success;failed/stopped→failed(governor 停止属业务终态);cancel/timeout 与外部任务语义一致。会话 TSV 落在 `<data_dir>/native/exec-<id>.tsv`,EVENT 轨迹进执行记录 stdout 字段。
+
+学习管线(NC9):`tools/vision/learn_route.py` + `draft_to_skill.py` 可从录制帧离线产出 skill/probes 草案(见 tools/vision/README.md)。
+
+---
+
 ## 🖥️ 命令行(`ctl`)
 
 > 全局参数(`-server`、``-token``、`-data`、`-game` …)必须放在**资源/动作之前**,例如 `ctl -server http://... -data '{...}' games add`。服务器开启鉴权时传 `-token`(或 `GS_TOKEN`)。
