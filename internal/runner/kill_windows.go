@@ -36,7 +36,10 @@ func assignJob(p *os.Process) (release func(), err error) {
 		_ = windows.CloseHandle(h)
 		return func() {}, err
 	}
-	ph, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(p.Pid))
+	// Windows PIDs are DWORDs from the OS: os.Process.Pid can never be
+	// negative nor exceed uint32 on this platform, so both conversions in
+	// this file are lossless for any PID Windows can hand out.
+	ph, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(p.Pid)) //#nosec G115 -- Windows PIDs are DWORDs, see comment above
 	if err != nil {
 		_ = windows.CloseHandle(h)
 		return func() {}, err
@@ -66,7 +69,7 @@ func killProcessTree(p *os.Process) error {
 	if p == nil {
 		return nil
 	}
-	pid := int32(p.Pid)
+	pid := int32(p.Pid) //#nosec G115 -- same DWORD-PID argument; gopsutil's PID API is int32-shaped
 	err := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(int(pid))).Run()
 	if err == nil {
 		return nil

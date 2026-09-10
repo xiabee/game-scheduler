@@ -46,6 +46,9 @@ $cfg = Join-Path $work "config.json"
   "auth_token": "nightly-verify-token"
 }
 '@ -replace "PLACEHOLDER", $dataDir | Set-Content -Path $cfg -Encoding UTF8
+# The token above is a synthetic placeholder for the throwaway local test
+# server in this battery (isolated temp dir); scripts/ci-local.ps1 secret
+# scan allowlists this exact value.
 
 go build -o (Join-Path $work "gs-server.exe") ./cmd/server
 if ($LASTEXITCODE -ne 0) { $script:failed += "go build server" }

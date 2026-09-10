@@ -67,6 +67,55 @@ Write-Host "== go build =="
 go build ./...
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# --- Security stage ----------------------------------------------------------
+# govulncheck (known-vuln scan, symbol level) + gosec (static analysis, HIGH
+# severity x HIGH confidence gate) + a credential-pattern scan over git-tracked
+# files. Scanners are resolved in GOPATH\bin; a node without them skips
+# honestly (same policy as the Rust gate). #nosec annotations with a written
+# reason are the only accepted suppressions.
+$gopath = (& go env GOPATH) | Select-Object -First 1
+$govuln = Join-Path $gopath "govulncheck.exe"
+$gosecExe = Join-Path $gopath "gosec.exe"
+
+if (Test-Path $govuln) {
+    Write-Host "== govulncheck =="
+    & $govuln ./...
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+else {
+    Write-Host "SKIP govulncheck: not found in GOPATH\bin (go install golang.org/x/vuln/cmd/govulncheck@latest)."
+}
+
+if (Test-Path $gosecExe) {
+    Write-Host "== gosec (severity=high confidence=high) =="
+    & $gosecExe -severity high -confidence high -quiet ./...
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+else {
+    Write-Host "SKIP gosec: not found in GOPATH\bin (go install github.com/securego/gosec/v2/cmd/gosec@latest)."
+}
+
+Write-Host "== secret scan (git-tracked files) =="
+# High-signal credential shapes only. The sole allowlisted value is the
+# synthetic token inside scripts/nightly-verify.ps1 (throwaway local test
+# server in an isolated temp dir).
+$patterns = @(
+    "-----BEGIN [A-Z ]*PRIVATE KEY-----",
+    "ghp_[A-Za-z0-9]{20,}",
+    "github_pat_[A-Za-z0-9_]{20,}",
+    "AKIA[0-9A-Z]{16}",
+    "xox[baprs]-[A-Za-z0-9-]{10,}",
+    "(password|secret|api_key|apikey|auth_token)[""']*\s*[:=]\s*[""']*[A-Za-z0-9+/_-]{16,}"
+)
+$grepArgs = @("grep", "-I", "-n")
+foreach ($p in $patterns) { $grepArgs += @("-e", $p) }
+$secretHits = & git @grepArgs | Where-Object { $_ -notmatch "nightly-verify-token" }
+if ($secretHits) {
+    Write-Host "secret scan FAILED:"
+    $secretHits
+    exit 1
+}
+
 # --- Rust controller gate (NC0) -------------------------------------------
 # Runs when cargo exists. Nodes without the Rust toolchain (win-devops)
 # skip honestly instead of failing: remote acceptance covers the Go side
