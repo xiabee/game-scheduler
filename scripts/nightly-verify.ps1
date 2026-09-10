@@ -23,17 +23,17 @@ $script:failed = @()
 function Note([string]$msg) { Write-Host $msg }
 
 # ---------- [1] local CI (Go + Rust) ----------
-Note "== [1/4] ci-local =="
+Note "== [1/5] ci-local =="
 & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ci-local.ps1
 if ($LASTEXITCODE -ne 0) { $script:failed += "ci-local" }
 
 # ---------- [2] controller smoke ----------
-Note "== [2/4] controller smoke =="
+Note "== [2/5] controller smoke =="
 & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\controller-smoke.ps1
 if ($LASTEXITCODE -ne 0) { $script:failed += "controller-smoke" }
 
 # ---------- [3] windows full-chain smoke (isolated temp server) ----------
-Note "== [3/4] windows full-chain smoke =="
+Note "== [3/5] windows full-chain smoke =="
 $work = Join-Path $env:TEMP ("nf_nightly_" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 # forward slashes: backslashes would be invalid JSON escapes
@@ -70,13 +70,20 @@ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 
 # ---------- [4] 30s ONNX soak (fixture, cache + degradation surfaces) ----------
-Note "== [4/4] ONNX soak (30s) =="
+Note "== [4/5] ONNX soak (30s) =="
 $soakLog = Join-Path $env:TEMP ("nf_nightly_soak_" + [guid]::NewGuid().ToString("N") + ".tsv")
 Set-Location -LiteralPath (Join-Path $repo "controller")
 cmd /c ".\target\debug\controller.exe --dry-run --duration 30 --fps 15 --backend synthetic --model-path tests\fixtures\constant_yolo.manifest.json --session-log $soakLog 2>nul"
 $code = $LASTEXITCODE
 if ($code -ne 0) { $script:failed += "onnx-soak" }
 if (Test-Path $soakLog) { Remove-Item $soakLog -ErrorAction SilentlyContinue }
+Set-Location -LiteralPath $repo
+
+# ---------- [5] NC9 learning-pipeline selftest (stdlib-only, offline) ----------
+Note "== [5/5] learn_route selftest =="
+Set-Location -LiteralPath (Join-Path $repo "tools\vision")
+python learn_route.py --selftest
+if ($LASTEXITCODE -ne 0) { $script:failed += "learn-route-selftest" }
 Set-Location -LiteralPath $repo
 
 # ---------- verdict ----------
