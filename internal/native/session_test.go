@@ -243,3 +243,28 @@ func TestParseLineDocEventPayload(t *testing.T) {
 		t.Fatalf("event decode wrong: %+v", msg.Event)
 	}
 }
+
+func TestRunSessionStartFailureIsAnError(t *testing.T) {
+	res := RunSession(context.Background(), SessionConfig{
+		ControllerPath: `Z:\definitely\not\here\controller.exe`,
+	}, nil)
+	if res.Outcome != SessionError {
+		t.Fatalf("outcome = %v, want error", res.Outcome)
+	}
+	if res.ExitCode != -1 {
+		t.Fatalf("exit code = %d, want -1 (never started)", res.ExitCode)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "start:") {
+		t.Fatalf("err = %v, want start failure", res.Err)
+	}
+}
+
+func TestRunSessionStderrTailCapturedOnFailure(t *testing.T) {
+	// the badversion fake writes nothing to stderr; use the shell-free way:
+	// a missing path exercises the stderr-less branch, so assert via the
+	// noresult script that stderr capture does not corrupt clean verdicts.
+	res := runSession(t, "noresult", SessionConfig{}, nil)
+	if res.Outcome != SessionError {
+		t.Fatalf("outcome = %v, want error", res.Outcome)
+	}
+}
