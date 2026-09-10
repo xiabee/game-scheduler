@@ -579,7 +579,7 @@ Get-Content backup_request.json | ctl -server $S -data - planner import
 
 **RESULT→执行状态映射**:done→success;failed/stopped→failed(governor 停止属业务终态);cancel/timeout 与外部任务语义一致。会话 TSV 落在 `<data_dir>/native/exec-<id>.tsv`,EVENT 轨迹进执行记录 stdout 字段。
 
-学习管线(NC9):`tools/vision/learn_route.py` + `draft_to_skill.py` 可从录制帧离线产出 skill/probes 草案(见 tools/vision/README.md)。
+学习管线(NC9):`tools/vision/learn_route.py` + `draft_to_skill.py` 可从录制帧离线产出 skill/probes 草案(见 tools/vision/README.md)。完整上手路径见 [docs/native-quickstart.md](docs/native-quickstart.md)。
 
 ---
 
