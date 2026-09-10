@@ -152,7 +152,7 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Objective**:接入真实 YOLO 推理。**训练与运行解耦**:训练用 Python/Ultralytics,部署用 ONNX;controller 运行时不依赖 Python / PyTorch / CUDA。
 - **Scope**:`InferenceBackend` trait;Windows 优先 WinML 或 ONNX Runtime;`models/` 目录 + model manifest(labels / version / input size / confidence / game-profile);配置项 `model_path` / `confidence` / `imgsz` / `device(provider)`;**大型权重不进 Git**。
 - **已落地(2026-09-09/10)**:WinML 推理后端(CPU 设备,运行时零下载、零 GPU 依赖);schema-v1 模型 manifest(`controller/models/`,严格校验);`--model-path` / `--manifest-check` CLI;模型缺失/非法→Mock 诚实降级;输出布局自动识别(rows-major `[1,N,≥6]` + YOLOv8 channels-first `[1,4+nc,N]`)+ class-aware NMS;`tools/vision/` 训练脚手架(PLAN gate 防意外下载/训练);跨机验证:win-devops 全量 Rust 门禁 PASS(含 WinML 实测,节点 WinML 兼容线 = ir3/opset9)。
-- **剩余**:用 `tools/vision/` 训练并导出首个真实 nano 模型(白天工作:采集/标注/训练);`device(provider)` 配置化(当前固定 CPU,低资源约束下非必需)。
+- **剩余**:用 `tools/vision/` 训练并导出首个真实 nano 模型(白天工作:采集/标注/训练)。~~`device(provider)` 配置化~~ ✅(2026-09-11:`--device cpu|gpu`,GPU=DirectX 经降级链诚实失败;native params `device` 透传)。
 - **Deliverables**:可加载一个导出的 ONNX nano 级模型并输出 Detection;manifest 校验。
 - **Acceptance Criteria**:同一 ONNX 模型在 1080p 与 1440p 截图上,经 letterbox 变换后检出一致(坐标按 client 系换算正确)。(已以确定性形式覆盖:fixture 模型跨同宽高比分辨率归一化位置/框占比不变,有测试;真实模型就绪后以实机对拍复验。)
 - **Tests**:letterbox 前后数值对拍、manifest 解析、推理超时与降级(模型缺失→Mock)。(降级已落地;推理超时线程化 deferred——WinML 同步调用不可取消,当前以连续失败熔断代替。)
@@ -202,9 +202,16 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Dependencies**:NC0–NC4。
 - **Out of Scope**:开放世界;多游戏泛化(先一个游戏打透)。
 
-### NC6 — Scheduler Integration ⬜(协议 schema v1 已冻结)
+### NC6 — Scheduler Integration 🚧(会话链路已落地,UI/auto 收尾待办)
 
-- **Status**:⬜ Planned。线格式已定稿(2026-09-10/11 评审):stdin/stdout JSON lines,信封 `v/seq/ts/type/payload`,schema 由 `controller/src/protocol.rs` serde 类型+测试固化,决策与文档见 docs/controller-protocol-draft.md(D1 事件粒度/D2 截图路径引用/D3 一次一进程已定,D4 executor 配置留 NC6)。Go 侧消费仍属 NC6 实施。
+- **Status**:🚧 In Progress(2026-09-10/11 夜班:协议+执行器+调度分发全落地,真实 controller 全链路验收 PASS;剩余=dashboard 对 native 任务的可视化编辑与 `auto` 模式)。核心验收已达成:native 任务从 API/ctl 触发 → preflight → 调度 → 协议会话 → Execution 落库,取消路径同样有验收。
+- **已落地**:
+  - 协议 schema v1 冻结(`controller/src/protocol.rs` serde 类型+测试;docs/controller-protocol-draft.md,D1–D4 全部定稿);
+  - controller `--protocol` 线模式(HELLO/READY/EVENT/RESULT,RFC3339,stdout 纯协议;终态 EVENT 门控防每周期重复);
+  - Go 侧 `internal/native`(协议镜像+流式会话执行器,版本 fail-fast/协议违规杀树/cancel-timeout 裁决矩阵);
+  - 调度分发(`internal/task/native.go`:params 契约、config 双闸 `native_controller_path`+`native_allow_input`、RESULT→Execution 映射、会话 TSV 入 `<data_dir>/native/`、EVENT 轨迹入执行记录);
+  - 验收设施(`cmd/fake-controller` 无游戏测试缝;windows_smoke native 三步:创建+preflight/真实会话 success/中途 cancel)。
+- **剩余**:dashboard 对 native 任务 params 的可视化编辑;`auto` 执行模式(native skill 可用→native 否则 external);EVENT→SSE 事件流打磨。
 - **Objective**:Native Controller 接回 Go 调度器。
 - **Scope**:简单进程协议(stdin/stdout JSON lines 或 localhost IPC);Go Task 支持 `executor = external | native`;native task 形如 `{"executor":"native","skill":"daily_reward","game_id":"genshin"}`;Go 侧:启动/停止 controller、接收 events、写入 Execution、cancel / timeout / screenshot / log / stats 复用现有 runner 基建。
 - **Acceptance Criteria**:一个 native task 从 API 触发到 Execution 落库全链路可走通;cancel/timeout 行为与 external 任务一致;协议有 schema 与版本字段。
@@ -351,6 +358,7 @@ BetterGI / March7thAssistant / Fhoe-Rail / ok-ww / M9A 的现有适配器:
 
 ## 10. 变更记录
 
+- **2026-09-10/11(夜)**:NC4 输入层落地(SendInput+governor 硬前置,默认零输入);NC6 主体落地(协议 schema 冻结、--protocol 线模式、Go 会话执行器、native 调度分发、真实 controller 全链路+取消验收);NC1 deferred 清零(device 配置化+推理超时线程化);安全扫描接入本地 CI;NC9 视频学习路线入路线图且学习管线最小闭环打通(帧→draft→skill→回放 DONE)。
 - **2026-09-10(夜)**:新增 **NC9 Route & Skill Learning(视频学习路线)**(§3)——无真实游戏测试环境期间,从 B 站攻略/教程/跑图视频离线学习操作路线,转结构化 Skill/Route 草案并 dry-run 模拟输出;实际游戏测试 deferred 待环境。
 - **2026-09-09**:NC0 标记完成(§3/§9);下一夜班起点更新为 NC1;README(中/英)新增「当前开发方向」章节并明确 Controller 安全边界;NIGHTOPS.yaml 夜间优先级对齐本路线图。
 - **2026-09-08**:全面重写。历史 Go 调度核心/路线/Planner/界面能力标记 ✅(§1);主线改为 **Native Vision Controller**(§2–§3,NC0–NC8);新增数据集生命周期(§4)、性能预算(§5)、旧外部控制器降级为 fallback(§6)、安全红线(§7);明确今晚 NC0 起点(§9)。
