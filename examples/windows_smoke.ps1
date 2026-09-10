@@ -210,6 +210,11 @@ try {
             if (-not $pf.ready) { throw "preflight not ready" }
         }
         Step "native: run real controller session (RESULT done -> success)" {
+            $params2 = @{ executor = "native"; probes = $probeFile; window = "@probe";
+                          backend = "synthetic"; duration_sec = 2 } | ConvertTo-Json -Compress
+            $body = @{ game_id = $gameId; name = $script:nativeTask.name; type = "native";
+                       params = $params2; enabled = $true } | ConvertTo-Json -Compress -Depth 4
+            $null = Invoke-Ctl -ResourceArgs @("tasks", "update", "$($script:nativeTask.id)") -JsonBody $body
             $exec = Invoke-Ctl -ResourceArgs @("tasks", "run", "$($script:nativeTask.id)")
             $deadline = (Get-Date).AddSeconds(60)
             do {
@@ -219,6 +224,21 @@ try {
             } while ($e.status -in @("pending", "running"))
             if ($e.status -ne "success") { throw "status=$($e.status) error=$($e.error_msg)" }
             if ($e.exit_code -ne 0) { throw "exit_code=$($e.exit_code)" }
+        }
+        Step "native: cancel mid-run (process tree killed, status cancelled)" {
+            $params3 = @{ executor = "native"; probes = $probeFile; window = "@probe";
+                          backend = "synthetic"; duration_sec = 60 } | ConvertTo-Json -Compress
+            $body = @{ game_id = $gameId; name = $script:nativeTask.name; type = "native";
+                       params = $params3; enabled = $true } | ConvertTo-Json -Compress -Depth 4
+            $null = Invoke-Ctl -ResourceArgs @("tasks", "update", "$($script:nativeTask.id)") -JsonBody $body
+            $exec = Invoke-Ctl -ResourceArgs @("tasks", "run", "$($script:nativeTask.id)")
+            Start-Sleep -Seconds 3
+            $e = Invoke-Ctl -ResourceArgs @("execs", "get", "$($exec.id)")
+            if ($e.status -ne "running") { throw "expected running mid-session, got $($e.status)" }
+            $null = Invoke-Ctl -ResourceArgs @("execs", "cancel", "$($exec.id)")
+            Start-Sleep -Seconds 3
+            $e = Invoke-Ctl -ResourceArgs @("execs", "get", "$($exec.id)")
+            if ($e.status -ne "cancelled") { throw "status=$($e.status), want cancelled" }
         }
     }
 } finally {
