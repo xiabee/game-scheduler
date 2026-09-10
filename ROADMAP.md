@@ -202,9 +202,9 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Dependencies**:NC0–NC4。
 - **Out of Scope**:开放世界;多游戏泛化(先一个游戏打透)。
 
-### NC6 — Scheduler Integration ⬜
+### NC6 — Scheduler Integration ⬜(协议 schema v1 已冻结)
 
-- **Status**:⬜ Planned
+- **Status**:⬜ Planned。线格式已定稿(2026-09-10/11 评审):stdin/stdout JSON lines,信封 `v/seq/ts/type/payload`,schema 由 `controller/src/protocol.rs` serde 类型+测试固化,决策与文档见 docs/controller-protocol-draft.md(D1 事件粒度/D2 截图路径引用/D3 一次一进程已定,D4 executor 配置留 NC6)。Go 侧消费仍属 NC6 实施。
 - **Objective**:Native Controller 接回 Go 调度器。
 - **Scope**:简单进程协议(stdin/stdout JSON lines 或 localhost IPC);Go Task 支持 `executor = external | native`;native task 形如 `{"executor":"native","skill":"daily_reward","game_id":"genshin"}`;Go 侧:启动/停止 controller、接收 events、写入 Execution、cancel / timeout / screenshot / log / stats 复用现有 runner 基建。
 - **Acceptance Criteria**:一个 native task 从 API 触发到 Execution 落库全链路可走通;cancel/timeout 行为与 external 任务一致;协议有 schema 与版本字段。
