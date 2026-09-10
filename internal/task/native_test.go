@@ -26,6 +26,9 @@ func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
 // per test: a real child process over real pipes, no game needed.
 func buildFakeController(t *testing.T) string {
 	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH; cannot build fake-controller")
+	}
 	out := filepath.Join(t.TempDir(), "fake-controller.exe")
 	cmd := exec.Command("go", "build", "-o", out,
 		"github.com/xiabee/game-scheduler/cmd/fake-controller")
