@@ -163,6 +163,10 @@
 | M14 | device(provider) 配置化（NC1 最后一个 deferred 项）：`--device cpu|gpu` + native params `device` 透传；GPU=DirectX provider，在服务/RDP 会话经既有降级链诚实失败（open 失败→Mock+原因打印），CPU 路径 soak 覆盖不变 | PASS | dd64c65 | 全部 ONNX 测试经 Cpu 路径回归；parse 校验测试；NIGHTLY VERIFY PASS |
 | M15 | native 会话取消路径验收：windows_smoke 新增 [15] 中途 cancel 步骤——controller 进程树被杀、Execution 落 cancelled、无孤儿 | PASS | (见下方 commit) | NIGHTLY VERIFY PASS 全 15 步 |
 
+| M17 | 操作者快速上手文档 `docs/native-quickstart.md`:编译→录帧→学习→转换→接入调度器→安全边界→故障排查表,全路径可复制粘贴;README 链接 | PASS | bf8022e | **文档逐字执行真值测试**:按文档步骤录 34 帧→learn(静态场景诚实判单段)→convert(平凡技能告警)→回放 DONE 全通 |
+| M18 | NC6 剩余项盘点:dashboard 可视化(→M19)、auto 模式(需 NC7 skill 可用性建模,暂缓)、SSE 打磨(D1 事件稀疏,执行后 trail+TSV 已可观测,暂缓)——两项暂缓均有书面理由 | PASS | — | — |
+| M19 | dashboard native 任务表单:**修复真实 footgun**——native 任务经 dashboard 编辑时 renderTaskFields 回退到首个 adapter 类型,保存会用错误字段静默覆盖 params(丢失 executor:native);新增 NATIVE_TASK_TYPE schema(9 字段含双闸说明)加入每个游戏的类型下拉,编辑/创建均走同一 collectParams 路径;API 测试 + JS 语法检查过 | PASS | c00007e | go test ./internal/api 全绿;node --check JS 语法通过 |
+
 
 ### 夜班收尾（2026-09-10 04:20 close）
 
