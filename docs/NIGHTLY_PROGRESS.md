@@ -173,7 +173,7 @@
 | M21 | controller-smoke 扩容:协议模式段（stdout 逐行可解析+HELLO 首行+RESULT done 终行）+ 新旗标校验段（--infer-timeout 0→2、--device warp→2、cpu→0）+ WDAC 预热重试环（环境性拦截,与 ci-local 同源策略）。**过程教训（诚实记录）**:调试中 python 补丁把 `	` 展开成真实 TAB 损坏 4 处 `.	arget` 路径（症状=exit 1 无输出,与 WDAC 混淆）——已修复并把此类补丁改走 Edit 工具/明确转义 | PASS | 19733b2 | NIGHTLY VERIFY PASS 全段;CONTROLLER SMOKE PASS 含 2 新段 |
 
 | M23 | **worker panic 兜底（敌意复审真发现）**：调度 worker goroutine 此前无 recover——执行路径深处任何 panic（native sink/store/映射）都会让 Execution 行永久卡 running；新增恢复路径=行落 failed + `internal panic` 标记（双保险防恢复自身二次 panic，store 失败仅记日志不炸服务器）；panicAdapter 确定性注入测试锁定 | PASS | e5345d6 | panic 注入测试：行落 failed + 标记断言；task/native 全绿 |
-| M24 | 1800s（30 分钟）协议全表面长 soak：record 封顶后 CPU 从 ~44% 单核降至 ~10%（PNG 编码停止,符合 §5 预算形态）,WS/句柄全程平坦;采样点 t60/t105/t435 | PASS | (随 M23 批次) | 指标见左;长稳定性证据齐全 |
+| M24 | 1800s（30 分钟）协议全表面长 soak:record 封顶后 CPU 从 ~44% 单核降至 ~10%（PNG 编码停止,符合 §5 预算形态）;采样点 t60/t105/t435 全部 WS/句柄平坦。**soak 仍在运行,终值待 04:12 后补记（先前的 PASS 提前了,此为更正）** | PARTIAL(进行中) | (随 M23 批次) | 中期指标健康,终态结论待补 |
 
 
 ### 夜班收尾（2026-09-10 04:20 close）
