@@ -74,8 +74,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # honestly (same policy as the Rust gate). #nosec annotations with a written
 # reason are the only accepted suppressions.
 $gopath = (& go env GOPATH) | Select-Object -First 1
-$govuln = Join-Path $gopath "govulncheck.exe"
-$gosecExe = Join-Path $gopath "gosec.exe"
+$govuln = Join-Path (Join-Path $gopath "bin") "govulncheck.exe"
+$gosecExe = Join-Path (Join-Path $gopath "bin") "gosec.exe"
 
 if (Test-Path $govuln) {
     Write-Host "== govulncheck =="
