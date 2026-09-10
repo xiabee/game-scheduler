@@ -7,13 +7,20 @@
 ## Current State
 
 近期落地：终端 rec 防护、非覆盖式 upsert、origin guard、ctl delete/depth。
-**2026-09-08 夜班起主线切换至 Native Vision Controller（ROADMAP §9），`controller/` Rust crate 已落地 NC0 全部六个 milestone。**
+**2026-09-08 夜班起主线切换至 Native Vision Controller（ROADMAP §9）**：
+NC0 基础 ✅ → NC1 推理运行时 ✅（运行时侧收官，仅首个真实模型待白天训练）→
+NC4 输入层 ✅（SendInput+governor 硬前置，默认零输入，selftest 留操作者）→
+NC6 调度集成 🚧（协议 schema v1 冻结、Go 会话执行器、native 任务分发与取消路径全验，dashboard 表单已支持；余 auto 模式与 SSE 打磨）→
+NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已通）。
+环境发现：隐藏控制台启动时 GDI 捕获黑帧（已可观测化告警，见 2026-09-11 夜班记录）。
 
 ## Candidate Backlog
 
-- NC1 Vision Runtime（ONNX 推理，训练/运行解耦）
-- WGC 在 RDP/管控环境下的验证（见下方环境发现）
-- win-devops 节点安装 Rust 工具链，使 remote acceptance 覆盖 Rust 门禁
+- 白天：首个真实 nano 模型训练（tools/vision 全链路已就绪），NC1 收官对拍
+- NC2 真实 UI 数据补全验收（L2 归入 Evidence 契约待真实模型）
+- NC7 设计评审：recommendation skill 绑定语义 + auto 执行模式
+- 晨间运维：调取 win-devops 作业日志定位远端 FAIL 根因（2026-09-11 05:xx 起 3 连）
+- WGC 在实体控制台的复验（长期 BLOCKED，RDP 环境）
 
 ## Night Runs
 
