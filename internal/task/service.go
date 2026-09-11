@@ -509,11 +509,12 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	if err != nil {
 		return s.finishWithError(exec, fmt.Errorf("load task: %w", err))
 	}
-	// NC6: native-executor tasks bypass the external-adapter path
-	// entirely — no adapter command line, no game tool layout checks.
 	// executor "auto" re-resolves HERE, at fire time: native runs only
 	// when its prerequisites still hold; anything else (including params
 	// that no longer decode) falls back to the external adapter path.
+	// autoNote carries the resolution into the execution row — scheduled
+	// unattended runs must show WHY the external branch ran.
+	var autoNote string
 	switch paramsExecutor(t) {
 	case "native":
 		return s.executeNative(ctx, exec, execID, t)
@@ -529,10 +530,12 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 			} else {
 				s.log.Info("auto executor resolved external", "exec_id", execID,
 					"task", t.Name, "reason", reason)
+				autoNote = fmt.Sprintf("executor=auto resolved=external (%s)\n", reason)
 			}
 		} else {
 			s.log.Info("auto executor resolved external", "exec_id", execID,
 				"task", t.Name, "reason", derr.Error())
+			autoNote = fmt.Sprintf("executor=auto resolved=external (%s)\n", derr.Error())
 		}
 	}
 	g, err := s.store.GetGame(t.GameID)
@@ -592,7 +595,7 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 
 	end := res.EndTime.UTC()
 	exec.EndTime = &end
-	exec.Stdout = res.Stdout
+	exec.Stdout = autoNote + res.Stdout
 	exec.Stderr = res.Stderr
 	code := res.ExitCode
 	exec.ExitCode = &code

@@ -225,6 +225,9 @@ func TestAutoExecutorFallsBackToExternal(t *testing.T) {
 	if strings.Contains(got.Command, "--session-log") {
 		t.Fatalf("fallback must not carry native session args: %q", got.Command)
 	}
+	if !strings.Contains(got.Stdout, "executor=auto resolved=external") {
+		t.Fatalf("unattended runs must see WHY external ran: %q", got.Stdout)
+	}
 }
 
 func TestAutoExecutorFallsBackWhenDeclaredAssetMissing(t *testing.T) {

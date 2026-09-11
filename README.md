@@ -576,7 +576,7 @@ Get-Content backup_request.json | ctl -server $S -data - planner import
 }
 ```
 
-**auto 执行器**:触发时实时决议——controller 已配置且可执行、且声明的 skill/probes/model 文件都在,则走 native;否则回退外部 adapter 命令(任务 Type 用适配器自有类型即可)。决议结果写进 Preflight(`resolution` 字段)与执行记录 stdout 轨迹(`executor=auto resolved=native`)。auto 只降级不升级:绝不会因 auto 而启用真实输入,双闸照旧。
+**auto 执行器**:触发时实时决议——controller 已配置且可执行、且声明的 skill/probes/model 文件都在,则走 native;否则回退外部 adapter 命令(任务 Type 用适配器自有类型即可)。决议结果写进 Preflight(`resolution` 字段)与执行记录 stdout 首行(`executor=auto resolved=native` / `resolved=external (原因)`)——计划任务无人值守回退时,执行记录自己说明原因。auto 只降级不升级:绝不会因 auto 而启用真实输入,双闸照旧。
 
 **启用前提**:config 里 `native_controller_path` 指向 controller.exe(空=native 执行器关闭,任务 fail-fast 并明确报错)。
 

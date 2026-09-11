@@ -261,7 +261,8 @@ the controller runs only when it is configured and executable and every
 declared skill/probes/model file exists; otherwise the task falls back to
 the game's external adapter command (keep an adapter-owned task Type).
 The resolution is announced in the Preflight report (`resolution` field)
-and in the execution's stdout trail (`executor=auto resolved=native`).
+and in the execution's stdout first line (`executor=auto resolved=native`
+/ `resolved=external (reason)`) — a scheduled fallback run explains itself.
 auto only degrades, never escalates: it cannot turn on real input — the
 double gate still applies.
 
