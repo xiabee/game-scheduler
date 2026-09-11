@@ -32,7 +32,7 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 
 | M | 内容 | Verdict | Commit | 测试 |
 |---|------|---------|--------|------|
-| M1 | D1 终态 EVENT 恰好一次（P0 修复）：闩锁此前只盖引擎重复 Done/Failed 分支，但**落入终态的转移以 Transitioned 形态上报**（skill.rs 契约）并发自己的 EVENT、不进闩锁——下一周期 Done 再发一条；通过与否取决于转移后是否还有剩余周期（时序脆弱，昨夜侥幸全绿）。修复：main.rs 落终态（runner.is_done()）即置闩锁（Transitioned/FellBack 两臂）；Done 分支只剩「起始态即终态」场景，改发 runner.current() 真实状态名（原硬编码 "done"）；skill.rs fallback 落终态也置 done（与转移路径对称，原遗漏，+单测）；集成测试强化 transitions==1 并给 s0 加终态 fallback（2s 超时）使「探针未触发」负载瞬态也恰好落一次（M24 异常族去脆弱）；协议草案 D1 措辞更新 | PASS | e0240cf | `--test protocol` 3 连绿；全量 ci-local PASS（Go+Rust 全门禁含安全阶段）；skill 单测 9 绿 |
+| M1 | D1 终态 EVENT 恰好一次（P0 修复）：闩锁此前只盖引擎重复 Done/Failed 分支，但**落入终态的转移以 Transitioned 形态上报**（skill.rs 契约）并发自己的 EVENT、不进闩锁——下一周期 Done 再发一条；通过与否取决于转移后是否还有剩余周期（时序脆弱，昨夜侥幸全绿）。修复：main.rs 落终态（runner.is_done()）即置闩锁（Transitioned/FellBack 两臂）；Done 分支只剩「起始态即终态」场景，改发 runner.current() 真实状态名（原硬编码 "done"）；skill.rs fallback 落终态也置 done（与转移路径对称，原遗漏，+单测）；集成测试强化 transitions==1 并给 s0 加终态 fallback（2s 超时）使「探针未触发」负载瞬态也恰好落一次（M24 异常族去脆弱）；协议草案 D1 措辞更新 | PASS | e0240cf | `--test protocol` 3 连绿；全量 ci-local PASS（Go+Rust 全门禁含安全阶段）；skill 单测 9 绿；**REMOTE CI（win-devops）PASS exit=0 3m4s**——昨夜 05:xx 3 连 FAIL 未复现，节点已恢复（晨间运维项降级：历史 FAIL 根因未追，但当前节点健康且同码全绿，阻塞解除） |
 
 ### Night 2026-09-10 → 2026-09-11（夜班 agent 记录）
 
