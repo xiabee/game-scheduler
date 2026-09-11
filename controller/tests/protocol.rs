@@ -177,3 +177,85 @@ fn terminal_skill_event_emits_once() {
          by terminal fallback); later Done cycles stay silent"
     );
 }
+
+/// D1 gate on the FAILURE path: a skill whose expectations can never be met
+/// (a label no detector emits) must announce engine failure EXACTLY once —
+/// the synthetic backend keeps returning the same detection every cycle, so
+/// without the latch the engine's repeated Failed outcomes would flood the
+/// stream the same way Done used to.
+#[test]
+fn failed_skill_event_emits_once() {
+    use std::io::Read;
+    if !controller::window::interactive_desktop_available() {
+        eprintln!("skipped: no interactive desktop (service context)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("nf_proto_fail_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let skill = dir.join("skill.json");
+    std::fs::write(
+        &skill,
+        r#"{"name":"doomed","start":"s0","states":[
+            {"name":"s0","expect":[{"label":"never_detected"}],"actions":[],"next":"done","timeout_ms":1500,"max_retries":1,"terminal":false},
+            {"name":"done","expect":[],"actions":[],"next":"done","timeout_ms":1000,"max_retries":1,"terminal":true}]}"#,
+    )
+    .expect("write skill");
+
+    let exe = env!("CARGO_BIN_EXE_controller");
+    let mut child = Command::new(exe)
+        .args([
+            "--dry-run",
+            "--protocol",
+            "--window",
+            "@probe",
+            "--backend",
+            "synthetic",
+            "--skill",
+        ])
+        .arg(skill.to_string_lossy().as_ref())
+        .arg("--duration")
+        .arg("4")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn controller");
+    let mut stdout = String::new();
+    child
+        .stdout
+        .take()
+        .expect("stdout")
+        .read_to_string(&mut stdout)
+        .expect("read");
+    let status = child.wait().expect("wait");
+    assert!(status.success(), "controller exited {status:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let mut failed_events = 0;
+    let mut events = 0;
+    let mut last_was_result_done = false;
+    for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
+        let msg = controller::protocol::Envelope::parse(line)
+            .unwrap_or_else(|e| panic!("protocol violation: {e} — {line}"));
+        match msg.payload {
+            controller::protocol::Payload::Event(e) => {
+                events += 1;
+                if e.state == "failed" {
+                    failed_events += 1;
+                }
+            }
+            controller::protocol::Payload::Result(r) => {
+                last_was_result_done = r.outcome == controller::protocol::Outcome::Done;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        last_was_result_done,
+        "the session runs to its duration end: RESULT outcome stays completed/done"
+    );
+    assert_eq!(
+        failed_events, 1,
+        "engine failure must be announced exactly once (D1)"
+    );
+    assert_eq!(events, 1, "the failed skill emits no other state changes");
+}
