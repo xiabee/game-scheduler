@@ -33,6 +33,7 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 | M | 内容 | Verdict | Commit | 测试 |
 |---|------|---------|--------|------|
 | M1 | D1 终态 EVENT 恰好一次（P0 修复）：闩锁此前只盖引擎重复 Done/Failed 分支，但**落入终态的转移以 Transitioned 形态上报**（skill.rs 契约）并发自己的 EVENT、不进闩锁——下一周期 Done 再发一条；通过与否取决于转移后是否还有剩余周期（时序脆弱，昨夜侥幸全绿）。修复：main.rs 落终态（runner.is_done()）即置闩锁（Transitioned/FellBack 两臂）；Done 分支只剩「起始态即终态」场景，改发 runner.current() 真实状态名（原硬编码 "done"）；skill.rs fallback 落终态也置 done（与转移路径对称，原遗漏，+单测）；集成测试强化 transitions==1 并给 s0 加终态 fallback（2s 超时）使「探针未触发」负载瞬态也恰好落一次（M24 异常族去脆弱）；协议草案 D1 措辞更新 | PASS | e0240cf | `--test protocol` 3 连绿；全量 ci-local PASS（Go+Rust 全门禁含安全阶段）；skill 单测 9 绿；**REMOTE CI（win-devops）PASS exit=0 3m4s**——昨夜 05:xx 3 连 FAIL 未复现，节点已恢复（晨间运维项降级：历史 FAIL 根因未追，但当前节点健康且同码全绿，阻塞解除） |
+| M2 | auto 执行模式（NC6 最后功能项）：params `executor:"auto"` 触发时实时决议——controller 已配置+可执行+声明 skill/probes/model 全存在 → native，否则回退外部 adapter 命令；**只降级不升级**（auto 永不启用真实输入，双闸不变）。决议可观测：Preflight 新增 `resolution` 字段（`auto→native` / `auto→external (原因)`），native 分支执行轨迹首行 `executor=auto resolved=native`，external 分支记日志。**顺带修真实 footgun**：dashboard 图形表单 collectParams 从 schema 字段重建 params、从不写 executor 选择器——表单创建的 native 任务静默落入外部路径、点火即败（M19 只修了类型下拉覆盖）；现 API create/update 对 type=native 且无选择器的任务默认注入 `executor:"native"`（显式值优先），native 表单加 executor 字段（native\|auto，留空=native）。外部任务 params 不受影响；params 无法解析时保持旧契约=无选择器走外部 | PASS | aec8ceb | +4 task 测试（auto 择 native/fallback-无配置/fallback-资产缺失/Preflight 决议矩阵）+ API 选择器默认测试（含 update 路径与非 native 不注入）；全量 ci-local PASS；dashboard JS 语法守卫过 |
 
 ### Night 2026-09-10 → 2026-09-11（夜班 agent 记录）
 
