@@ -656,7 +656,10 @@ Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -C
 > skill-bound recommendation run with `executor=auto`: the native controller
 > runs the skill when its prerequisites hold, and otherwise the task falls
 > back to the bound route command — auto only degrades, never escalates, and
-> the real-input double gate still applies.
+> the real-input double gate still applies. **Bind-after-create works**:
+attaching a skill retrofits the recommendation's existing task (an explicit
+executor wins; a task with no selector gains `auto`, keeping its route
+command as the fallback).
 
 CLI examples:
 

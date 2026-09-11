@@ -120,7 +120,51 @@ func (s *Server) attachRecommendationSkill(w http.ResponseWriter, r *http.Reques
 		rec.RecommendationType = "skill"
 	}
 	out, err := s.store.UpdateFarmingRecommendation(rec)
+	if err == nil {
+		if rerr := s.retrofitSkillBinding(rec, skill); rerr != nil {
+			// The binding is recorded on the recommendation, but the retrofit
+			// failed — tell the operator instead of leaving a half-applied
+			// binding looking complete. Re-attaching retries the retrofit.
+			writeStoreErr(w, rerr)
+			return
+		}
+	}
 	respond(w, out, s.changed(err))
+}
+
+// retrofitSkillBinding carries a late skill binding into a recommendation
+// task that already exists (bind-after-create): without this the binding
+// would silently do nothing, because ensureRecommendationTask returns the
+// existing row. An explicit executor on the task always wins; a task with
+// no selector gains "auto" so the route command it already has stays the
+// fallback. A vanished task row (ErrNotFound) or unparseable params are
+// tolerated silently — the rec link follows the task's lifecycle anyway.
+func (s *Server) retrofitSkillBinding(rec store.FarmingRecommendation, skill string) error {
+	if rec.TaskID == nil {
+		return nil
+	}
+	tk, err := s.store.GetTask(*rec.TaskID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	pm, perr := tk.ParamsMap()
+	if perr != nil {
+		return nil
+	}
+	if _, ok := pm["executor"]; !ok {
+		pm["executor"] = "auto"
+	}
+	pm["skill"] = skill
+	b, merr := json.Marshal(pm)
+	if merr != nil {
+		return nil
+	}
+	tk.Params = string(b)
+	_, uerr := s.store.UpdateTask(tk)
+	return uerr
 }
 
 func (s *Server) listCharacters(w http.ResponseWriter, r *http.Request) {

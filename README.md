@@ -418,7 +418,7 @@ Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -C
 
 > 💡 **手动绑定路线**:推荐没有匹配到路线时(`recommendation_type=manual`),可以用 `POST /api/planner/recommendations/{id}/attach-route` + `{"route_id":N}` 手动绑定已有路线;路线的游戏必须与推荐一致,否则返回 400。看板「培养计划 → 推荐」中对手动建议直接点「绑定路线」即可按关键词 / 类型搜索并绑定,绑定后即可创建任务 / 计划。已完成(`completed`)或已忽略(`dismissed`)的推荐**不可复用**——attach-route / create-task / create-plan 会返回 400,防误触复活;不需要的推荐可用 `DELETE /api/planner/recommendations/{id}`(看板「删除」按钮或 `ctl planner delete <id>`)彻底移除。材料需求会校验**同游戏**:目标所属角色与材料必须属于同一游戏,否则 400。
 
-> 💡 **绑定 Skill(NC7)**:推荐还可以绑定一个 NC3 SkillDefinition 文件:`POST /api/planner/recommendations/{id}/attach-skill` + `{"skill":"skills/daily.json"}`(文件必须已存在;ctl 用 `planner attach-skill <推荐id> -skill <路径>`;看板推荐表点「绑定 Skill」)。绑定后创建的任务 `executor=auto`:native controller 可用就走 skill,不可用自动回退到绑定的路线命令——只降级不升级,真实输入双闸照旧。看板推荐表会显示 `skill` 徽标与文件路径。
+> 💡 **绑定 Skill(NC7)**:推荐还可以绑定一个 NC3 SkillDefinition 文件:`POST /api/planner/recommendations/{id}/attach-skill` + `{"skill":"skills/daily.json"}`(文件必须已存在;ctl 用 `planner attach-skill <推荐id> -skill <路径>`;看板推荐表点「绑定 Skill」)。绑定后创建的任务 `executor=auto`:native controller 可用就走 skill,不可用自动回退到绑定的路线命令——只降级不升级,真实输入双闸照旧。**先建任务后绑 skill 也生效**:绑定会回灌进推荐已关联的任务(显式 executor 优先,无选择器则补 `auto`,原外部命令保持为回退分支)。看板推荐表会显示 `skill` 徽标与文件路径。
 
 ### CLI 示例
 

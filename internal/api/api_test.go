@@ -732,6 +732,34 @@ func TestPlannerAttachSkill(t *testing.T) {
 		t.Fatalf("skill-bound rec keeps the adapter-owned type for the fallback branch, got %q", task.Type)
 	}
 
+	// bind-after-create: attaching a skill to a rec whose task already
+	// exists retrofits the binding into that task's params (create-task is
+	// idempotent — it returns the existing row, albeit with 201)
+	var task2 store.Task
+	if code := post("/api/planner/recommendations/"+recID+"/create-task", `{}`, &task2); code != http.StatusCreated || task2.ID != task.ID {
+		t.Fatalf("create-task must return the existing task #%d, got status=%d id=%d",
+			task.ID, code, task2.ID)
+	}
+	otherSkill := filepath.Join(dir, "other.json")
+	if err := os.WriteFile(otherSkill, []byte(`{"name":"other"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var rec2 store.FarmingRecommendation
+	if code := post("/api/planner/recommendations/"+recID+"/attach-skill", `{"skill":`+strconv.Quote(otherSkill)+`}`, &rec2); code != http.StatusOK {
+		t.Fatalf("re-attach skill status=%d", code)
+	}
+	stored, err := st.GetTask(task2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm2, err := stored.ParamsMap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pm2["skill"] != otherSkill || pm2["executor"] != "auto" || pm2["script"] != "D:/routes/jueyun.json" {
+		t.Fatalf("late binding must retrofit the existing task: %v", pm2)
+	}
+
 	// a closed recommendation cannot gain a skill binding
 	if code := post("/api/planner/recommendations/"+recID+"/dismiss", `{}`, nil); code != http.StatusOK {
 		t.Fatalf("dismiss status=%d", code)
