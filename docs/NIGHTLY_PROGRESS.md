@@ -10,16 +10,18 @@
 **2026-09-08 夜班起主线切换至 Native Vision Controller（ROADMAP §9）**：
 NC0 基础 ✅ → NC1 推理运行时 ✅（运行时侧收官，仅首个真实模型待白天训练）→
 NC4 输入层 ✅（SendInput+governor 硬前置，默认零输入，selftest 留操作者）→
-NC6 调度集成 🚧（协议 schema v1 冻结、Go 会话执行器、native 任务分发与取消路径全验，dashboard 表单已支持；余 auto 模式与 SSE 打磨）→
-NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已通）。
-环境发现：隐藏控制台启动时 GDI 捕获黑帧（已可观测化告警，见 2026-09-11 夜班记录）。
+NC6 调度集成 ✅ 功能面收官（协议 schema v1 冻结、Go 会话执行器、native 任务分发与取消、dashboard 表单、**auto 执行器**——native 可用即走、否则回退外部命令，2026-09-11/12 夜；余 EVENT→SSE 打磨，暂缓理由在案）→
+NC7 Planner 集成 🚧 **首片落地**（recommendation 可绑 NC3 skill,create-task 产出 auto 任务,bind-after-create 回灌;余反馈统计与无路线纯 skill 推荐）→
+NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已通,真实素材待白天）。
+环境发现：隐藏控制台启动时 GDI 捕获黑帧（已可观测化告警）；D1 终态 EVENT 恰好一次已修复并 120s soak 验证（2026-09-11/12 夜）。
 
 ## Candidate Backlog
 
 - 白天：首个真实 nano 模型训练（tools/vision 全链路已就绪），NC1 收官对拍
 - NC2 真实 UI 数据补全验收（L2 归入 Evidence 契约待真实模型）
-- NC7 设计评审：recommendation skill 绑定语义 + auto 执行模式
-- 晨间运维：调取 win-devops 作业日志定位远端 FAIL 根因（2026-09-11 05:xx 起 3 连）
+- NC7 第二片：执行结果反馈 planner 统计（需产品语义定义:一次成功 run ≠ 材料入账,不宜自动改 owned_count）;无路线纯 skill 推荐推荐形态
+- NC6 收尾单件：EVENT→SSE 事件流打磨（D1 事件稀疏,trail+TSV 已可观测,暂缓理由在案）
+- NC5 前置：真实 skill 流程设计（待 NC1 真实模型/真实 UI 数据）
 - WGC 在实体控制台的复验（长期 BLOCKED，RDP 环境）
 
 ## Night Runs
@@ -41,6 +43,7 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 | M7 | dashboard 编辑保 params（footgun 家族第三例修复）：collectParams 从 schema 字段从零重建 params——图形表单编辑 native/auto 任务会**静默丢 executor/skill/probes**（M19 修类型下拉覆盖、M2 服务端默认注入修创建,编辑路径仍丢）。修复:编辑时以任务原 params 为底(`form.__baseParams`),表单字段只覆盖自己的键;高级 JSON 手改仍整体生效;类型切换残留键惰性(adapter 只读认识的键),可在高级视图删除。语义四用例 node 行为级验证(编辑保参/新建不变/高级优先/切型惰性) | PASS | af23b0d | node 行为级 4/4 PASS；JS parse 守卫过（看板无 JS 测试架,行为模拟+人工走查为证,已如实注明） |
 | M8 | 未近审面走读（负结果）：Go `vision`(命令行截图源,模板渲染+临时文件清理)/`notify`(15s 超时+WaitDelay+shell 元字符消毒)/`shellcmd`(cmd /S /C CmdLine 直通,注释与实现一致)/`discover`(只读遍历,深度/超时/上限/跳过表全齐)/`guide`(WBI 签名 md5 属协议要求已 adjudicated、限读 64KB/1MB/4MB、BVID 字符集白名单防注入、-412 友好报错);Rust `session.rs`(lazy append+warn-once+字段消毒+列数兼容钉死)/`replay.rs`(有界录制+清晰错误分类)。**零 P0/P1**；全仓零 TODO/FIXME/unimplemented；README 测试计数声明无漂移(cargo 163 ≥ "150+") | PASS | (无代码变更,审计轮) | 现有测试全绿佐证 |
 | M9 | 绑定回灌：**先建任务后绑 skill 时绑定曾静默无效**（ensureRecommendationTask 幂等返回既有任务,skill 只落在推荐行上）。修复:attach-skill 成功后把绑定回灌进关联任务 params——任务已有显式 executor 则尊重（native 照用,external 保持）,无选择器补 `auto`（既有外部命令保留为回退分支）;任务行已删/params 不可解析容忍跳过;store 失败以 API 错误浮现（半应用状态不可伪装成功,重绑即重试）。顺带钉死:create-task 幂等返回既有任务但恒 201（客户端可见契约,不改,测试注明）。README 双语补 bind-after-create 语义 | PASS | fd0a9d4 | TestPlannerAttachSkill 扩展（回灌断言:skill 更新+executor=auto+script 保留;幂等 201+同 ID）；全量 ci-local PASS |
+| M10 | 状态文档刷新 + release 保险：NIGHTLY_PROGRESS Current State/Candidate Backlog 刷新至今晚后状态（NC6 功能面 ✅、NC7 首片 🚧、D1 soak 结论、远端 3 连 FAIL 降级为已恢复）;晨间运维清单移除（节点已恢复,历史 FAIL 根因不再阻塞）;`cargo test --release` 全量 163 绿（skill 闩锁/时序新代码 opt 下无回归） | PASS | (本轮无代码变更) | release 163 绿 exit 0 |
 
 ### Night 2026-09-10 → 2026-09-11（夜班 agent 记录）
 
