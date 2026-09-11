@@ -47,6 +47,7 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 | M11 | D1 失败路径锁定：done 路径有真实二进制锁,failed 路径（超时耗尽无 fallback）共用同一闩锁但无测试驱动。新集成测试:期望永不出现的 label 的 skill 对 synthetic 后端必须恰好发 1 条 `failed` EVENT 且无其他状态变化。**环境注记**：01:4x 本机桌面转锁（OpenInputDesktop FAIL）,窗口类测试按约定诚实跳过——M1 三连跑/M5 soak/nightly-verify 均在锁屏前真实跑毕,有效性不受影响;今晚后续实机捕获验证不可用（与黑帧同族环境约束） | PASS | 7b56f78 | ci-local PASS（跳过模式）;实跑验证待交互桌面（与既有约定一致） |
 | M12 | main.rs 全文走读（2012 行,编排核心,此前仅增量审）（负结果）：CLI 分发/参数校验矩阵（有专属测试钉死）/后端三级回退（诚实 WARNING）/探测窗口生命周期/干跑主循环（错误分类→RetryTracker 有界退避→WindowGone 终态→推理熔断 30 周期→黑帧看门狗→重标定重建后端→verdict_notes 有界 50）/ProtocolEmitter（seq 单调、stdout 纯协议、RFC3339 有已知日期测试）。**零 P0/P1**。examples/README 契约文档补「fallback 落终态亦完成 + D1 恰好一次」语义（M1 修复的契约面收尾） | PASS | 1296fc7 | cargo test 全量 164 绿（含示例守护） |
 | M13 | 审计扩展（负结果）：`internal/planner` 推荐引擎（确定性评分 route_type>source>名称、体力预算 `len(fresh)>0` 保护首条、ReplaceOpenRecommendations 原子替换;每 gap 一次 200 条路线查询属本地 SQLite 可接受规模）、`internal/game/hsr` 适配器（python 入口/绝对 entry 不与 dir 拼接/preflight 同口径）、`internal/game/cmdutil`（BaseSpec 默认工作目录=可执行文件所在目录的注释钉死 BetterGI exit 553 真实脚枪;Timeout 0=无超时语义）。**零 P0/P1** | PASS | (无代码变更,审计轮) | M32 直测佐证 |
+| M14 | **Go 侧持续点火 soak（首个调度/执行/存储链路 soak）**：此前全部 soak 均 controller 侧,Go 的 cron→Enqueue→runner→落库循环只有单测/集成级证据。300s 隔离临时 server + raw 任务（复制 cmd.exe /c exit 0,桌面无关,锁屏会话可跑）+ 计划 `@every 3s`：**恰好 100 次点火（=300/3 理论值,零丢槽零重复）,100 success,0 pending/running 卡死,0 failed**,exit 0。脚本留档 `.nightly/m14/soak.ps1`（一次性验证,不入库——是否固化为 nightly-verify 段留操作者决定） | PASS | (无代码变更,验证轮) | 100/100 精确点火;计划/执行/存储全链路持续运转证据 |
 
 ### Night 2026-09-10 → 2026-09-11（夜班 agent 记录）
 
