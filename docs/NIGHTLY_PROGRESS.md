@@ -199,6 +199,7 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 
 ### 夜班收尾（2026-09-11 08:40 close）
 
+- **Session**:START_COMMIT `6ad2efb`(2026-09-10 23:38 dispatch)→ END_COMMIT 见 git log;工作窗口 23:00-08:40 全程 RUN,08:40 起收尾。
 - **计划 vs 完成**：夜班主线全部落地并验收（M1-M28,零遗留 milestone）——
   - **M1 安全**：govulncheck+gosec+secret 扫描接入本地 CI（M21 节点环境分类修正）;
   - **M2/M13-M14 NC4 输入层**：SendInput 封装+governor 硬前置+双闸,真实输入 selftest 留操作者;
