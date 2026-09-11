@@ -4,7 +4,7 @@
 // Params contract (JSON object):
 //
 //	{
-//	  "executor": "native",
+//	  "executor": "native",              // or "auto" — see below
 //	  "skill": "path/to/skill.json",     // optional, controller --skill
 //	  "probes": "path/to/probes.json",   // optional, controller --probes
 //	  "window": "@probe",                // optional, default @probe
@@ -14,6 +14,14 @@
 //	  "backend": "auto",                 // optional capture backend
 //	  "model": "path/to/manifest.json"   // optional model manifest
 //	}
+//
+// executor "auto" (NC6): the controller runs only when its prerequisites
+// hold at execution time (controller configured + executable + every
+// declared asset present); otherwise the task falls back to the game's
+// external adapter path. The task's Type stays an adapter-owned kind in
+// that case (the external branch builds the adapter command from it);
+// type "native" remains the pure-native family marker. The resolution is
+// announced in the Preflight report and in the Execution event trail.
 //
 // Safety: real input synthesis requires dry_run=false AND allow_input=true
 // in params AND native_allow_input=true in config; anything less and the
@@ -173,6 +181,11 @@ func (s *Service) executeNative(ctx context.Context, exec store.Execution, execI
 	attempts := t.MaxRetries + 1
 	var res native.SessionResult
 	var trail strings.Builder // bounded event trail surfaced in exec.Stdout
+	if paramsExecutor(t) == "auto" {
+		// The auto resolution is part of the execution's observable story:
+		// the operator must be able to tell which branch actually ran.
+		fmt.Fprintf(&trail, "executor=auto resolved=native\n")
+	}
 	for attempt := 0; attempt < attempts; attempt++ {
 		if attempt > 0 {
 			fmt.Fprintf(&trail, "attempt=%d\n", attempt+1)
@@ -281,11 +294,41 @@ func (s *Service) nativePreflight(t store.Task) (Preflight, error) {
 	return pf, nil
 }
 
-// isNativeTask reports whether the task params select the native executor.
-func isNativeTask(t store.Task) bool {
+// paramsExecutor reads the executor selector from the params contract:
+// "native" (always the controller), "auto" (controller when its
+// prerequisites are met, otherwise the game's external adapter), anything
+// else — including no field at all — stays on the external path.
+func paramsExecutor(t store.Task) string {
 	pm, err := t.ParamsMap()
 	if err != nil {
-		return false
+		return ""
 	}
-	return stringValue(pm["executor"]) == "native"
+	return stringValue(pm["executor"])
+}
+
+// nativeViable reports whether the auto executor would pick the native
+// branch right now, with a human-readable reason when it would not. Every
+// DECLARED native asset must exist: auto prefers native only when the
+// session would actually run as declared — a missing skill/model degrades
+// to external instead of silently running the controller without it.
+func nativeViable(cfg config.Config, p nativeParams) (bool, string) {
+	if cfg.NativeControllerPath == "" {
+		return false, "config native_controller_path is not set"
+	}
+	if !executableExists(cfg.NativeControllerPath) {
+		return false, fmt.Sprintf("controller executable not found: %s", cfg.NativeControllerPath)
+	}
+	if p.Skill == "" && p.Probes == "" {
+		return false, "params declare no skill/probes for the controller to run"
+	}
+	if p.Skill != "" && !fileExists(p.Skill) {
+		return false, fmt.Sprintf("skill file not found: %s", p.Skill)
+	}
+	if p.Probes != "" && !fileExists(p.Probes) {
+		return false, fmt.Sprintf("probes file not found: %s", p.Probes)
+	}
+	if p.Model != "" && !fileExists(p.Model) {
+		return false, fmt.Sprintf("model manifest not found: %s", p.Model)
+	}
+	return true, ""
 }

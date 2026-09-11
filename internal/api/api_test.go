@@ -1594,3 +1594,102 @@ func TestCreateTaskAcceptsNativeTypeForAdapterGame(t *testing.T) {
 		t.Fatalf("type = %q", task.Type)
 	}
 }
+
+// The dashboard's graphical form rebuilds params from the schema fields
+// and never wrote the executor selector, so a form-created native task
+// fell to the external path and failed at fire time. Type "native" with
+// no explicit executor must store as executor "native"; an explicit value
+// (e.g. "auto") always wins.
+func TestCreateNativeTaskDefaultsExecutorSelector(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "g", Adapter: "genshin",
+		ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	c := srv.Client()
+
+	post := func(params string) store.Task {
+		resp, err := c.Post(srv.URL+"/api/tasks", "application/json",
+			strings.NewReader(`{"game_id":"genshin","name":"n","type":"native","params":`+params+`}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+		}
+		var task store.Task
+		if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+			t.Fatal(err)
+		}
+		return task
+	}
+
+	// form-style params: fields only, no executor selector
+	task := post(`"{\"skill\":\"x.json\",\"dry_run\":true}"`)
+	pm, err := task.ParamsMap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pm["executor"] != "native" {
+		t.Fatalf("executor selector must default to native, got %v (params %s)", pm["executor"], task.Params)
+	}
+
+	// explicit auto must survive untouched
+	task = post(`"{\"executor\":\"auto\",\"skill\":\"x.json\"}"`)
+	pm, _ = task.ParamsMap()
+	if pm["executor"] != "auto" {
+		t.Fatalf("explicit executor must win, got %v", pm["executor"])
+	}
+
+	// non-native types are untouched (no selector injected)
+	resp, err := c.Post(srv.URL+"/api/tasks", "application/json",
+		strings.NewReader(`{"game_id":"genshin","name":"ext","type":"raw","params":"{\"raw_args\":\"--x\"}"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var ext store.Task
+	if err := json.NewDecoder(resp.Body).Decode(&ext); err != nil {
+		t.Fatal(err)
+	}
+	if pm, _ := ext.ParamsMap(); len(pm) == 0 {
+		t.Fatal("external task params must round-trip")
+	} else if _, ok := pm["executor"]; ok {
+		t.Fatalf("executor must not be injected into non-native tasks: %v", pm)
+	}
+
+	// update path normalizes the same way (dashboard edit round-trip)
+	resp2, err := c.Post(srv.URL+"/api/tasks", "application/json",
+		strings.NewReader(`{"game_id":"genshin","name":"n2","type":"native","params":"{}"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created store.Task
+	if err := json.NewDecoder(resp2.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+	created.Name = "n2-renamed"
+	created.Params = `{"skill":"y.json"}` // form-style edit: selector dropped
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/tasks/"+strconv.FormatInt(created.ID, 10),
+		strings.NewReader(`{"game_id":"genshin","name":"n2-renamed","type":"native","params":"{\"skill\":\"y.json\"}","timeout_sec":0,"max_retries":0}`))
+	resp3, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp3.Body)
+		t.Fatalf("update status=%d body=%s", resp3.StatusCode, body)
+	}
+	stored, err := st.GetTask(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm2, _ := stored.ParamsMap()
+	if pm2["executor"] != "native" {
+		t.Fatalf("update must re-default the selector, got %v (params %s)", pm2["executor"], stored.Params)
+	}
+}

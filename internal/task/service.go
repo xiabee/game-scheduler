@@ -291,6 +291,7 @@ type Preflight struct {
 	Missing          []string         `json:"missing"`
 	ValidationError  string           `json:"validation_error,omitempty"`
 	BuildError       string           `json:"build_error,omitempty"`
+	Resolution       string           `json:"resolution,omitempty"` // auto executor: which branch was picked and why
 	Ready            bool             `json:"ready"`
 }
 
@@ -309,9 +310,39 @@ func (s *Service) Preflight(taskID int64) (Preflight, error) {
 		return Preflight{}, err
 	}
 	// NC6: native tasks preflight against the controller + declared files.
-	if isNativeTask(t) {
+	// The auto executor reports WHICH branch it resolved to and why.
+	switch paramsExecutor(t) {
+	case "native":
 		return s.nativePreflight(t)
+	case "auto":
+		return s.autoPreflight(t)
 	}
+	return s.externalPreflight(t)
+}
+
+// autoPreflight resolves the auto executor's branch and reports the
+// resolved branch's real prerequisites: native branch = controller +
+// declared assets; external branch = the game's adapter command, with the
+// reason native was rejected.
+func (s *Service) autoPreflight(t store.Task) (Preflight, error) {
+	if p, err := decodeNativeParams(t); err == nil {
+		if viable, _ := nativeViable(s.cfg, p); viable {
+			pf, err := s.nativePreflight(t)
+			pf.Resolution = "auto→native"
+			return pf, err
+		}
+		pf, err := s.externalPreflight(t)
+		if err == nil {
+			_, reason := nativeViable(s.cfg, p)
+			pf.Resolution = "auto→external (" + reason + ")"
+		}
+		return pf, err
+	}
+	// Malformed params: the native view surfaces the decode error.
+	return s.nativePreflight(t)
+}
+
+func (s *Service) externalPreflight(t store.Task) (Preflight, error) {
 	g, err := s.store.GetGame(t.GameID)
 	if err != nil {
 		return Preflight{}, err
@@ -472,8 +503,24 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	}
 	// NC6: native-executor tasks bypass the external-adapter path
 	// entirely — no adapter command line, no game tool layout checks.
-	if isNativeTask(t) {
+	// executor "auto" re-resolves HERE, at fire time: native runs only
+	// when its prerequisites still hold; anything else (including params
+	// that no longer decode) falls back to the external adapter path.
+	switch paramsExecutor(t) {
+	case "native":
 		return s.executeNative(ctx, exec, execID, t)
+	case "auto":
+		if p, derr := decodeNativeParams(t); derr == nil {
+			if viable, reason := nativeViable(s.cfg, p); viable {
+				return s.executeNative(ctx, exec, execID, t)
+			} else {
+				s.log.Info("auto executor resolved external", "exec_id", execID,
+					"task", t.Name, "reason", reason)
+			}
+		} else {
+			s.log.Info("auto executor resolved external", "exec_id", execID,
+				"task", t.Name, "reason", derr.Error())
+		}
 	}
 	g, err := s.store.GetGame(t.GameID)
 	if err != nil {

@@ -151,6 +151,165 @@ func TestNativeTaskPreflightChecksDeclaredFiles(t *testing.T) {
 	}
 }
 
+// ---- auto executor (NC6): resolve native vs external per execution ---------
+
+// autoTask is nativeTask with an explicit task type: auto tasks may keep an
+// adapter-owned type (the external fallback branch builds the adapter
+// command from it), which is exactly the contract under test here.
+func autoTask(t *testing.T, st *store.Store, taskType, params string) store.Task {
+	t.Helper()
+	if _, err := st.GetGame("stub"); err != nil {
+		if _, err := st.CreateGame(store.Game{ID: "stub", Name: "stub", Adapter: "stub",
+			ToolPath: os.Args[0], Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tk, err := st.CreateTask(store.Task{GameID: "stub", Name: "auto-run", Type: taskType,
+		Params: params, TimeoutSec: 30, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
+
+func TestAutoExecutorPrefersNativeWhenViable(t *testing.T) {
+	fake := buildFakeController(t)
+	dir := t.TempDir()
+	skill := filepath.Join(dir, "skill.json")
+	if err := os.WriteFile(skill, []byte(`{"name":"fake"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc, st := newNativeSvc(t, config.Config{MaxConcurrent: 1, DataDir: dir,
+		NativeControllerPath: fake})
+	tk := autoTask(t, st, "ok", fmt.Sprintf(`{"executor":"auto","skill":%q,"duration_sec":1}`, skill))
+
+	e, skipped, err := svc.Enqueue(tk.ID, store.TriggerManual, nil, false)
+	if err != nil || skipped {
+		t.Fatalf("enqueue: %v skipped=%v", err, skipped)
+	}
+	waitStatus(t, st, e.ID, store.StatusSuccess, 15*time.Second)
+
+	got, _ := st.GetExecution(e.ID)
+	if got.ExitCode == nil || *got.ExitCode != 0 {
+		t.Fatalf("exit code = %v, want 0", got.ExitCode)
+	}
+	if !strings.Contains(got.Command, "fake-controller") {
+		t.Fatalf("auto must run the controller when viable: %q", got.Command)
+	}
+	if !strings.Contains(got.Stdout, "executor=auto resolved=native") {
+		t.Fatalf("execution trail must announce the auto resolution: %q", got.Stdout)
+	}
+}
+
+func TestAutoExecutorFallsBackToExternal(t *testing.T) {
+	dir := t.TempDir()
+	skill := filepath.Join(dir, "skill.json")
+	if err := os.WriteFile(skill, []byte(`{"name":"fake"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No controller configured: auto must fall back to the adapter path and
+	// still complete the task successfully (stub "ok" exits 0).
+	svc, st := newNativeSvc(t, config.Config{MaxConcurrent: 1, DataDir: dir})
+	tk := autoTask(t, st, "ok", fmt.Sprintf(`{"executor":"auto","skill":%q}`, skill))
+
+	e, _, err := svc.Enqueue(tk.ID, store.TriggerManual, nil, false)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitStatus(t, st, e.ID, store.StatusSuccess, 15*time.Second)
+
+	got, _ := st.GetExecution(e.ID)
+	if !strings.Contains(got.Command, "TestTaskHelper") {
+		t.Fatalf("fallback must run the adapter command, got: %q", got.Command)
+	}
+	if strings.Contains(got.Command, "--session-log") {
+		t.Fatalf("fallback must not carry native session args: %q", got.Command)
+	}
+}
+
+func TestAutoExecutorFallsBackWhenDeclaredAssetMissing(t *testing.T) {
+	fake := buildFakeController(t)
+	dir := t.TempDir()
+	// Config and controller exist, but the declared skill file does not:
+	// auto degrades to external instead of running the controller without
+	// its declared asset.
+	svc, st := newNativeSvc(t, config.Config{MaxConcurrent: 1, DataDir: dir,
+		NativeControllerPath: fake})
+	tk := autoTask(t, st, "ok", `{"executor":"auto","skill":"Z:/definitely/missing/skill.json"}`)
+
+	e, _, err := svc.Enqueue(tk.ID, store.TriggerManual, nil, false)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitStatus(t, st, e.ID, store.StatusSuccess, 15*time.Second)
+
+	got, _ := st.GetExecution(e.ID)
+	if !strings.Contains(got.Command, "TestTaskHelper") {
+		t.Fatalf("missing asset must resolve external, got: %q", got.Command)
+	}
+}
+
+func TestAutoPreflightReportsResolution(t *testing.T) {
+	fake := buildFakeController(t)
+	dir := t.TempDir()
+	skill := filepath.Join(dir, "skill.json")
+	if err := os.WriteFile(skill, []byte(`{"name":"fake"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// viable → native branch, ready, resolution announced
+	svc, st := newNativeSvc(t, config.Config{MaxConcurrent: 1, DataDir: dir,
+		NativeControllerPath: fake})
+	tk := autoTask(t, st, "ok", fmt.Sprintf(`{"executor":"auto","skill":%q}`, skill))
+	pf, err := svc.Preflight(tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pf.Ready || pf.Resolution != "auto→native" {
+		t.Fatalf("viable auto must preflight native+ready, got ready=%v resolution=%q", pf.Ready, pf.Resolution)
+	}
+
+	// no controller config → external branch with the reason
+	svc2, st2 := newNativeSvc(t, config.Config{MaxConcurrent: 1, DataDir: dir})
+	tk2 := autoTask(t, st2, "ok", fmt.Sprintf(`{"executor":"auto","skill":%q}`, skill))
+	pf2, err := svc2.Preflight(tk2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pf2.Ready || !strings.Contains(pf2.Resolution, "auto→external") ||
+		!strings.Contains(pf2.Resolution, "native_controller_path") {
+		t.Fatalf("unconfigured auto must resolve external with reason, got ready=%v resolution=%q",
+			pf2.Ready, pf2.Resolution)
+	}
+	if len(pf2.Missing) != 0 {
+		t.Fatalf("resolved-external branch must carry the EXTERNAL checks only: %+v", pf2.Missing)
+	}
+
+	// declared asset missing → external with that reason (controller IS
+	// configured here, so the asset is what tips the resolution)
+	tk3 := autoTask(t, st, "ok", `{"executor":"auto","skill":"Z:/definitely/missing/skill.json"}`)
+	pf3, err := svc.Preflight(tk3.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pf3.Resolution, "skill file not found") {
+		t.Fatalf("missing asset reason must surface: %q", pf3.Resolution)
+	}
+
+	// params JSON that does not parse carries NO executor selector — the
+	// task stays on the external path (legacy contract for garbage params;
+	// the same dispatch rule protected plain external tasks before auto
+	// existed).
+	tk4 := autoTask(t, st2, "ok", `{"executor":"auto","skill":`)
+	pf4, err := svc2.Preflight(tk4.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pf4.Resolution != "" || len(pf4.Checks) == 0 {
+		t.Fatalf("garbage params must fall to the plain external view: %+v", pf4)
+	}
+}
+
 // ---- buildNativeSession unit tests -----------------------------------------
 
 func paramsFor(t *testing.T, raw string) nativeParams {

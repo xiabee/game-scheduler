@@ -204,14 +204,14 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 
 ### NC6 — Scheduler Integration 🚧(会话链路已落地,UI/auto 收尾待办)
 
-- **Status**:🚧 In Progress(2026-09-10/11 夜班:协议+执行器+调度分发全落地,真实 controller 全链路验收 PASS;剩余=dashboard 对 native 任务的可视化编辑与 `auto` 模式)。核心验收已达成:native 任务从 API/ctl 触发 → preflight → 调度 → 协议会话 → Execution 落库,取消路径同样有验收。
+- **Status**:🚧 In Progress(2026-09-10/11 夜班:协议+执行器+调度分发全落地,真实 controller 全链路验收 PASS;2026-09-11/12 夜班:`auto` 执行模式落地)。核心验收已达成:native 任务从 API/ctl 触发 → preflight → 调度 → 协议会话 → Execution 落库,取消路径同样有验收。
 - **已落地**:
   - 协议 schema v1 冻结(`controller/src/protocol.rs` serde 类型+测试;docs/controller-protocol-draft.md,D1–D4 全部定稿);
   - controller `--protocol` 线模式(HELLO/READY/EVENT/RESULT,RFC3339,stdout 纯协议;终态 EVENT 门控防每周期重复);
   - Go 侧 `internal/native`(协议镜像+流式会话执行器,版本 fail-fast/协议违规杀树/cancel-timeout 裁决矩阵);
   - 调度分发(`internal/task/native.go`:params 契约、config 双闸 `native_controller_path`+`native_allow_input`、RESULT→Execution 映射、会话 TSV 入 `<data_dir>/native/`、EVENT 轨迹入执行记录);
   - 验收设施(`cmd/fake-controller` 无游戏测试缝;windows_smoke native 三步:创建+preflight/真实会话 success/中途 cancel)。
-- **剩余**:dashboard 对 native 任务 params 的可视化编辑;`auto` 执行模式(native skill 可用→native 否则 external);EVENT→SSE 事件流打磨。
+- **剩余**:EVENT→SSE 事件流打磨(D1 事件稀疏,执行后 trail+TSV 已可观测,暂缓理由见 2026-09-10/11 夜班记录)。~~dashboard 对 native 任务 params 的可视化编辑~~ ✅(2026-09-10/11:M19 native 表单+服务端 executor 选择器默认注入);~~`auto` 执行模式(native skill 可用→native 否则 external)~~ ✅(2026-09-11/12:触发时实时决议,决议写进 Preflight resolution 与执行轨迹,只降级不升级)。
 - **Objective**:Native Controller 接回 Go 调度器。
 - **Scope**:简单进程协议(stdin/stdout JSON lines 或 localhost IPC);Go Task 支持 `executor = external | native`;native task 形如 `{"executor":"native","skill":"daily_reward","game_id":"genshin"}`;Go 侧:启动/停止 controller、接收 events、写入 Execution、cancel / timeout / screenshot / log / stats 复用现有 runner 基建。
 - **Acceptance Criteria**:一个 native task 从 API 触发到 Execution 落库全链路可走通;cancel/timeout 行为与 external 任务一致;协议有 schema 与版本字段。

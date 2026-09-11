@@ -237,7 +237,7 @@ Execution logs are pruned automatically: finished executions older than
 and every 6 hours; the newest 1000 rows are always kept and pending/running
 rows are never touched, so the database stays bounded over long runs.
 
-## 🎮 Native Controller tasks (executor=native, NC6)
+## 🎮 Native Controller tasks (executor=native|auto, NC6)
 
 The self-hosted Rust controller is wired into the scheduler: a task whose
 params declare `"executor":"native"` runs over the NC6 session protocol
@@ -254,6 +254,16 @@ params declare `"executor":"native"` runs over the NC6 session protocol
   "duration_sec": 30
 }
 ```
+
+`executor` accepts `native` or `auto` (a `type:"native"` task with no
+selector defaults to `native` server-side). **auto resolves at fire time**:
+the controller runs only when it is configured and executable and every
+declared skill/probes/model file exists; otherwise the task falls back to
+the game's external adapter command (keep an adapter-owned task Type).
+The resolution is announced in the Preflight report (`resolution` field)
+and in the execution's stdout trail (`executor=auto resolved=native`).
+auto only degrades, never escalates: it cannot turn on real input — the
+double gate still applies.
 
 **Enable it** by pointing `native_controller_path` at controller.exe in the
 config (empty = native executor disabled; such tasks fail fast with a clear

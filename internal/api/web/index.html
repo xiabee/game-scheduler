@@ -1055,6 +1055,7 @@ async function submitGame(ev){
 const NATIVE_TASK_TYPE={type:"native",label:"Native Controller(自研,默认 dry-run)",
   desc:"自研 Rust controller 会话:观察+规划,真实输入需 params/config 双闸。坐标一律归一化。",
   fields:[
+    {key:"executor",type:"text",label:"执行器(native|auto)",help:"native=总是 controller;auto=前置齐备走 native,否则回退外部 adapter(留空=native)"},
     {key:"skill",type:"text",label:"Skill JSON 路径(NC3 契约)"},
     {key:"probes",type:"text",label:"L0 探针 JSON 路径"},
     {key:"window",type:"text",label:"窗口标题子串(@probe=自带探针窗口)"},

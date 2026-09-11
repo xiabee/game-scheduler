@@ -368,8 +368,32 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	if !s.validTaskType(w, t) {
 		return
 	}
+	normalizeNativeParams(&t)
 	out, err := s.store.CreateTask(t)
 	respondCreated(w, out, s.changed(err))
+}
+
+// normalizeNativeParams fills the executor selector for native-family
+// tasks. Dispatch keys off params "executor", but the dashboard's
+// graphical form never wrote it (collectParams rebuilds params from the
+// schema fields only), so a form-created native task silently fell to the
+// external path and failed at fire time. Type "native" with no explicit
+// executor means "native"; an explicit value always wins.
+func normalizeNativeParams(t *store.Task) {
+	if t.Type != "native" {
+		return
+	}
+	pm, err := t.ParamsMap()
+	if err != nil {
+		return // unparseable params: dispatch treats them as selector-less
+	}
+	if _, ok := pm["executor"]; ok {
+		return
+	}
+	pm["executor"] = "native"
+	if b, err := json.Marshal(pm); err == nil {
+		t.Params = string(b)
+	}
 }
 
 // createGameRequest shadows Enabled with a pointer so a missing field can be
@@ -455,6 +479,7 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	if !s.validTaskType(w, t) {
 		return
 	}
+	normalizeNativeParams(&t)
 	t.ID = id
 	out, err := s.store.UpdateTask(t)
 	respond(w, out, s.changed(err))

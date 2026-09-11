@@ -557,13 +557,13 @@ Get-Content backup_request.json | ctl -server $S -data - planner import
 
 ---
 
-## 🎮 Native Controller 任务(executor=native,NC6)
+## 🎮 Native Controller 任务(executor=native|auto,NC6)
 
 自研 Rust controller 已接入调度器:任务 Params 里声明 `"executor":"native"` 即走原生会话协议(进程 stdin/stdout JSON lines),无需外部工具。
 
 ```json
 {
-  "executor": "native",
+  "executor": "native",              // native|auto;type=native 且缺省时服务端默认补 native
   "skill": "skills/daily.json",      // 可选,SkillDefinition(NC3 契约)
   "probes": "skills/probes.json",    // 可选,L0 探针定义
   "window": "@probe",                // 窗口标题子串;@probe=自带探针窗口
@@ -572,6 +572,8 @@ Get-Content backup_request.json | ctl -server $S -data - planner import
   "duration_sec": 30
 }
 ```
+
+**auto 执行器**:触发时实时决议——controller 已配置且可执行、且声明的 skill/probes/model 文件都在,则走 native;否则回退外部 adapter 命令(任务 Type 用适配器自有类型即可)。决议结果写进 Preflight(`resolution` 字段)与执行记录 stdout 轨迹(`executor=auto resolved=native`)。auto 只降级不升级:绝不会因 auto 而启用真实输入,双闸照旧。
 
 **启用前提**:config 里 `native_controller_path` 指向 controller.exe(空=native 执行器关闭,任务 fail-fast 并明确报错)。
 
