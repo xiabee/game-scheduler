@@ -325,6 +325,14 @@ func (s *Service) Preflight(taskID int64) (Preflight, error) {
 // declared assets; external branch = the game's adapter command, with the
 // reason native was rejected.
 func (s *Service) autoPreflight(t store.Task) (Preflight, error) {
+	// auto's whole contract is a usable fallback branch; type "native" has
+	// none (no adapter owns it). Be loud at preflight instead of reporting a
+	// deceptively ready task whose degrade path is guaranteed to fail.
+	if t.Type == "native" {
+		pf := Preflight{TaskID: t.ID, TaskName: t.Name,
+			ValidationError: `executor "auto" needs an adapter-owned task type as its external fallback; type "native" is native-only — use executor "native" instead`}
+		return pf, nil
+	}
 	if p, err := decodeNativeParams(t); err == nil {
 		if viable, _ := nativeViable(s.cfg, p); viable {
 			pf, err := s.nativePreflight(t)
@@ -510,6 +518,11 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	case "native":
 		return s.executeNative(ctx, exec, execID, t)
 	case "auto":
+		if t.Type == "native" {
+			err := fmt.Errorf(`executor "auto" needs an adapter-owned task type as its external fallback; type "native" is native-only — use executor "native" instead`)
+			s.log.Warn("auto executor misconfigured", "exec_id", execID, "task", t.Name, "err", err)
+			return s.finishWithError(exec, err)
+		}
 		if p, derr := decodeNativeParams(t); derr == nil {
 			if viable, reason := nativeViable(s.cfg, p); viable {
 				return s.executeNative(ctx, exec, execID, t)

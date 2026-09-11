@@ -240,6 +240,40 @@ try {
             $e = Invoke-Ctl -ResourceArgs @("execs", "get", "$($exec.id)")
             if ($e.status -ne "cancelled") { throw "status=$($e.status), want cancelled" }
         }
+
+        # ---- 9b. auto executor (NC6): resolve and announce the branch ----
+        Step "native: auto executor resolves to the controller (preflight + run)" {
+            # adapter-owned type with a usable script fallback; native
+            # prerequisites hold, so the controller branch must win
+            $paramsAuto = @{ executor = "auto"; probes = $probeFile; window = "@probe";
+                             backend = "synthetic"; duration_sec = 2; script = "auto-fallback" } | ConvertTo-Json -Compress
+            $body = @{ game_id = $gameId; name = $script:nativeTask.name; type = "script";
+                       params = $paramsAuto; enabled = $true } | ConvertTo-Json -Compress -Depth 4
+            $null = Invoke-Ctl -ResourceArgs @("tasks", "update", "$($script:nativeTask.id)") -JsonBody $body
+            $pf = Invoke-Ctl -ResourceArgs @("tasks", "preflight", "$($script:nativeTask.id)")
+            if ($pf.resolution -ne "auto→native") { throw "resolution=$($pf.resolution), want auto→native" }
+            if (-not $pf.ready) { throw "preflight not ready: $($pf.validation_error) $($pf.missing -join '; ')" }
+            $exec = Invoke-Ctl -ResourceArgs @("tasks", "run", "$($script:nativeTask.id)")
+            $deadline = (Get-Date).AddSeconds(60)
+            do {
+                Start-Sleep -Milliseconds 500
+                $e = Invoke-Ctl -ResourceArgs @("execs", "get", "$($exec.id)")
+                if ((Get-Date) -gt $deadline) { throw "auto execution did not finish in 60s (status=$($e.status))" }
+            } while ($e.status -in @("pending", "running"))
+            if ($e.status -ne "success") { throw "status=$($e.status) error=$($e.error_msg)" }
+            if ($e.stdout -notmatch "executor=auto resolved=native") { throw "trail missing auto resolution: $($e.stdout)" }
+        }
+        Step "native: auto executor degrades to the adapter when an asset is missing" {
+            $paramsDegrade = @{ executor = "auto"; probes = $probeFile; skill = "Z:/definitely/missing/skill.json";
+                                window = "@probe"; backend = "synthetic"; duration_sec = 2; script = "auto-fallback" } | ConvertTo-Json -Compress
+            $body = @{ game_id = $gameId; name = $script:nativeTask.name; type = "script";
+                       params = $paramsDegrade; enabled = $true } | ConvertTo-Json -Compress -Depth 4
+            $null = Invoke-Ctl -ResourceArgs @("tasks", "update", "$($script:nativeTask.id)") -JsonBody $body
+            $pf = Invoke-Ctl -ResourceArgs @("tasks", "preflight", "$($script:nativeTask.id)")
+            if ($pf.resolution -notmatch "auto→external") { throw "resolution=$($pf.resolution), want auto→external" }
+            if ($pf.resolution -notmatch "skill file not found") { throw "resolution lacks the reason: $($pf.resolution)" }
+            if (-not $pf.ready) { throw "external fallback branch must be ready: $($pf.validation_error) $($pf.missing -join '; ')" }
+        }
     }
 } finally {
     # ---- 8. cleanup (delete game cascades tasks/routes/executions) ----

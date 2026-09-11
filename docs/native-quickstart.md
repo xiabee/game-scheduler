@@ -90,6 +90,22 @@ ctl tasks run <task_id>           # Execution 落库,RESULT done → success
 会话 TSV 在 `<data_dir>/native/exec-<id>.tsv`,EVENT 轨迹在执行记录的
 stdout 字段,取消(`ctl execs cancel <id>`)会杀掉整棵 controller 进程树。
 
+### auto 执行器(NC6):native 可用才走 native
+
+把 `executor` 写成 `"auto"` 并配一个**适配器自有**的任务类型,任务就在
+触发时实时决议:controller 已配置+可执行+声明的文件都在 → 走 native;
+否则回退到该类型的外部命令(上例若配 `type=script` + `params.script`,
+回退分支就是 BetterGI 脚本)。决议结果在 preflight 的 `resolution`
+字段与执行记录 stdout 首行可见:
+
+```powershell
+ctl tasks preflight <task_id>     # resolution = auto→native / auto→external (原因)
+```
+
+注意:`executor=auto` 需要**有真实回退分支**——type=native(原生专用)
+配 auto 会在 preflight/execute 显式报错,请直接用 `executor=native`。
+auto 只降级不升级:它永远不会替你打开真实输入,双闸照旧。
+
 ## 5. 安全边界(为什么要双闸)
 
 - 本任务形态**默认 dry_run=true**:只观察、只记录计划动作,不发输入。

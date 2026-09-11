@@ -5,7 +5,7 @@
 #   [2] scripts/controller-smoke.ps1  - window probe / GDI capture / manifest
 #                                       gates / ONNX dry-run / record-replay
 #   [3] windows full-chain smoke      - isolated temp server on a scratch port,
-#                                       examples/windows_smoke.ps1 11 steps
+#                                       examples/windows_smoke.ps1 full chain (incl. native + auto executor)
 #   [4] 30s ONNX soak                 - dry-run with the committed fixture,
 #                                       inference + cache stats asserted
 # Exit code 0 only when every section passed. Each section logs its own

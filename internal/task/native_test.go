@@ -310,6 +310,38 @@ func TestAutoPreflightReportsResolution(t *testing.T) {
 	}
 }
 
+func TestAutoRequiresAdapterOwnedTypeForFallback(t *testing.T) {
+	fake := buildFakeController(t)
+	dir := t.TempDir()
+	skill := filepath.Join(dir, "skill.json")
+	if err := os.WriteFile(skill, []byte(`{"name":"fake"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc, st := newNativeSvc(t, config.Config{MaxConcurrent: 1, DataDir: dir,
+		NativeControllerPath: fake})
+	// type "native" + executor "auto": native is viable, but the fallback
+	// branch cannot exist (no adapter owns type "native") — preflight and
+	// execute must both be loud instead of deceptively ready.
+	tk := autoTask(t, st, "native", fmt.Sprintf(`{"executor":"auto","skill":%q}`, skill))
+	pf, err := svc.Preflight(tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pf.Ready || pf.Resolution != "" || !strings.Contains(pf.ValidationError, "adapter-owned") {
+		t.Fatalf("type=native + auto must fail validation, got ready=%v resolution=%q err=%q",
+			pf.Ready, pf.Resolution, pf.ValidationError)
+	}
+	e, _, err := svc.Enqueue(tk.ID, store.TriggerManual, nil, false)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitStatus(t, st, e.ID, store.StatusFailed, 3*time.Second)
+	got, _ := st.GetExecution(e.ID)
+	if !strings.Contains(got.ErrorMsg, "adapter-owned") {
+		t.Fatalf("execution must carry the config error, got %q", got.ErrorMsg)
+	}
+}
+
 // ---- buildNativeSession unit tests -----------------------------------------
 
 func paramsFor(t *testing.T, raw string) nativeParams {
