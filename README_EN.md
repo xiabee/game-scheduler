@@ -646,6 +646,17 @@ Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -C
 > requirements are validated to stay within one game (goal's character game vs
 > material game), otherwise 400.
 
+> 💡 **Attaching a skill (NC7)**: a recommendation can also bind an NC3
+> SkillDefinition file:
+> `POST /api/planner/recommendations/{id}/attach-skill` +
+> `{"skill":"skills/daily.json"}` (the file must already exist; ctl:
+> `planner attach-skill <recommendation-id> -skill <path>`; dashboard shows a
+> "绑定 Skill" button on each recommendation row). Tasks created from a
+> skill-bound recommendation run with `executor=auto`: the native controller
+> runs the skill when its prerequisites hold, and otherwise the task falls
+> back to the bound route command — auto only degrades, never escalates, and
+> the real-input double gate still applies.
+
 CLI examples:
 
 ```powershell
@@ -660,6 +671,7 @@ ctl -server $S -data '{"goal_id":1,"material_id":1,"required_count":168,"owned_c
 ctl -server $S -data '{"goal_id":1,"daily_stamina":160,"max_tasks":3}' planner recommend
 ctl -server $S -goal 1 planner recommendations
 ctl -server $S -route 3 planner attach-route <recommendation-id>   # bind a route to a manual recommendation
+ctl -server $S -skill skills/daily.json planner attach-skill <recommendation-id>  # bind an NC3 skill (NC7: tasks prefer native)
 ctl -server $S planner create-task <recommendation-id>
 ctl -server $S -data '{"cron_expr":"0 9 * * *"}' planner create-plan <recommendation-id>
 ```

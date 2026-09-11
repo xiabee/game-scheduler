@@ -681,16 +681,41 @@ async function renderRecommendations(){
     const routeCell = rec.route_id
       ? esc(await routeName(rec.route_id))
       : `<span class="meta">手动建议</span> <button type="button" onclick="openAttachRoute(${rec.id},'${encodeURIComponent(rec.game_id||'').replace(/'/g,'%27')}')">绑定路线</button>`;
+    const skillCell = rec.skill
+      ? `<span class="badge" title="native 优先,不可用时回退路线">skill</span><div class="hint">${esc(rec.skill)}</div>`
+      : `<button type="button" onclick="openBindSkill(${rec.id})">绑定 Skill</button>`;
     rows.push(`<tr>
       <td><strong>${esc(rec.title)}</strong><div class="hint">${esc(rec.reason)}</div></td>
       <td>${routeCell}</td>
+      <td>${skillCell}</td>
       <td>${rec.estimated_runs||0} 次 / ${rec.estimated_stamina||0}</td>
       <td><span class="badge">${esc(rec.status||'open')}</span></td>
       <td><button onclick="plannerCreateTask(${rec.id})">任务</button> <button onclick="plannerCreatePlan(${rec.id})">计划</button> <button onclick="plannerMark(${rec.id},'complete')">完成</button> <button onclick="plannerMark(${rec.id},'dismiss')">忽略</button> <button class="danger" onclick="plannerDelete('/api/planner/recommendations/${rec.id}','删除这条推荐，确认？')">删除</button></td>
     </tr>`);
   }
-  $("#cp-recs").innerHTML=rows.length?`<table><thead><tr><th>推荐</th><th>路线</th><th>预计</th><th>状态</th><th></th></tr></thead><tbody>${rows.join("")}</tbody></table>`:
+  $("#cp-recs").innerHTML=rows.length?`<table><thead><tr><th>推荐</th><th>路线</th><th>Skill</th><th>预计</th><th>状态</th><th></th></tr></thead><tbody>${rows.join("")}</tbody></table>`:
     '<div class="empty">暂无推荐</div>';
+}
+function openBindSkill(recId){
+  openModal("为推荐 #"+recId+" 绑定 Skill", `<form class="form" onsubmit="return doBindSkill(event,${recId})">
+    <label>Skill JSON 路径(NC3 契约)<input id="bs-skill" required placeholder="skills/daily.json"></label>
+    <div class="hint">绑定后创建的任务 executor=auto:native controller 可用就走 skill,否则回退到绑定的路线。文件必须已存在。</div>
+    <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">绑定</button></div>
+  </form><div id="ferr" class="hint" style="color:var(--err)"></div>`);
+}
+async function doBindSkill(ev,recId){
+  ev.preventDefault();
+  const skill=$("#bs-skill").value.trim();
+  if(!skill) return false;
+  try{
+    const r=await api(`/api/planner/recommendations/${recId}/attach-skill`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({skill})});
+    const out=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(out.error||("HTTP "+r.status));
+    closeModal();
+    $("#err").textContent="已绑定 skill，推荐 #"+recId+" 创建的任务将优先走 native。";
+    await loadPlannerData();
+  }catch(e){ $("#ferr").textContent="绑定失败: "+esc(String(e.message||e)); }
+  return false;
 }
 async function addPlannerCharacter(){
   const body={game_id:$("#cp-game").value,name:$("#cp-char-name").value.trim(),role_type:$("#cp-role").value.trim(),

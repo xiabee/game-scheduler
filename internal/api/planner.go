@@ -1,9 +1,12 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/xiabee/game-scheduler/internal/planner"
 	"github.com/xiabee/game-scheduler/internal/scheduler"
@@ -64,6 +67,57 @@ func (s *Server) attachRecommendationRoute(w http.ResponseWriter, r *http.Reques
 	rec.RouteID = &rt.ID
 	if rec.RecommendationType == "manual" {
 		rec.RecommendationType = "route"
+	}
+	out, err := s.store.UpdateFarmingRecommendation(rec)
+	respond(w, out, s.changed(err))
+}
+
+// attachSkillRequest is the POST .../attach-skill body.
+type attachSkillRequest struct {
+	Skill string `json:"skill"`
+}
+
+// skillFileExists reports whether path names an existing regular file.
+func skillFileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}
+
+// attachRecommendationSkill binds an NC3 SkillDefinition file (NC7): tasks
+// created from this recommendation will prefer the native controller for
+// the skill and fall back to the bound route otherwise. The file must
+// exist at bind time — a typo'd path would otherwise silently degrade
+// every run to the external branch forever.
+func (s *Server) attachRecommendationSkill(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req attachSkillRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	skill := strings.TrimSpace(req.Skill)
+	if skill == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("skill path is required"))
+		return
+	}
+	if !skillFileExists(skill) {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("skill file not found: %s", skill))
+		return
+	}
+	rec, err := s.store.GetFarmingRecommendation(id)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	if !recOpen(rec) {
+		writeErr(w, http.StatusBadRequest, errRecommendationClosed)
+		return
+	}
+	rec.Skill = skill
+	if rec.RecommendationType == "manual" {
+		rec.RecommendationType = "skill"
 	}
 	out, err := s.store.UpdateFarmingRecommendation(rec)
 	respond(w, out, s.changed(err))
@@ -482,6 +536,24 @@ func (s *Server) ensureRecommendationTask(id int64) (store.Task, error) {
 	}
 	if rec.Title != "" {
 		task.Name = rec.Title
+	}
+	// NC7 skill binding: a bound SkillDefinition rides on the route task as
+	// the auto executor's preferred branch — the controller runs the skill
+	// when its prerequisites hold, otherwise the adapter route command from
+	// taskfactory remains the fallback. The adapter params stay: they are
+	// exactly what the external branch needs at fire time.
+	if rec.Skill != "" {
+		pm, perr := task.ParamsMap()
+		if perr != nil {
+			return store.Task{}, fmt.Errorf("taskfactory params: %w", perr)
+		}
+		pm["executor"] = "auto"
+		pm["skill"] = rec.Skill
+		if b, merr := json.Marshal(pm); merr != nil {
+			return store.Task{}, merr
+		} else {
+			task.Params = string(b)
+		}
 	}
 	// One transaction: the task row and the recommendation link appear
 	// together, so a failure cannot orphan a task (and a retry duplicate it).

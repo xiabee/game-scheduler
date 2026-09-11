@@ -14,6 +14,7 @@
 //	materials list [-game id] [-category c] | get <id> | add | update <id> | delete <id>
 //	requirements list [-goal id] | get <id> | add | update <id> | delete <id>
 //	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | attach-route <id> -route <routeId>
+//	        | attach-skill <id> -skill <skill.json> | create-plan <id>
 //	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | create-plan <id>
 //	        | export -game <id> | import -data '<json>'|@file.json|-
 //	plans   list | get <id> | add | update <id> | delete <id>
@@ -58,6 +59,7 @@ func main() {
 	goalID := flag.String("goal", "", "filter by goal id (requirements/recommendations list)")
 	category := flag.String("category", "", "filter by category (materials list)")
 	routeID := flag.String("route", "", "route id for 'planner attach-route'")
+	skillPath := flag.String("skill", "", "skill JSON path for 'planner attach-skill'")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -216,6 +218,18 @@ func main() {
 				break
 			}
 			err = c.do("POST", "/api/planner/recommendations/"+id+"/attach-route", []byte(`{"route_id":`+strconv.FormatInt(rid, 10)+`}`))
+		case "attach-skill":
+			sp := strings.TrimSpace(*skillPath)
+			if sp == "" {
+				err = fmt.Errorf("planner attach-skill requires -skill <skill.json path>")
+				break
+			}
+			body, e := json.Marshal(map[string]string{"skill": sp})
+			if e != nil {
+				err = e
+				break
+			}
+			err = c.do("POST", "/api/planner/recommendations/"+id+"/attach-skill", body)
 		case "create-plan":
 			body := []byte("{}")
 			if *data != "" {

@@ -452,9 +452,9 @@ func insertFarmingRecommendation(q dbtx, r *FarmingRecommendation) error {
 	if r.RecommendationType == "" {
 		r.RecommendationType = "manual"
 	}
-	res, err := q.Exec(`INSERT INTO farming_recommendations (goal_id,game_id,material_id,route_id,task_id,recommendation_type,title,reason,priority,estimated_runs,estimated_stamina,status,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		r.GoalID, r.GameID, r.MaterialID, r.RouteID, r.TaskID, r.RecommendationType, r.Title, r.Reason, r.Priority, r.EstimatedRuns, r.EstimatedStamina, r.Status, r.CreatedAt, r.UpdatedAt)
+	res, err := q.Exec(`INSERT INTO farming_recommendations (goal_id,game_id,material_id,route_id,task_id,recommendation_type,title,reason,priority,estimated_runs,estimated_stamina,status,skill,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.GoalID, r.GameID, r.MaterialID, r.RouteID, r.TaskID, r.RecommendationType, r.Title, r.Reason, r.Priority, r.EstimatedRuns, r.EstimatedStamina, r.Status, r.Skill, r.CreatedAt, r.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -464,8 +464,8 @@ func insertFarmingRecommendation(q dbtx, r *FarmingRecommendation) error {
 
 func (s *Store) GetFarmingRecommendation(id int64) (FarmingRecommendation, error) {
 	var r FarmingRecommendation
-	err := s.db.QueryRow(`SELECT id,goal_id,game_id,material_id,route_id,task_id,recommendation_type,title,reason,priority,estimated_runs,estimated_stamina,status,created_at,updated_at FROM farming_recommendations WHERE id=?`, id).
-		Scan(&r.ID, &r.GoalID, &r.GameID, &r.MaterialID, &r.RouteID, &r.TaskID, &r.RecommendationType, &r.Title, &r.Reason, &r.Priority, &r.EstimatedRuns, &r.EstimatedStamina, &r.Status, &r.CreatedAt, &r.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id,goal_id,game_id,material_id,route_id,task_id,recommendation_type,title,reason,priority,estimated_runs,estimated_stamina,status,skill,created_at,updated_at FROM farming_recommendations WHERE id=?`, id).
+		Scan(&r.ID, &r.GoalID, &r.GameID, &r.MaterialID, &r.RouteID, &r.TaskID, &r.RecommendationType, &r.Title, &r.Reason, &r.Priority, &r.EstimatedRuns, &r.EstimatedStamina, &r.Status, &r.Skill, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return FarmingRecommendation{}, ErrNotFound
 	}
@@ -474,8 +474,8 @@ func (s *Store) GetFarmingRecommendation(id int64) (FarmingRecommendation, error
 
 func (s *Store) UpdateFarmingRecommendation(r FarmingRecommendation) (FarmingRecommendation, error) {
 	r.UpdatedAt = time.Now().UTC()
-	res, err := s.db.Exec(`UPDATE farming_recommendations SET goal_id=?,game_id=?,material_id=?,route_id=?,task_id=?,recommendation_type=?,title=?,reason=?,priority=?,estimated_runs=?,estimated_stamina=?,status=?,updated_at=? WHERE id=?`,
-		r.GoalID, r.GameID, r.MaterialID, r.RouteID, r.TaskID, r.RecommendationType, r.Title, r.Reason, r.Priority, r.EstimatedRuns, r.EstimatedStamina, r.Status, r.UpdatedAt, r.ID)
+	res, err := s.db.Exec(`UPDATE farming_recommendations SET goal_id=?,game_id=?,material_id=?,route_id=?,task_id=?,recommendation_type=?,title=?,reason=?,priority=?,estimated_runs=?,estimated_stamina=?,status=?,skill=?,updated_at=? WHERE id=?`,
+		r.GoalID, r.GameID, r.MaterialID, r.RouteID, r.TaskID, r.RecommendationType, r.Title, r.Reason, r.Priority, r.EstimatedRuns, r.EstimatedStamina, r.Status, r.Skill, r.UpdatedAt, r.ID)
 	if err != nil {
 		return FarmingRecommendation{}, err
 	}
@@ -497,7 +497,7 @@ func (s *Store) DeleteFarmingRecommendation(id int64) error {
 }
 
 func (s *Store) ListFarmingRecommendations(f FarmingRecommendationFilter) ([]FarmingRecommendation, error) {
-	q := `SELECT id,goal_id,game_id,material_id,route_id,task_id,recommendation_type,title,reason,priority,estimated_runs,estimated_stamina,status,created_at,updated_at FROM farming_recommendations WHERE 1=1`
+	q := `SELECT id,goal_id,game_id,material_id,route_id,task_id,recommendation_type,title,reason,priority,estimated_runs,estimated_stamina,status,skill,created_at,updated_at FROM farming_recommendations WHERE 1=1`
 	var args []any
 	if f.GoalID != 0 {
 		q += ` AND goal_id=?`
@@ -524,7 +524,7 @@ func (s *Store) ListFarmingRecommendations(f FarmingRecommendationFilter) ([]Far
 	out := []FarmingRecommendation{}
 	for rows.Next() {
 		var r FarmingRecommendation
-		if err := rows.Scan(&r.ID, &r.GoalID, &r.GameID, &r.MaterialID, &r.RouteID, &r.TaskID, &r.RecommendationType, &r.Title, &r.Reason, &r.Priority, &r.EstimatedRuns, &r.EstimatedStamina, &r.Status, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.GoalID, &r.GameID, &r.MaterialID, &r.RouteID, &r.TaskID, &r.RecommendationType, &r.Title, &r.Reason, &r.Priority, &r.EstimatedRuns, &r.EstimatedStamina, &r.Status, &r.Skill, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

@@ -141,21 +141,25 @@ type MaterialRequirement struct {
 
 // FarmingRecommendation is the persisted output of the character planner.
 type FarmingRecommendation struct {
-	ID                 int64     `json:"id"`
-	GoalID             int64     `json:"goal_id"`
-	GameID             string    `json:"game_id"`
-	MaterialID         int64     `json:"material_id"`
-	RouteID            *int64    `json:"route_id,omitempty"`
-	TaskID             *int64    `json:"task_id,omitempty"`
-	RecommendationType string    `json:"recommendation_type"`
-	Title              string    `json:"title"`
-	Reason             string    `json:"reason"`
-	Priority           int       `json:"priority"`
-	EstimatedRuns      int       `json:"estimated_runs"`
-	EstimatedStamina   int       `json:"estimated_stamina"`
-	Status             string    `json:"status"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 int64  `json:"id"`
+	GoalID             int64  `json:"goal_id"`
+	GameID             string `json:"game_id"`
+	MaterialID         int64  `json:"material_id"`
+	RouteID            *int64 `json:"route_id,omitempty"`
+	TaskID             *int64 `json:"task_id,omitempty"`
+	RecommendationType string `json:"recommendation_type"`
+	Title              string `json:"title"`
+	Reason             string `json:"reason"`
+	Priority           int    `json:"priority"`
+	EstimatedRuns      int    `json:"estimated_runs"`
+	EstimatedStamina   int    `json:"estimated_stamina"`
+	Status             string `json:"status"`
+	// Skill optionally binds an NC3 SkillDefinition file (NC7): a task
+	// created from this recommendation prefers the native controller for
+	// it and falls back to the bound route otherwise.
+	Skill     string    `json:"skill,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Plan binds a task to a cron schedule.

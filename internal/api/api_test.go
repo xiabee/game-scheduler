@@ -627,6 +627,120 @@ func TestPlannerAttachRoute(t *testing.T) {
 	}
 }
 
+// NC7 first slice: attaching a skill to an open recommendation makes
+// create-task produce an auto-executor task that prefers the native skill
+// and keeps the taskfactory route command as the external fallback.
+func TestPlannerAttachSkill(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	dir := t.TempDir()
+	skillPath := filepath.Join(dir, "daily.json")
+	if err := os.WriteFile(skillPath, []byte(`{"name":"daily_claim"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := srv.Client()
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "原神", Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	ch, err := st.CreateCharacter(store.Character{GameID: "genshin", Name: "香菱"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal, err := st.CreateCharacterGoal(store.CharacterGoal{CharacterID: ch.ID, Name: "突破90", Priority: 5, Status: "open"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mat, err := st.CreateMaterialItem(store.MaterialItem{GameID: "genshin", Name: "绝云椒椒", Category: "collect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateMaterialRequirement(store.MaterialRequirement{GoalID: goal.ID, MaterialID: mat.ID, RequiredCount: 10, OwnedCount: 2, Priority: 8}); err != nil {
+		t.Fatal(err)
+	}
+	var recs []store.FarmingRecommendation
+	resp, err := c.Post(srv.URL+"/api/planner/recommend", "application/json",
+		strings.NewReader(`{"goal_id":`+strconv.FormatInt(goal.ID, 10)+`,"max_tasks":3}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&recs); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	recID := strconv.FormatInt(recs[0].ID, 10)
+	post := func(path, body string, out any) int {
+		t.Helper()
+		r, err := c.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Body.Close()
+		if out != nil {
+			if err := json.NewDecoder(r.Body).Decode(out); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return r.StatusCode
+	}
+	var e struct {
+		Error string `json:"error"`
+	}
+
+	// missing file is rejected at bind time (a typo'd path must not silently
+	// degrade every later run to the external branch)
+	if code := post("/api/planner/recommendations/"+recID+"/attach-skill", `{"skill":"Z:/no/such/skill.json"}`, &e); code != http.StatusBadRequest {
+		t.Fatalf("attach missing skill: status=%d", code)
+	}
+	// empty body is rejected
+	if code := post("/api/planner/recommendations/"+recID+"/attach-skill", `{}`, &e); code != http.StatusBadRequest {
+		t.Fatalf("attach without skill: status=%d", code)
+	}
+	// existing route still required for task creation
+	if code := post("/api/planner/recommendations/"+recID+"/create-task", `{}`, &e); code != http.StatusBadRequest {
+		t.Fatalf("create-task without route: status=%d", code)
+	}
+
+	rt, err := st.CreateRoute(store.Route{GameID: "genshin", Adapter: "genshin", RouteType: "collect", Name: "绝云椒椒采集", FilePath: "D:/routes/jueyun.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec store.FarmingRecommendation
+	if code := post("/api/planner/recommendations/"+recID+"/attach-route", `{"route_id":`+strconv.FormatInt(rt.ID, 10)+`}`, &rec); code != http.StatusOK {
+		t.Fatalf("attach route status=%d", code)
+	}
+	if code := post("/api/planner/recommendations/"+recID+"/attach-skill", `{"skill":`+strconv.Quote(skillPath)+`}`, &rec); code != http.StatusOK {
+		t.Fatalf("attach skill status=%d", code)
+	}
+	if rec.Skill != skillPath {
+		t.Fatalf("attach skill result=%+v", rec)
+	}
+	// the recommendation type stays "route" here — the route attach already
+	// upgraded it; skill binding never downgrades an existing type
+
+	var task store.Task
+	if code := post("/api/planner/recommendations/"+recID+"/create-task", `{}`, &task); code != http.StatusCreated {
+		t.Fatalf("create-task after skill attach status=%d", code)
+	}
+	pm, err := task.ParamsMap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pm["executor"] != "auto" || pm["skill"] != skillPath || pm["script"] != "D:/routes/jueyun.json" {
+		t.Fatalf("task params must carry executor=auto + skill + adapter fallback: %v", pm)
+	}
+	if task.Type == "native" {
+		t.Fatalf("skill-bound rec keeps the adapter-owned type for the fallback branch, got %q", task.Type)
+	}
+
+	// a closed recommendation cannot gain a skill binding
+	if code := post("/api/planner/recommendations/"+recID+"/dismiss", `{}`, nil); code != http.StatusOK {
+		t.Fatalf("dismiss status=%d", code)
+	}
+	if code := post("/api/planner/recommendations/"+recID+"/attach-skill", `{"skill":`+strconv.Quote(skillPath)+`}`, &e); code != http.StatusBadRequest || e.Error == "" {
+		t.Fatalf("attach on closed rec: status=%d err=%q", code, e.Error)
+	}
+}
+
 func TestPlannerExportImport(t *testing.T) {
 	srv, st, _ := newTestServer(t, "")
 	c := srv.Client()

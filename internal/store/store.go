@@ -59,6 +59,7 @@ func (s *Store) migrate() error {
 		{"routes", "success_count", "INTEGER NOT NULL DEFAULT 0"},
 		{"routes", "fail_count", "INTEGER NOT NULL DEFAULT 0"},
 		{"routes", "updated_at", "TIMESTAMP"},
+		{"farming_recommendations", "skill", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := s.ensureColumn(col.table, col.name, col.def); err != nil {
 			return err
@@ -243,6 +244,7 @@ CREATE TABLE IF NOT EXISTS farming_recommendations (
     estimated_runs      INTEGER NOT NULL DEFAULT 0,
     estimated_stamina   INTEGER NOT NULL DEFAULT 0,
     status              TEXT NOT NULL DEFAULT 'open',
+    skill               TEXT NOT NULL DEFAULT '',
     created_at          TIMESTAMP NOT NULL,
     updated_at          TIMESTAMP NOT NULL
 );

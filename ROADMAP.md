@@ -219,11 +219,11 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Dependencies**:NC5。
 - **Out of Scope**:把 controller 逻辑塞进 Go API(红线)。
 
-### NC7 — Planner Integration ⬜
+### NC7 — Planner Integration ⬜(首片落地:skill 绑定→auto 任务)
 
-- **Status**:⬜ Planned
+- **Status**:🚧 In Progress(2026-09-11/12 夜班首片:recommendation 可绑定 NC3 SkillDefinition,create-task 产出 executor=auto 任务——native skill 可用即走 native,否则回退绑定路线的外部命令;`POST /attach-skill` + ctl + 看板「绑定 Skill」全通)。**依赖 NC6 的 auto 执行器 ✅(同夜 M2)**。
 - **Objective**:打通 `Planner → Recommendation → Skill/Route → Native Controller`,执行结果回流 Execution。
-- **Scope**:recommendation 增加可选 skill 绑定;执行结果(feedback)反哺 planner 统计。
+- **Scope**:recommendation 增加可选 skill 绑定 ✅(首片);执行结果(feedback)反哺 planner 统计(⬜ 未做);无路线纯 skill 推荐(⬜ deferred——当前推荐生命周期 route 中心,skill 绑定骑在路线任务上)。
 - **Acceptance Criteria**:"今天需要刷材料 A"的推荐可以一键生成 native 任务并执行,结果在 dashboard 可见。
 - **Dependencies**:NC6。
 - **Out of Scope**:自动生成 Skill(人工/半自动制作 Skill)。
