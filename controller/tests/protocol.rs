@@ -82,9 +82,13 @@ fn protocol_session_stream_conforms() {
 /// D1 gate regression: a skill that reaches its terminal state must emit
 /// EXACTLY ONE EVENT for that terminal transition, even though the engine
 /// keeps returning Done on every later cycle (the 300s soak caught this
-/// flooding before the gate existed). Drives the real probe window scene:
-/// a probe watching the normalized (0.6,0.6)-(0.8,0.8) red anchor fires on
-/// the first cycle, so the skill walks s0 -> done immediately.
+/// flooding before the gate existed; the transition-into-terminal arm also
+/// had to join the latch — it used to emit and then let Done re-emit).
+/// Drives the real probe window scene: a probe watching the normalized
+/// (0.6,0.6)-(0.8,0.8) red anchor fires within the first cycles, so the
+/// skill walks s0 -> done; if the probe never fires (load transient), the
+/// 2s timeout retreats into the same terminal state — either way the
+/// terminal state is announced EXACTLY once.
 #[test]
 fn terminal_skill_event_emits_once() {
     use std::io::Read;
@@ -104,7 +108,7 @@ fn terminal_skill_event_emits_once() {
     std::fs::write(
         &skill,
         r#"{"name":"gate_test","start":"s0","states":[
-            {"name":"s0","expect":[{"probe":"rect_probe"}],"actions":["click"],"next":"done","timeout_ms":8000,"max_retries":1,"terminal":false},
+            {"name":"s0","expect":[{"probe":"rect_probe"}],"actions":["click"],"next":"done","timeout_ms":2000,"max_retries":1,"fallback":"done","terminal":false},
             {"name":"done","expect":[],"actions":[],"next":"done","timeout_ms":1000,"max_retries":1,"terminal":true}]}"#,
     )
     .expect("write skill");
@@ -167,8 +171,9 @@ fn terminal_skill_event_emits_once() {
         done_events, 1,
         "terminal 'done' event must be emitted exactly once (D1)"
     );
-    assert!(
-        transitions <= 2,
-        "s0->done transition + terminal event = at most 2 events, got {transitions}"
+    assert_eq!(
+        transitions, 1,
+        "exactly one state change is announced (s0 -> done, by probe or \
+         by terminal fallback); later Done cycles stay silent"
     );
 }

@@ -290,6 +290,14 @@ impl SkillRunner {
                 self.reentries = 0;
                 self.current = fb.clone();
                 self.state_entered_at_ms = now_ms;
+                // Landing on a terminal state via fallback completes the
+                // skill too — symmetric with the transition path above;
+                // `Done` follows on the next step.
+                if let Some(fb_def) = self.definition.state(&fb) {
+                    if fb_def.terminal {
+                        self.done = true;
+                    }
+                }
                 return StepOutcome::FellBack { to: fb };
             }
             self.failed = true;
@@ -471,6 +479,42 @@ mod tests {
                 to: "home".into(),
                 planned: vec![]
             }
+        );
+    }
+
+    #[test]
+    fn fallback_into_a_terminal_state_completes_the_skill() {
+        // "done" is terminal: retreating into it via fallback must complete
+        // the skill exactly like a transition into it would (the caller
+        // learns the landing from FellBack, Done follows afterwards).
+        let def = SkillDefinition::from_json(
+            SKILL
+                .replace("\"fallback\": \"home_reset\"", "\"fallback\": \"done\"")
+                .as_str(),
+        )
+        .expect("skill");
+        let mut r = SkillRunner::start(def, 0);
+        assert_eq!(
+            r.step(0, &probes(&[]), &detections(&[])),
+            StepOutcome::Waiting
+        );
+        assert_eq!(
+            r.step(1000, &probes(&[]), &detections(&[])),
+            StepOutcome::Waiting
+        );
+        assert_eq!(
+            r.step(2000, &probes(&[]), &detections(&[])),
+            StepOutcome::FellBack { to: "done".into() }
+        );
+        assert!(r.is_done(), "landing on a terminal fallback completes");
+        // the step AFTER the landing reports Done, forever
+        assert_eq!(
+            r.step(2100, &probes(&[]), &detections(&[])),
+            StepOutcome::Done
+        );
+        assert_eq!(
+            r.step(2200, &probes(&[]), &detections(&[])),
+            StepOutcome::Done
         );
     }
 

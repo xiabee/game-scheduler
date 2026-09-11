@@ -863,15 +863,33 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                         &report.client_detections,
                         &planned,
                     );
+                    // The transition INTO the terminal state already carried
+                    // the one D1 EVENT — the engine's repeated Done outcomes
+                    // afterwards must stay silent.
+                    if runner.is_done() {
+                        skill_terminal_emitted = true;
+                    }
                 }
                 controller::skill::StepOutcome::FellBack { to } => {
                     eprintln!("skill: fallback -> {to}");
                     proto.event(cycle, &to, &fired_names, &report.client_detections, &[]);
+                    if runner.is_done() {
+                        skill_terminal_emitted = true;
+                    }
                 }
                 controller::skill::StepOutcome::Done => {
                     eprintln!("skill: DONE");
                     if !skill_terminal_emitted {
-                        proto.event(cycle, "done", &fired_names, &report.client_detections, &[]);
+                        // Only reachable when the START state itself was
+                        // terminal (no transition ever announced it) — name
+                        // the real state instead of a hardcoded alias.
+                        proto.event(
+                            cycle,
+                            runner.current(),
+                            &fired_names,
+                            &report.client_detections,
+                            &[],
+                        );
                         skill_terminal_emitted = true;
                     }
                 }
