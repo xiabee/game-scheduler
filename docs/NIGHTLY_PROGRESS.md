@@ -24,6 +24,16 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 
 ## Night Runs
 
+### Night 2026-09-11 → 2026-09-12（夜班 agent 记录）
+
+- START_COMMIT: 6e596a7（docs(progress): night close 2026-09-11）
+- Handoff：XNightOps `2026-09-11/game-scheduler` 验证通过（night/project/workspace/dispatch_at=23:35/git_head=6e596a7 全一致；prompt_hash a797ca59a0ab72a8）
+- 基线发现：**master 基线 LOCAL CI 红**——`protocol` 集成测试 `terminal_skill_event_emits_once` 确定性数出 2 条 done EVENT（P0，M1 修复）
+
+| M | 内容 | Verdict | Commit | 测试 |
+|---|------|---------|--------|------|
+| M1 | D1 终态 EVENT 恰好一次（P0 修复）：闩锁此前只盖引擎重复 Done/Failed 分支，但**落入终态的转移以 Transitioned 形态上报**（skill.rs 契约）并发自己的 EVENT、不进闩锁——下一周期 Done 再发一条；通过与否取决于转移后是否还有剩余周期（时序脆弱，昨夜侥幸全绿）。修复：main.rs 落终态（runner.is_done()）即置闩锁（Transitioned/FellBack 两臂）；Done 分支只剩「起始态即终态」场景，改发 runner.current() 真实状态名（原硬编码 "done"）；skill.rs fallback 落终态也置 done（与转移路径对称，原遗漏，+单测）；集成测试强化 transitions==1 并给 s0 加终态 fallback（2s 超时）使「探针未触发」负载瞬态也恰好落一次（M24 异常族去脆弱）；协议草案 D1 措辞更新 | PASS | e0240cf | `--test protocol` 3 连绿；全量 ci-local PASS（Go+Rust 全门禁含安全阶段）；skill 单测 9 绿 |
+
 ### Night 2026-09-10 → 2026-09-11（夜班 agent 记录）
 
 - START_COMMIT: 6ad2efb（docs(progress): night close 2026-09-10 04:20）
