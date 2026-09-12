@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -119,5 +121,65 @@ func TestRecommendationFeedbackAPI(t *testing.T) {
 	}
 	if empty.TaskID != nil || empty.TotalExecutions != 0 || empty.TaskMissing {
 		t.Fatalf("no-task feedback=%+v", empty)
+	}
+}
+
+// HTTP-level version of the M4 race guard: N concurrent create-task POSTs on
+// one recommendation must all resolve to the SAME task with exactly one task
+// row created — the double-click scenario the store guard exists for.
+func TestRecommendationCreateTaskConcurrentIdempotent(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	rec, _ := mkFeedbackFixture(t, st)
+
+	const n = 8
+	ids := make([]int64, n)
+	statuses := make([]int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			resp, err := srv.Client().Post(srv.URL+"/api/planner/recommendations/"+strconv.FormatInt(rec.ID, 10)+"/create-task",
+				"application/json", strings.NewReader(`{}`))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer resp.Body.Close()
+			statuses[i] = resp.StatusCode
+			var task store.Task
+			if err := json.NewDecoder(resp.Body).Decode(&task); err == nil {
+				ids[i] = task.ID
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for i := 0; i < n; i++ {
+		if statuses[i] != http.StatusCreated && statuses[i] != http.StatusOK {
+			t.Fatalf("request %d status=%d", i, statuses[i])
+		}
+	}
+	// every response that carried a task must carry the SAME task
+	first := int64(0)
+	for _, id := range ids {
+		if id != 0 {
+			if first == 0 {
+				first = id
+			} else if id != first {
+				t.Fatalf("responses disagree on task id: %d vs %d", first, id)
+			}
+		}
+	}
+	if first == 0 {
+		t.Fatal("no response carried the task")
+	}
+	tasks, err := st.ListTasks("genshin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// fixture itself created exactly one task; the race must not add another
+	if len(tasks) != 1 {
+		t.Fatalf("task rows=%d, want 1", len(tasks))
 	}
 }
