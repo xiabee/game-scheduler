@@ -223,6 +223,22 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 | M31c | NC9 资源验收基准实测:600 帧 640×480 合成序列（背景阶梯+矩形场景,5 切分）learn 全程 60.8s（~101ms/帧）——「10 分钟 @1fps 采集 ≈ 600 帧预算内」成立,切分数与场景构造一致 | PASS | (记录于 M31 轮) | 实测数据 |
 
 
+### 夜班收尾（2026-09-12 08:40 close）
+
+- **Session**:START_COMMIT `6e596a7`(2026-09-11 23:18 handoff 生成,dispatch 23:35)→ END_COMMIT 见 git log;工作窗口全程 RUN,08:40 起收尾。
+- **计划 vs 完成**：零遗留 milestone。今晚主题=「NC6 功能面收官 + NC7 首片 + 协议契约加固」——
+  - **M1 安全/契约**：master 基线 LOCAL CI 红被当场抓获并修复（D1 终态 EVENT 双发:落终态转移不进闩锁,时序脆弱型漏网）,120s soak 432 周期验证恰好一次;失败路径补锁;
+  - **M2/M4/M6 auto 执行器**（NC6 最后功能项）:触发时决议 native↔external、只降级不升级、决议三面可观测（Preflight resolution/执行轨迹/日志）;type=native+auto 严格报错;表单/服务端两条 footgun 路径根治;17 步实机 smoke 锁定双分支;
+  - **M3/M7/M9 NC7 首片**:recommendation skill 绑定（attach-skill + ctl + 看板）、create-task 产出 auto 任务、bind-after-create 回灌、dashboard 编辑保 params（footgun 家族第三例）;
+  - **M5/M14/M15 三项 soak**:D1 协议 120s（432 周期恰 1 EVENT）、Go 侧调度链 300s（100/100 精确）与 3.5h 长程（1176/1176,integrity ok）——Go 调度链首次获得 soak 级证据;
+  - **M8/M12/M13 审计**:main.rs 全文、planner 引擎、四适配器、vision/guide/notify/discover/shellcmd/session/replay——**零 P0/P1**;全仓零 TODO/FIXME。
+- **验证签名**：最终 LOCAL CI PASS（gofmt/vet/go test/go build/govulncheck/gosec/secret scan/cargo fmt+clippy+test+build）;NIGHTLY VERIFY PASS（ci-local+controller smoke+17 步全链 smoke+30s ONNX soak+NC9 selftests+JS 守卫）;cargo test --release 163 绿;定向 `-race`（task+native）干净;`cargo test` 全量 164 绿。
+- **Remote acceptance**：win-devops `after_local_pass` 策略,M1/M2/M3-M4/M9 四轮全 PASS（3m4s/1m48s/3m43s/2m2s）——昨夜 05:xx 3 连 FAIL 未复现,节点恢复,晨间运维清单该项解除。
+- **安全**：govulncheck 0 可调用漏洞;gosec HIGH×HIGH 0;secret 扫描 0 命中;零真实游戏输入（auto 只降级不升级,双闸全链路保持;`--input-selftest` 仍未无人值守执行）。
+- **环境注记**：01:4x 本机桌面转锁（OpenInputDesktop FAIL）——窗口类测试按约定诚实跳过;此前全部实机验证（M1 三连/M5 soak/nightly-verify）在锁屏前真实跑毕。
+- **已知问题/Deferred**：①首个真实 nano 模型未训练（白天工作,tools/vision 就绪）;②NC7 反馈统计需产品语义定义（一次成功 run ≠ 材料入账）;③无路线纯 skill 推荐与 EVENT→SSE 打磨暂缓（理由在案）;④WGC 实体控制台复验长期 BLOCKED（RDP）;⑤历史 win-devops 3 连 FAIL 根因未追（节点已恢复,非阻塞）。
+- **下一夜班建议**：①白天训练真实 nano 模型后走 NC1 收官对拍+NC5 首 skill;②NC9 换真实游戏录屏素材跑学习闭环;③NC7 反馈语义定向设计评审;④若夜间仍无实机方向,维持审计/soak 轮换即可（当前仓库审计面已全覆盖）。
+
 ### 夜班收尾（2026-09-11 08:40 close）
 
 - **Session**:START_COMMIT `6ad2efb`(2026-09-10 23:38 dispatch)→ END_COMMIT 见 git log;工作窗口 23:00-08:40 全程 RUN,08:40 起收尾。
