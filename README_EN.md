@@ -459,7 +459,9 @@ goals    list [-character id] [-game id] [-status s] | get <id> | add | update <
 materials list [-game id] [-category c] | get <id> | add | update <id> | delete <id>
 requirements list [-goal id] | get <id> | add | update <id> | delete <id>
 planner  recommend | recommendations [-goal id] [-game id] [-status s] [-limit n]
-         | create-task <id> | create-plan <id> | dismiss <id> | complete <id> | delete <id>
+         | create-task <id> | create-plan <id> | attach-route <id> -route <route-id>
+         | attach-skill <id> -skill <skill.json> | feedback <id>
+         | dismiss <id> | complete <id> | delete <id>
          | export -game <id> | import -data '<json>'|@file.json|-
 health
 ```
