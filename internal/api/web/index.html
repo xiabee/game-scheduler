@@ -690,7 +690,7 @@ async function renderRecommendations(){
       <td>${skillCell}</td>
       <td>${rec.estimated_runs||0} 次 / ${rec.estimated_stamina||0}</td>
       <td><span class="badge">${esc(rec.status||'open')}</span></td>
-      <td><button onclick="plannerCreateTask(${rec.id})">任务</button> <button onclick="plannerCreatePlan(${rec.id})">计划</button> <button onclick="plannerMark(${rec.id},'complete')">完成</button> <button onclick="plannerMark(${rec.id},'dismiss')">忽略</button> <button class="danger" onclick="plannerDelete('/api/planner/recommendations/${rec.id}','删除这条推荐，确认？')">删除</button></td>
+      <td><button onclick="plannerCreateTask(${rec.id})">任务</button> <button onclick="plannerCreatePlan(${rec.id})">计划</button> <button onclick="openFeedback(${rec.id})">反馈</button> <button onclick="plannerMark(${rec.id},'complete')">完成</button> <button onclick="plannerMark(${rec.id},'dismiss')">忽略</button> <button class="danger" onclick="plannerDelete('/api/planner/recommendations/${rec.id}','删除这条推荐，确认？')">删除</button></td>
     </tr>`);
   }
   $("#cp-recs").innerHTML=rows.length?`<table><thead><tr><th>推荐</th><th>路线</th><th>Skill</th><th>预计</th><th>状态</th><th></th></tr></thead><tbody>${rows.join("")}</tbody></table>`:
@@ -716,6 +716,26 @@ async function doBindSkill(ev,recId){
     await loadPlannerData();
   }catch(e){ $("#ferr").textContent="绑定失败: "+esc(String(e.message||e)); }
   return false;
+}
+async function openFeedback(recId){
+  openModal("推荐 #"+recId+" 执行反馈", `<div id="fb-body" class="hint">加载中…</div><div class="actions"><button type="button" onclick="closeModal()">关闭</button></div>`);
+  try{
+    const r=await api(`/api/planner/recommendations/${recId}/feedback`);
+    const fb=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(fb.error||("HTTP "+r.status));
+    let line;
+    if(fb.task_missing){
+      line="关联的任务已不存在(链接悬空)——重建任务后这里会显示新的执行统计。";
+    }else if(!fb.task_id){
+      line="还没有关联任务——先点「任务」创建,执行后这里显示统计。";
+    }else{
+      const last=fb.last_execution
+        ? `最近一次:${esc(fb.last_execution.status)}${fb.last_execution.end_time?(" @ "+esc(String(fb.last_execution.end_time).replace("T"," ").slice(0,16))):""}。`
+        : "尚未执行过。";
+      line=`共 ${fb.total_executions||0} 次执行:成功 ${fb.success_runs||0} / 失败 ${fb.failed_runs||0} / 取消 ${fb.cancelled_runs||0},进行中 ${fb.pending_or_running||0}。预估 ${fb.estimated_runs||0} 次。${last}<div class="hint">只读统计:不会自动修改材料库存(一次成功 run ≠ 材料入账),入库与完成始终是人工决定。数字覆盖保留的执行历史。</div>`;
+    }
+    $("#fb-body").innerHTML=line;
+  }catch(e){ $("#fb-body").textContent="加载失败: "+esc(String(e.message||e)); }
 }
 async function addPlannerCharacter(){
   const body={game_id:$("#cp-game").value,name:$("#cp-char-name").value.trim(),role_type:$("#cp-role").value.trim(),
