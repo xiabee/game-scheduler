@@ -272,6 +272,30 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 - **下一夜班建议**：①白天训练真实 nano 模型后走 NC1 收官对拍+NC5 首 skill;②NC9 换真实游戏录屏素材跑学习闭环;③NC7 反馈语义定向设计评审;④若夜间仍无实机方向,维持审计/soak 轮换即可（当前仓库审计面已全覆盖）。
 - **推送状态（08:45 注记）**：close 记录 `f55e6f7` 因网络层 SSH 中断（github.com:22 与 ssh.github.com:443 同报 connection closed,SSH 探针同失败——传输层而非凭据）暂存本地未推送,M1-M15 全部 milestone 提交已在远端（至 `58ccf73`）。推送恢复后 `git push origin master` 即可,无需任何代码动作。
 
+- **M6b/soak2 收官（03:21–06:51,12600s 长程轮,M9 修正挂具）**:**PASS(直接测量)**——06:40:52 采样 `executions_total=1197`,同期期望 ~1198(Δ1 次,落点在下个 tick),全窗 `running=0`、`failed_24h=0`,最新 500 条 100% success,WS 20.9→23.9MB 全程平坦,CPU 累计 6.1s。挂具脚本自判 FAIL 系 scratch 工具第二处口径 bug——`ctl dashboard` 资源不存在(计数为空触发容差告警);权威读数取自直接 API 采样。**两条挂具教训入库账本**:①计数必须走 dashboard totals(executions_total)而非 list 窗口;②`ctl` 无 dashboard 资源,直连 `/api/dashboard`。
+
+### 夜班收尾（2026-09-13 08:40 close）
+
+- **Session**:START_COMMIT `a29670b` → END_COMMIT `d467cd1`+close 记录;16+ 个 commit 全部推送,工作树干净。Handoff 验证于 23:38 通过并开工。
+- **今晚主题**:「NC7 功能面收官 + 可靠性/可观测性双修 + 远端 CI 悬案告破」。
+- **里程碑 10 个全 PASS**:
+  - M1 NC7 执行反馈统计(只读 rollup,保守语义,不动 owned_count/生命周期) — 092ee0c
+  - M1b 看板「反馈」弹窗(点击拉取,三态文案,无 N+1) — 7c8c6d3
+  - M2 无路线纯 skill 推荐→纯 native 任务(NC7 deferred 清零) — 9262193
+  - M3/M3b NIGHTLY VERIFY 电池全绿 + ROADMAP NC7→✅ — (证据轮)/2de51a6
+  - M4 create-task 并发竞态守卫(事务内条件更新+哨兵回滚+API 幂等回退) — 7d7c004
+  - M5 NC9 链式夹具 e2e(确定性帧→learn→convert→replay 入电池) — fe86826
+  - M6/M6b 双轮调度链 soak(2h+3.5h):1197/~1198 fires、零失败零滞留、资源平坦 — (证据轮)
+  - M7 竞态守卫 HTTP 层并发锁定测试 — 2c32ca4
+  - M8/M10 soak 中程资源采样(可观测性证据) — (证据轮)
+  - M9 dashboard `executions_total`(soak 计数缺口的 产品侧修复) — 7444482
+- **REMOTE CI 悬案告破(本夜最大发现)**:win-devops 失败根因=节点 04:30 `cleanup-ci-node.ps1` 按 mtime>21d 清理 `D:\CI\cache`,误杀拷贝播种的 cargo 缓存(src 解压树残缺 + 节点无外网);当场删除 `registry\src` 重建即愈,修复后远端 **5 连 PASS**(1m46s/1m49s/2m9s/2m50s/2m34s)。防复发归运维侧(backlog 有条目)。
+- **验证签名**:最终 NIGHTLY VERIFY PASS(gofmt/vet/go test 22 包/go build/govulncheck/gosec/secret scan/cargo fmt+clippy+test+build/controller smoke/17 步全链 smoke 含 native [12]-[17]/30s ONNX soak 448 周期/NC9 链式 e2e/JS 守卫);每 milestone 提交前 LOCAL CI 独立 PASS;REMOTE after_local_pass 5 轮全 PASS。
+- **安全**:govulncheck 0 可调用漏洞;gosec HIGH×HIGH 0;secret 扫描 0 命中;零真实游戏输入;全部 smoke 用临时库/fixture/假任务,用后即清理。
+- **资源纪律**:GOMAXPROCS=2 / -p 2;单 cargo 无并行;soak 为 20MB 级假任务循环;无 GPU;无大下载。
+- **已知问题/Deferred**:①首个真实 nano 模型(白天);②NC2 真实 UI 数据(白天);③NC9 真实素材(白天);④WGC 实体控制台(RDP 长期 BLOCKED);⑤EVENT→SSE 维持暂缓(复核理由更新);⑥scratch 挂具两处口径教训已入账本(产品侧 executions_total 已修)。
+- **下一夜班建议**:①白天训练真实 nano 模型后走 NC1 收官对拍 + NC5 首 skill;②NC9 真实录屏素材跑学习闭环(管线+链式 e2e 就绪);③若夜间仍无实机方向:审计面已全覆盖+本夜 soak 证据充分,建议优先 soak 轮换与 defer 项复核;④运维侧跟进 win-devops 清理脚本豁免。
+
 ### 夜班收尾（2026-09-11 08:40 close）
 
 - **Session**:START_COMMIT `6ad2efb`(2026-09-10 23:38 dispatch)→ END_COMMIT 见 git log;工作窗口 23:00-08:40 全程 RUN,08:40 起收尾。
