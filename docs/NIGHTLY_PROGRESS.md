@@ -45,6 +45,7 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 | M7 | **M4 守卫的 HTTP 层锁定**:并发集成测试——8 路同时 POST create-task(双击场景的真实入口),断言全部 2xx、携带同一任务 id、tasks 行数恒为 1(fixture 既有任务外零新增);-count=3 复跑稳定;README 中英 controller 章节头部状态同步(NC6/NC7 收官补入,消除漂移) | PASS | 2c32ca4 | api 全包测试绿;LOCAL CI PASS |
 | M8 | **soak 中程资源采样(可观测性证据)**:15 分钟处 gs-server WS 20.9MB、CPU 累计 0.2s——平坦极小,与 M14/M15 基线同族;点火节奏正常(#46 @ ~13min) | PASS | (无代码变更) | 采样记录于本行 |
 | M9 | **dashboard `executions_total` 观测字段**(M6 测量缺口的产品侧修复):`store.CountExecutions()` + dashboard totals 新字段——列表视图按 500 行封顶,持续点火类工具从此经由 dashboard 拿精确保留行数;api 测试断言窗口外计数(502 行>500 窗口);挂具 M9 版改为 dashboard 计数(容差 1200..1320)+窗口内成败判定+failed_24h 联检 | PASS | 7444482 | api 测试绿;LOCAL CI PASS |
+| M10 | **soak2(12600s 长程轮,M9 修正挂具)中程采样**:584 次 @ ~05:09(节奏与 10.0s 期望吻合)、running=0、failed24h=0、WS 23.3MB、CPU 累计 3.4s——新观测字段 `executions_total` 实战首次应用,计数不再受列表钳制 | PASS | (无代码变更) | 远端验收 PASS(2m34s)已于 M9 后取得 |
 
 - **NC6「EVENT→SSE 打磨」暂缓复核(本夜)**:读 stream.go/events bus 后确认维持暂缓——D1 门控下一次运行仅 2-5 条语义事件;中途 trail 不落库,按事件广播快照无新信息;有效实现需跨包事件管道(task.Service→api)+独立 SSE 帧类型+看板实时视图,当前无真实技能流量支撑该成本。暂缓理由由「事件稀疏」更新为「事件稀疏 + 管道成本 vs 无真实流量」。
 - **外键语义确认**:executions/plans 对 tasks 删除均为 ON DELETE CASCADE——删除任务连带清理历史与计划,系刻意模式(smoke [11] 依赖),非缺陷。
