@@ -10,19 +10,20 @@
 **2026-09-08 夜班起主线切换至 Native Vision Controller（ROADMAP §9）**：
 NC0 基础 ✅ → NC1 推理运行时 ✅（运行时侧收官，仅首个真实模型待白天训练）→
 NC4 输入层 ✅（SendInput+governor 硬前置，默认零输入，selftest 留操作者）→
-NC6 调度集成 ✅ 功能面收官（协议 schema v1 冻结、Go 会话执行器、native 任务分发与取消、dashboard 表单、**auto 执行器**——native 可用即走、否则回退外部命令，2026-09-11/12 夜；余 EVENT→SSE 打磨，暂缓理由在案）→
-NC7 Planner 集成 🚧 **首片落地**（recommendation 可绑 NC3 skill,create-task 产出 auto 任务,bind-after-create 回灌;余反馈统计与无路线纯 skill 推荐）→
-NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已通,真实素材待白天）。
-环境发现：隐藏控制台启动时 GDI 捕获黑帧（已可观测化告警）；D1 终态 EVENT 恰好一次已修复并 120s soak 验证（2026-09-11/12 夜）。
+NC6 调度集成 ✅ 功能面收官（协议 schema v1 冻结、Go 会话执行器、native 任务分发与取消、dashboard 表单、**auto 执行器**——native 可用即走、否则回退外部命令，2026-09-11/12 夜；余 EVENT→SSE 打磨，2026-09-12/13 夜复核后维持暂缓，理由更新在案）→
+NC7 Planner 集成 ✅ **功能面收官**（2026-09-12/13 夜：skill 绑定→auto 任务、bind-after-create 回灌、**执行反馈统计**——`GET .../feedback`+ctl+看板「反馈」弹窗，只读 rollup 不自动改 owned_count；**无路线纯 skill 推荐**→纯 native 任务）→
+NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已通；**链式夹具 e2e** 入 nightly-verify，2026-09-12/13 夜；真实素材待白天）。
+环境发现：隐藏控制台启动时 GDI 捕获黑帧（已可观测化告警）；D1 终态 EVENT 恰好一次已修复并 120s soak 验证（2026-09-11/12 夜）；**win-devops 远端 CI 失败根因=节点 04:30 清理脚本按 mtime 误杀拷贝播种的 cargo 缓存**（2026-09-12/13 夜当场修复并四轮远端 PASS 复验；防复发归运维侧）。
 
 ## Candidate Backlog
 
 - 白天：首个真实 nano 模型训练（tools/vision 全链路已就绪），NC1 收官对拍
 - NC2 真实 UI 数据补全验收（L2 归入 Evidence 契约待真实模型）
-- NC7 第二片：执行结果反馈 planner 统计（需产品语义定义:一次成功 run ≠ 材料入账,不宜自动改 owned_count）;无路线纯 skill 推荐推荐形态
-- NC6 收尾单件：EVENT→SSE 事件流打磨（D1 事件稀疏,trail+TSV 已可观测,暂缓理由在案）
+- NC9 用真实游戏录屏素材跑学习闭环（管线+链式 e2e 已就绪,素材待白天）
+- NC6 收尾单件：EVENT→SSE 事件流打磨（复核维持暂缓:事件稀疏+跨包管道成本 vs 无真实技能流量）
 - NC5 前置：真实 skill 流程设计（待 NC1 真实模型/真实 UI 数据）
 - WGC 在实体控制台的复验（长期 BLOCKED，RDP 环境）
+- 运维侧（XNightOps 仓）:win-devops 清理脚本对 `D:\CI\cache\cargo\registry` 加豁免或播种拷贝归一化 mtime
 
 ## Night Runs
 
