@@ -161,3 +161,40 @@ func TestRecommendationFeedbackDanglingTask(t *testing.T) {
 		t.Fatalf("dangling feedback=%+v", fb)
 	}
 }
+
+// CreateTaskForRecommendation must be safe against concurrent double-create:
+// the loser of the race rolls back its insert (no orphan/duplicate task) and
+// reports ErrRecommendationTaskExists, while the recommendation keeps
+// pointing at the winner's task.
+func TestCreateTaskForRecommendationRaceGuard(t *testing.T) {
+	s := newTestStore(t)
+	rec := mkFeedbackRec(t, s)
+
+	winner, err := s.CreateTaskForRecommendation(rec.ID, Task{GameID: "genshin", Name: "winner", Type: "script", Params: "{}", Enabled: true})
+	if err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	if _, err := s.CreateTaskForRecommendation(rec.ID, Task{GameID: "genshin", Name: "loser", Type: "script", Params: "{}", Enabled: true}); err != ErrRecommendationTaskExists {
+		t.Fatalf("want ErrRecommendationTaskExists, got %v", err)
+	}
+
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tasks`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("tasks count=%d, want 1 (loser must roll back)", n)
+	}
+	cur, err := s.GetFarmingRecommendation(rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.TaskID == nil || *cur.TaskID != winner.ID {
+		t.Fatalf("rec link=%+v, want winner %d", cur.TaskID, winner.ID)
+	}
+
+	// An unknown recommendation stays ErrNotFound (and creates nothing).
+	if _, err := s.CreateTaskForRecommendation(424242, Task{GameID: "genshin", Name: "x", Type: "script", Params: "{}"}); err != ErrNotFound {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+}

@@ -585,10 +585,19 @@ func (s *Store) SetFarmingRecommendationTask(id, taskID int64) (FarmingRecommend
 	return s.UpdateFarmingRecommendation(rec)
 }
 
+// ErrRecommendationTaskExists is returned by CreateTaskForRecommendation when
+// the recommendation gained a task link between the caller's check and the
+// transaction (a concurrent double-create, e.g. a double-clicked button). The
+// freshly inserted task is rolled back; callers should re-read the
+// recommendation and surface its linked task instead.
+var ErrRecommendationTaskExists = errors.New("store: recommendation already linked to a task")
+
 // CreateTaskForRecommendation creates the recommendation's task and links it
 // back in one transaction. Doing the two writes separately could leave an
 // orphan task behind when the link failed, and retrying would then create a
-// duplicate task. A nil recID row is ErrNotFound (and creates nothing).
+// duplicate task. The link update is guarded on task_id IS NULL, so the
+// loser of a create race rolls back its insert instead of orphaning a
+// duplicate. A nil recID row is ErrNotFound (and creates nothing).
 func (s *Store) CreateTaskForRecommendation(recID int64, t Task) (Task, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -606,16 +615,29 @@ func (s *Store) CreateTaskForRecommendation(recID int64, t Task) (Task, error) {
 	}
 	t.ID, _ = res.LastInsertId()
 
+	// Distinguish "recommendation gone" from "lost a create race": both make
+	// the guarded update below match zero rows, but callers treat them
+	// differently.
+	var exists int
+	if err := tx.QueryRow(`SELECT 1 FROM farming_recommendations WHERE id=?`, recID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Task{}, ErrNotFound
+		}
+		return Task{}, err
+	}
 	// Same status semantics as SetFarmingRecommendationTask: only a still-open
-	// recommendation moves to task_created.
+	// recommendation moves to task_created — and only an unlinked one gains a
+	// task, so a concurrent double-create cannot produce two tasks.
 	res2, err := tx.Exec(`UPDATE farming_recommendations
 		SET task_id=?, status=CASE WHEN status='open' THEN 'task_created' ELSE status END, updated_at=?
-		WHERE id=?`, t.ID, now, recID)
+		WHERE id=? AND task_id IS NULL`, t.ID, now, recID)
 	if err != nil {
 		return Task{}, err
 	}
 	if n, _ := res2.RowsAffected(); n == 0 {
-		return Task{}, ErrNotFound
+		// Roll the insert back via the deferred rollback: the loser of the
+		// race must not leave a duplicate task behind.
+		return Task{}, ErrRecommendationTaskExists
 	}
 	if err := tx.Commit(); err != nil {
 		return Task{}, err

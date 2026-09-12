@@ -642,6 +642,19 @@ func (s *Server) ensureRecommendationTask(id int64) (store.Task, error) {
 	// One transaction: the task row and the recommendation link appear
 	// together, so a failure cannot orphan a task (and a retry duplicate it).
 	out, err := s.store.CreateTaskForRecommendation(id, task)
+	if errors.Is(err, store.ErrRecommendationTaskExists) {
+		// Lost a concurrent create race (e.g. a double-clicked button): the
+		// winner's task is already linked — return it so both requests see
+		// the same task instead of one becoming an orphan.
+		cur, gerr := s.store.GetFarmingRecommendation(id)
+		if gerr != nil {
+			return store.Task{}, gerr
+		}
+		if cur.TaskID == nil {
+			return store.Task{}, store.ErrNotFound
+		}
+		return s.store.GetTask(*cur.TaskID)
+	}
 	if err != nil {
 		return store.Task{}, err
 	}
