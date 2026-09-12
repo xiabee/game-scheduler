@@ -25,6 +25,9 @@ type totals struct {
 	Plans     int `json:"plans"`
 	Running   int `json:"running"`
 	Failed24h int `json:"failed_24h"`
+	// ExecutionsTotal counts every retained execution row — list views cap
+	// at a bounded window, so soak tooling counts fires through this field.
+	ExecutionsTotal int `json:"executions_total"`
 }
 
 type taskBrief struct {
@@ -90,6 +93,10 @@ func (s *Server) buildDashboard() (dashboard, error) {
 		return dashboard{}, err
 	}
 	execs, err := s.store.ListExecutionMetas(store.ExecutionFilter{Limit: recentWindow})
+	if err != nil {
+		return dashboard{}, err
+	}
+	executionsTotal, err := s.store.CountExecutions()
 	if err != nil {
 		return dashboard{}, err
 	}
@@ -174,6 +181,7 @@ func (s *Server) buildDashboard() (dashboard, error) {
 		}
 	}
 
+	d.Totals.ExecutionsTotal = executionsTotal
 	d.Totals.Games = len(games)
 	d.Totals.Tasks = len(tasks)
 	d.Totals.Plans = len(plans)

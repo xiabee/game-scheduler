@@ -102,8 +102,34 @@ func TestDashboardJSON(t *testing.T) {
 	if d.Totals.Games != 1 || len(d.Games) != 1 {
 		t.Errorf("got totals=%+v games=%d", d.Totals, len(d.Games))
 	}
-	if d.Games[0].Health != "idle" {
-		t.Errorf("health=%q want idle", d.Games[0].Health)
+	if d.Totals.ExecutionsTotal != 0 {
+		t.Errorf("executions_total=%d on a fresh store", d.Totals.ExecutionsTotal)
+	}
+	// The total must count rows beyond any single list window: two rows are
+	// above the dashboard's recent window cap (recentWindow=500).
+	task, err := st.CreateTask(store.Task{GameID: "genshin", Name: "t", Type: "script", Params: "{}", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < recentWindow+2; i++ {
+		if _, err := st.CreateExecution(store.Execution{TaskID: task.ID, Trigger: store.TriggerManual, Status: store.StatusSuccess}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resp2, err := srv.Client().Get(srv.URL + "/api/dashboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if err := json.NewDecoder(resp2.Body).Decode(&d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Totals.ExecutionsTotal != recentWindow+2 {
+		t.Errorf("executions_total=%d, want %d", d.Totals.ExecutionsTotal, recentWindow+2)
+	}
+	// successful recent executions lift the game's health off idle
+	if d.Games[0].Health != "ok" {
+		t.Errorf("health=%q want ok", d.Games[0].Health)
 	}
 }
 

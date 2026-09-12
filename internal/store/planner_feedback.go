@@ -73,3 +73,12 @@ func (s *Store) RecommendationFeedback(recID int64) (RecommendationFeedback, err
 	}
 	return fb, nil
 }
+
+// CountExecutions returns the total number of retained execution rows. List
+// views cap at a bounded window, so soak/observability tooling needs this to
+// count fires beyond what a single page can return.
+func (s *Store) CountExecutions() (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM executions`).Scan(&n)
+	return n, err
+}
