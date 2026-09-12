@@ -104,7 +104,7 @@ internal/vision     screenshot-assist interface skeleton (Detector / Matcher / O
 
 > 🧭 **Roadmap**: the next phase is a self-built Native Vision Controller (Rust; window capture + CV + state machine + plain Windows input). Existing third-party tool adapters become legacy/fallback — see [ROADMAP.md](ROADMAP.md).
 
-### 🕹️ controller/ (Native Vision Controller — NC0 landed, NC1 inference runtime wired)
+### 🕹️ controller/ (Native Vision Controller — NC0 landed, NC1 runtime wired, NC4 input layer wired, NC6 scheduler integration + NC7 planner integration done — zero input by default)
 
 `controller/` is a standalone Rust crate. By default it is
 **observation-only: zero input**. Since NC4 it also ships a SendInput-level

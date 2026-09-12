@@ -146,7 +146,7 @@ internal/vision     截图辅助接口骨架(Detector / Matcher / OCR / FrameSou
 
 > 🧭 **路线图**:下一阶段主线是自研 Native Vision Controller(Rust,窗口捕获 + CV + 状态机 + 普通 Windows 输入),现有第三方工具适配器转为 legacy/fallback,详见 [ROADMAP.md](ROADMAP.md)。
 
-### 🕹️ controller/(Native Vision Controller,NC0–NC1 已落地,NC4 输入层已接线——默认零输入)
+### 🕹️ controller/(Native Vision Controller,NC0–NC1 已落地,NC4 输入层已接线,NC6 调度集成与 NC7 Planner 集成收官——默认零输入)
 
 `controller/` 是独立 Rust crate(默认**纯观察,零输入**;NC4 起提供 SendInput 级输入层,但仅在显式 opt-in 且 SafetyGovernor 逐动作放行时才会执行):
 
