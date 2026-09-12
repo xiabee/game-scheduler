@@ -50,6 +50,10 @@ tools/vision/
 - 资源形态：逐帧流式解码，降采样到 ≤64px 网格后再思考；无 GPU、无
   模型下载、常数量级内存。`python learn_route.py --selftest` 是合成
   端到端守护（nightly-verify 已接入）。
+- 链式夹具 e2e：`python pipeline_e2e.py --controller <controller.exe>`
+  在临时目录生成**确定性** 4 场景合成录像（16 帧，无随机无时间戳），
+  走完 learn → convert → controller replay 全链并断言 RESULT done
+  （nightly-verify 已接入；生成脚本即入库的夹具定义，仓库不放二进制帧）。
 - 真实游戏测试按 ROADMAP NC9 显式 deferred：本管线全部工作在帧目录上。
 
 ## 流程

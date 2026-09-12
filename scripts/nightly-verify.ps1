@@ -91,6 +91,17 @@ python learn_route.py --selftest
 if ($LASTEXITCODE -ne 0) { $script:failed += "learn-route-selftest" }
 python draft_to_skill.py --selftest
 if ($LASTEXITCODE -ne 0) { $script:failed += "draft-to-skill-selftest" }
+
+# Chained fixture e2e: deterministic synthetic frames -> learn -> convert ->
+# controller dry-run replay must reach RESULT done (ROADMAP NC9 test item).
+if (Test-Path (Join-Path $repo "controller\target\debug\controller.exe")) {
+    Note "== [5/5] NC9 chained fixture e2e (frames -> learn -> convert -> replay) =="
+    python pipeline_e2e.py --controller (Join-Path $repo "controller\target\debug\controller.exe")
+    if ($LASTEXITCODE -ne 0) { $script:failed += "nc9-pipeline-e2e" }
+}
+else {
+    Write-Host "SKIP NC9 chained e2e: controller.exe not built."
+}
 Set-Location -LiteralPath $repo
 
 # ---------- [5b] dashboard JS syntax guard ----------
