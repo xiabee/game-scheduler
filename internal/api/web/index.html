@@ -699,7 +699,7 @@ async function renderRecommendations(){
 function openBindSkill(recId){
   openModal("为推荐 #"+recId+" 绑定 Skill", `<form class="form" onsubmit="return doBindSkill(event,${recId})">
     <label>Skill JSON 路径(NC3 契约)<input id="bs-skill" required placeholder="skills/daily.json"></label>
-    <div class="hint">绑定后创建的任务 executor=auto:native controller 可用就走 skill,否则回退到绑定的路线。文件必须已存在。</div>
+    <div class="hint">绑定后创建的任务:有绑定路线 → executor=auto(native 可用走 skill,否则回退路线命令);无路线的纯 skill 推荐 → 纯 native 任务(无外部回退分支)。文件必须已存在。</div>
     <div class="actions"><button type="button" onclick="closeModal()">取消</button><button class="primary" type="submit">绑定</button></div>
   </form><div id="ferr" class="hint" style="color:var(--err)"></div>`);
 }

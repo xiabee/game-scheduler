@@ -1835,3 +1835,117 @@ func TestCreateNativeTaskDefaultsExecutorSelector(t *testing.T) {
 		t.Fatalf("update must re-default the selector, got %v (params %s)", pm2["executor"], stored.Params)
 	}
 }
+
+// NC7 second slice: a skill-bound recommendation with no route produces a
+// pure-native task (executor "native" — "auto" is rejected for type
+// "native" because auto's meaning is a usable external fallback, which a
+// route-less task does not have). A route-less recommendation without a
+// skill still fails as before.
+func TestPlannerSkillOnlyRecommendationNativeTask(t *testing.T) {
+	srv, st, _ := newTestServer(t, "")
+	dir := t.TempDir()
+	skillPath := filepath.Join(dir, "daily.json")
+	if err := os.WriteFile(skillPath, []byte(`{"name":"daily_claim"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := srv.Client()
+	if _, err := st.CreateGame(store.Game{ID: "genshin", Name: "genshin", Adapter: "genshin", ToolPath: "x", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	ch, err := st.CreateCharacter(store.Character{GameID: "genshin", Name: "XL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal, err := st.CreateCharacterGoal(store.CharacterGoal{CharacterID: ch.ID, Name: "lv90"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mat, err := st.CreateMaterialItem(store.MaterialItem{GameID: "genshin", Name: "chili", Category: "collect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mkRec := func(title string) store.FarmingRecommendation {
+		t.Helper()
+		rec, err := st.CreateFarmingRecommendation(store.FarmingRecommendation{
+			GoalID: goal.ID, GameID: "genshin", MaterialID: mat.ID, Title: title, Reason: "gap",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rec
+	}
+	post := func(path, body string, out any) int {
+		t.Helper()
+		r, err := c.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Body.Close()
+		if out != nil {
+			if err := json.NewDecoder(r.Body).Decode(out); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return r.StatusCode
+	}
+
+	// no skill, no route: still refused
+	recNone := mkRec("no skill no route")
+	var e struct {
+		Error string `json:"error"`
+	}
+	if code := post("/api/planner/recommendations/"+strconv.FormatInt(recNone.ID, 10)+"/create-task", `{}`, &e); code != http.StatusBadRequest {
+		t.Fatalf("create-task without route or skill: status=%d", code)
+	}
+
+	// skill bound, route still absent: create-task yields a native task
+	recSkill := mkRec("skill only")
+	if code := post("/api/planner/recommendations/"+strconv.FormatInt(recSkill.ID, 10)+"/attach-skill", `{"skill":`+strconv.Quote(skillPath)+`}`, nil); code != http.StatusOK {
+		t.Fatalf("attach-skill status=%d", code)
+	}
+	var task store.Task
+	if code := post("/api/planner/recommendations/"+strconv.FormatInt(recSkill.ID, 10)+"/create-task", `{}`, &task); code != http.StatusCreated {
+		t.Fatalf("create-task status=%d", code)
+	}
+	if task.Type != "native" || task.RouteID != nil || task.GameID != "genshin" {
+		t.Fatalf("native task=%+v", task)
+	}
+	pm, err := task.ParamsMap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pm["executor"] != "native" || pm["skill"] != skillPath {
+		t.Fatalf("params=%s", task.Params)
+	}
+	// the recommendation moved on to task_created with the link recorded
+	stored, err := st.GetFarmingRecommendation(recSkill.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "task_created" || stored.TaskID == nil || *stored.TaskID != task.ID {
+		t.Fatalf("recommendation=%+v", stored)
+	}
+	// create-task is idempotent through the recorded link
+	var again store.Task
+	if code := post("/api/planner/recommendations/"+strconv.FormatInt(recSkill.ID, 10)+"/create-task", `{}`, &again); code != http.StatusCreated || again.ID != task.ID {
+		t.Fatalf("second create-task status=%d id=%d (want %d)", code, again.ID, task.ID)
+	}
+
+	// feedback rollup (M1) works for native tasks the same way
+	var fb store.RecommendationFeedback
+	resp, err := c.Get(srv.URL + "/api/planner/recommendations/" + strconv.FormatInt(recSkill.ID, 10) + "/feedback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("feedback status=%d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&fb); err != nil {
+		t.Fatal(err)
+	}
+	if fb.TaskID == nil || *fb.TaskID != task.ID || fb.TotalExecutions != 0 {
+		t.Fatalf("feedback=%+v", fb)
+	}
+}

@@ -654,13 +654,16 @@ Invoke-RestMethod "$S/api/planner/recommendations/1/feedback"
 > `{"skill":"skills/daily.json"}` (the file must already exist; ctl:
 > `planner attach-skill <recommendation-id> -skill <path>`; dashboard shows a
 > "绑定 Skill" button on each recommendation row). Tasks created from a
-> skill-bound recommendation run with `executor=auto`: the native controller
-> runs the skill when its prerequisites hold, and otherwise the task falls
-> back to the bound route command — auto only degrades, never escalates, and
-> the real-input double gate still applies. **Bind-after-create works**:
-> attaching a skill retrofits the recommendation's existing task (an explicit
-> executor wins; a task with no selector gains `auto`, keeping its route
-> command as the fallback).
+> skill-bound recommendation come in two flavors: **with a bound route →
+> `executor=auto`**, the native controller runs the skill when its
+> prerequisites hold and the task otherwise falls back to the route command —
+> auto only degrades, never escalates, and the real-input double gate still
+> applies; **without a route (skill-only recommendation) → a pure-native
+> task** (`type=native`/`executor=native`) with no external fallback branch,
+> executed under the native contract (preflight + double gate). **Bind-after-
+> create works**: attaching a skill retrofits the recommendation's existing
+> task (an explicit executor wins; a task with no selector gains `auto`,
+> keeping its route command as the fallback).
 
 > 💡 **Execution feedback (NC7)**:
 > `GET /api/planner/recommendations/{id}/feedback` (ctl:

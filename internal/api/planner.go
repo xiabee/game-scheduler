@@ -577,8 +577,34 @@ func (s *Server) ensureRecommendationTask(id int64) (store.Task, error) {
 	if rec.TaskID != nil {
 		return s.store.GetTask(*rec.TaskID)
 	}
+	// NC7: a skill-bound recommendation without a route can still produce a
+	// task — a pure-native one. There is no external fallback branch here,
+	// so executor must be "native": "auto" is rejected for type "native" by
+	// the dispatch contract precisely because auto's whole meaning is a
+	// usable fallback. No skill and no route stays an error.
 	if rec.RouteID == nil {
-		return store.Task{}, errRecommendationNoRoute
+		if rec.Skill == "" {
+			return store.Task{}, errRecommendationNoRoute
+		}
+		if _, err := s.store.GetGame(rec.GameID); err != nil {
+			return store.Task{}, err
+		}
+		pm := map[string]string{"executor": "native", "skill": rec.Skill}
+		b, merr := json.Marshal(pm)
+		if merr != nil {
+			return store.Task{}, merr
+		}
+		name := rec.Title
+		if name == "" {
+			name = rec.Skill
+		}
+		task := store.Task{GameID: rec.GameID, Name: name, Type: "native", Params: string(b), Enabled: true}
+		out, err := s.store.CreateTaskForRecommendation(id, task)
+		if err != nil {
+			return store.Task{}, err
+		}
+		s.bus.Notify()
+		return out, nil
 	}
 	rt, err := s.store.GetRoute(*rec.RouteID)
 	if err != nil {

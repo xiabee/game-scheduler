@@ -223,7 +223,7 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 
 - **Status**:🚧 In Progress(2026-09-11/12 夜班首片:recommendation 可绑定 NC3 SkillDefinition,create-task 产出 executor=auto 任务——native skill 可用即走 native,否则回退绑定路线的外部命令;`POST /attach-skill` + ctl + 看板「绑定 Skill」全通。2026-09-12/13 夜班二片:执行结果反馈统计落地——`GET /api/planner/recommendations/{id}/feedback` + ctl `planner feedback`,对推荐关联任务做只读执行 rollup[总数/成功/失败/取消/进行中/最近执行 vs `estimated_runs`],**语义有意保守**:不自动改 `owned_count`、不动推荐生命周期——一次成功 run ≠ 材料入账,入库与完成始终是人工决定)。**依赖 NC6 的 auto 执行器 ✅(同夜 M2)**。
 - **Objective**:打通 `Planner → Recommendation → Skill/Route → Native Controller`,执行结果回流 Execution。
-- **Scope**:recommendation 增加可选 skill 绑定 ✅(首片);执行结果(feedback)反哺 planner 统计 ✅(二片,只读 rollup 形态,材料入账语义明确排除);无路线纯 skill 推荐(⬜ deferred——当前推荐生命周期 route 中心,skill 绑定骑在路线任务上)。
+- **Scope**:recommendation 增加可选 skill 绑定 ✅(首片);执行结果(feedback)反哺 planner 统计 ✅(二片,只读 rollup 形态,材料入账语义明确排除);无路线纯 skill 推荐 ✅(2026-09-12/13 夜:create-task 对「有 skill 无路线」的推荐产出**纯 native 任务**[`type=native`/`executor=native`,无外部回退分支——auto 对 type=native 严格报错的既有契约不变],有路线仍走 auto 双分支)。
 - **Acceptance Criteria**:"今天需要刷材料 A"的推荐可以一键生成 native 任务并执行,结果在 dashboard 可见。
 - **Dependencies**:NC6。
 - **Out of Scope**:自动生成 Skill(人工/半自动制作 Skill)。
