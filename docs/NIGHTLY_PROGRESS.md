@@ -238,6 +238,7 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 - **环境注记**：01:4x 本机桌面转锁（OpenInputDesktop FAIL）——窗口类测试按约定诚实跳过;此前全部实机验证（M1 三连/M5 soak/nightly-verify）在锁屏前真实跑毕。
 - **已知问题/Deferred**：①首个真实 nano 模型未训练（白天工作,tools/vision 就绪）;②NC7 反馈统计需产品语义定义（一次成功 run ≠ 材料入账）;③无路线纯 skill 推荐与 EVENT→SSE 打磨暂缓（理由在案）;④WGC 实体控制台复验长期 BLOCKED（RDP）;⑤历史 win-devops 3 连 FAIL 根因未追（节点已恢复,非阻塞）。
 - **下一夜班建议**：①白天训练真实 nano 模型后走 NC1 收官对拍+NC5 首 skill;②NC9 换真实游戏录屏素材跑学习闭环;③NC7 反馈语义定向设计评审;④若夜间仍无实机方向,维持审计/soak 轮换即可（当前仓库审计面已全覆盖）。
+- **推送状态（08:45 注记）**：close 记录 `f55e6f7` 因网络层 SSH 中断（github.com:22 与 ssh.github.com:443 同报 connection closed,SSH 探针同失败——传输层而非凭据）暂存本地未推送,M1-M15 全部 milestone 提交已在远端（至 `58ccf73`）。推送恢复后 `git push origin master` 即可,无需任何代码动作。
 
 ### 夜班收尾（2026-09-11 08:40 close）
 
