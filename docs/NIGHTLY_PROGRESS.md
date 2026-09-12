@@ -26,6 +26,24 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 
 ## Night Runs
 
+### Night 2026-09-12 → 2026-09-13（夜班 agent 记录）
+
+- Handoff：XNightOps `2026-09-12/game-scheduler` 验证通过（night/project/workspace=本仓/git_head=a29670b 全一致；dispatch_at=23:35，23:38 到岗即开工；prompt/manifest/context/close 四件套齐全）。
+- START_COMMIT `a29670b`。
+
+| M | 内容 | Verdict | Commit | 验收 |
+|---|------|---------|--------|------|
+| M1 | **NC7 二片：执行反馈统计（保守语义）**——store 层 `RecommendationFeedback` 只读 rollup（推荐关联任务的总执行/成功/失败/取消/进行中 + 最近一次执行 + `estimated_runs` 对照;悬空 task_id 诚实报 `task_missing`——正常路径不可能产生该态[ON DELETE SET NULL],分支为 DB 外部编辑/迁移残留而设,测试用租用连接临时关 FK 制造,**注意 store 是 MaxOpenConns(1),租用连接必须先归还**——首轮测试死锁 5 分钟的教训）;API `GET /api/planner/recommendations/{id}/feedback`;ctl `planner feedback <id>`;README 中英 + ROADMAP NC7 状态同步。**语义有意保守**:一次成功 run ≠ 材料入账——不自动改 `owned_count`、不动推荐生命周期,入库/完成始终人工决定(测试锁定只读性:feedback 前后推荐行逐字段不变) | PASS | 092ee0c | store 4 测试 + API 集成测试全绿;LOCAL CI PASS |
+| M1b | dashboard 推荐行「反馈」按钮 + 弹窗:点击时拉取 rollup 渲染(无任务/悬空/有任务三态文案),不进列表轮询(避免 N+1 请求);内嵌 JS node --check 通过;README 看板提示同步;实机 smoke:临时库起服 → 页面含 openFeedback ×2 → 未知推荐 404 → 建 fixture 走通 | PASS | 7c8c6d3 | LOCAL CI PASS(22 包 + cargo 门禁);JS 语法守卫过;实机 smoke PASS |
+
+- **REMOTE CI 根因终于抓到并当场修复（昨晚 M31b 三连 FAIL 同族,晨间运维清单该条可销）**：
+  - 症状：本地同码全绿,win-devops 两连 FAIL（exit=1,91s/86s,确定性;快照上传正常 22s/166MB）。
+  - 突破：昨夜「节点日志不可达」不再成立——SSH publickey 现已放行,直接读到 `D:\CI\jobs\<id>\logs\ci.log`：**Go 全家(test 18 包/vet/govulncheck/gosec/secret scan)在节点上全绿**,挂在 `cargo clippy`: `error: failed to download adler2 v2.0.1`。
+  - 根因链：节点 04:30 的 `cleanup-ci-node.ps1`（09-10 由本机运维部署）按 **mtime>21 天**清理 `D:\CI\cache`,当日删 14525 文件/315MB——缓存系 09-10 从他机拷贝播种,**文件携带旧 mtime 被整批误杀**;`registry\src` 解压树残缺(348 包目录中 adler2-2.0.1 的 Cargo.toml 缺失),`.crate` 存档尚在,但节点无 crates.io 外网,cargo 在线模式报 download 失败、离线模式报 read 失败。
+  - 修复（当场,纯缓存重建零数据损失）：删除 `D:\CI\cache\cargo\registry\src` 整树 → cargo 从本地 `.crate` 存档自动重解压;作业 source 目录内 `cargo clippy --all-targets --offline` 复验 **EXIT=0**。
+  - 防复发建议（归 XNightOps/运维侧,本仓不动）：cleanup 应排除 `cache\cargo\registry`(或对播种拷贝归一化 mtime/改用 mtime 之外的活性判据);另 `cargo clippy` 可加 `--offline` 降级重试作第二道保险。
+- 资源纪律：GOMAXPROCS=2 / -p 2;单跑 cargo,无并行大构建;无 GPU;无真实游戏输入;临时库 smoke 后即清理。
+
 ### Night 2026-09-11 → 2026-09-12（夜班 agent 记录）
 
 - START_COMMIT: 6e596a7（docs(progress): night close 2026-09-11）
