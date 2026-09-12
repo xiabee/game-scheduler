@@ -219,11 +219,11 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Dependencies**:NC5。
 - **Out of Scope**:把 controller 逻辑塞进 Go API(红线)。
 
-### NC7 — Planner Integration ⬜(首片落地:skill 绑定→auto 任务)
+### NC7 — Planner Integration 🚧(首片:skill 绑定→auto 任务;二片:执行反馈统计)
 
-- **Status**:🚧 In Progress(2026-09-11/12 夜班首片:recommendation 可绑定 NC3 SkillDefinition,create-task 产出 executor=auto 任务——native skill 可用即走 native,否则回退绑定路线的外部命令;`POST /attach-skill` + ctl + 看板「绑定 Skill」全通)。**依赖 NC6 的 auto 执行器 ✅(同夜 M2)**。
+- **Status**:🚧 In Progress(2026-09-11/12 夜班首片:recommendation 可绑定 NC3 SkillDefinition,create-task 产出 executor=auto 任务——native skill 可用即走 native,否则回退绑定路线的外部命令;`POST /attach-skill` + ctl + 看板「绑定 Skill」全通。2026-09-12/13 夜班二片:执行结果反馈统计落地——`GET /api/planner/recommendations/{id}/feedback` + ctl `planner feedback`,对推荐关联任务做只读执行 rollup[总数/成功/失败/取消/进行中/最近执行 vs `estimated_runs`],**语义有意保守**:不自动改 `owned_count`、不动推荐生命周期——一次成功 run ≠ 材料入账,入库与完成始终是人工决定)。**依赖 NC6 的 auto 执行器 ✅(同夜 M2)**。
 - **Objective**:打通 `Planner → Recommendation → Skill/Route → Native Controller`,执行结果回流 Execution。
-- **Scope**:recommendation 增加可选 skill 绑定 ✅(首片);执行结果(feedback)反哺 planner 统计(⬜ 未做);无路线纯 skill 推荐(⬜ deferred——当前推荐生命周期 route 中心,skill 绑定骑在路线任务上)。
+- **Scope**:recommendation 增加可选 skill 绑定 ✅(首片);执行结果(feedback)反哺 planner 统计 ✅(二片,只读 rollup 形态,材料入账语义明确排除);无路线纯 skill 推荐(⬜ deferred——当前推荐生命周期 route 中心,skill 绑定骑在路线任务上)。
 - **Acceptance Criteria**:"今天需要刷材料 A"的推荐可以一键生成 native 任务并执行,结果在 dashboard 可见。
 - **Dependencies**:NC6。
 - **Out of Scope**:自动生成 Skill(人工/半自动制作 Skill)。
@@ -358,6 +358,7 @@ BetterGI / March7thAssistant / Fhoe-Rail / ok-ww / M9A 的现有适配器:
 
 ## 10. 变更记录
 
+- **2026-09-12/13(夜)**:NC7 二片——推荐执行反馈统计落地(`GET .../feedback` + ctl `planner feedback`,只读 rollup,不自动改 owned_count/生命周期,材料入账语义明确排除);README 中英与本文档同步。
 - **2026-09-10/11(夜)**:NC4 输入层落地(SendInput+governor 硬前置,默认零输入);NC6 主体落地(协议 schema 冻结、--protocol 线模式、Go 会话执行器、native 调度分发、真实 controller 全链路+取消验收);NC1 deferred 清零(device 配置化+推理超时线程化);安全扫描接入本地 CI;NC9 视频学习路线入路线图且学习管线最小闭环打通(帧→draft→skill→回放 DONE)。
 - **2026-09-10(夜)**:新增 **NC9 Route & Skill Learning(视频学习路线)**(§3)——无真实游戏测试环境期间,从 B 站攻略/教程/跑图视频离线学习操作路线,转结构化 Skill/Route 草案并 dry-run 模拟输出;实际游戏测试 deferred 待环境。
 - **2026-09-09**:NC0 标记完成(§3/§9);下一夜班起点更新为 NC1;README(中/英)新增「当前开发方向」章节并明确 Controller 安全边界;NIGHTOPS.yaml 夜间优先级对齐本路线图。

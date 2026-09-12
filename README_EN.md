@@ -631,6 +631,7 @@ Invoke-RestMethod "$S/api/planner/recommendations?goal_id=1"
 Invoke-RestMethod "$S/api/planner/recommendations/1/attach-route" -Method POST -ContentType application/json -Body '{"route_id":3}'
 Invoke-RestMethod "$S/api/planner/recommendations/1/create-task" -Method POST
 Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -ContentType application/json -Body '{"cron_expr":"0 9 * * *"}'
+Invoke-RestMethod "$S/api/planner/recommendations/1/feedback"
 ```
 
 > 💡 **Attaching a route manually**: when a recommendation has no route
@@ -657,9 +658,24 @@ Invoke-RestMethod "$S/api/planner/recommendations/1/create-plan" -Method POST -C
 > runs the skill when its prerequisites hold, and otherwise the task falls
 > back to the bound route command — auto only degrades, never escalates, and
 > the real-input double gate still applies. **Bind-after-create works**:
-attaching a skill retrofits the recommendation's existing task (an explicit
-executor wins; a task with no selector gains `auto`, keeping its route
-command as the fallback).
+> attaching a skill retrofits the recommendation's existing task (an explicit
+> executor wins; a task with no selector gains `auto`, keeping its route
+> command as the fallback).
+
+> 💡 **Execution feedback (NC7)**:
+> `GET /api/planner/recommendations/{id}/feedback` (ctl:
+> `planner feedback <recommendation-id>`) returns the execution-outcome
+> rollup for the recommendation's linked task: total runs, success / failed /
+> cancelled, in-flight, the newest execution (status and time), and the
+> recommendation's `estimated_runs`. **The semantics are deliberately
+> conservative**: this is a summary of observable facts, not material
+> accounting — one successful run does not prove a material was gained, so
+> the endpoint **never** touches a requirement's `owned_count` or the
+> recommendation lifecycle; completing a recommendation and updating stock
+> stay manual decisions. Counts cover the retained execution history (old
+> rows are pruned by retention, so the numbers describe what is still
+> observable); deleting the linked task nulls the link and the rollup reads
+> as zeros.
 
 CLI examples:
 
@@ -678,6 +694,7 @@ ctl -server $S -route 3 planner attach-route <recommendation-id>   # bind a rout
 ctl -server $S -skill skills/daily.json planner attach-skill <recommendation-id>  # bind an NC3 skill (NC7: tasks prefer native)
 ctl -server $S planner create-task <recommendation-id>
 ctl -server $S -data '{"cron_expr":"0 9 * * *"}' planner create-plan <recommendation-id>
+ctl -server $S planner feedback <recommendation-id>   # execution rollup (NC7, read-only — never touches stock)
 ```
 
 Dashboard flow: open **培养计划** in the header. The modal lets you add

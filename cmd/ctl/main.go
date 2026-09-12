@@ -16,7 +16,7 @@
 //	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | attach-route <id> -route <routeId>
 //	        | attach-skill <id> -skill <skill.json> | create-plan <id>
 //	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | create-plan <id>
-//	        | export -game <id> | import -data '<json>'|@file.json|-
+//	        | feedback <id> | export -game <id> | import -data '<json>'|@file.json|-
 //	plans   list | get <id> | add | update <id> | delete <id>
 //	execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
 //	discover [-paths "F:/Games;D:/Tools"]   scan disk for tool executables
@@ -241,6 +241,8 @@ func main() {
 				}
 			}
 			err = c.do("POST", "/api/planner/recommendations/"+id+"/create-plan", body)
+		case "feedback":
+			err = c.do("GET", "/api/planner/recommendations/"+id+"/feedback", nil)
 		case "dismiss", "complete":
 			err = c.do("POST", "/api/planner/recommendations/"+id+"/"+action, nil)
 		case "delete":

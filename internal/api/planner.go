@@ -167,6 +167,20 @@ func (s *Server) retrofitSkillBinding(rec store.FarmingRecommendation, skill str
 	return uerr
 }
 
+// recommendationFeedback serves GET .../feedback (NC7 second slice): the
+// execution-outcome rollup for the recommendation's linked task. Read-only
+// by design — it informs the operator but never mutates owned_count or the
+// recommendation lifecycle, because one successful run does not prove a
+// material was gained.
+func (s *Server) recommendationFeedback(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	out, err := s.store.RecommendationFeedback(id)
+	respond(w, out, err)
+}
+
 func (s *Server) listCharacters(w http.ResponseWriter, r *http.Request) {
 	out, err := s.store.ListCharacters(store.CharacterFilter{GameID: r.URL.Query().Get("game_id")})
 	respond(w, out, err)
